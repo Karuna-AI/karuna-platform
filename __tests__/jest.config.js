@@ -34,12 +34,17 @@ module.exports = {
     '^@env$': '<rootDir>/../src/web/env-mock.ts',
 
     // Expo mocks
+    '^expo-crypto$': '<rootDir>/../src/web/expo-crypto-mock.ts',
     '^expo-document-picker$': '<rootDir>/../src/web/expo-document-picker-mock.ts',
     '^expo-notifications$': '<rootDir>/../src/web/expo-notifications-mock.ts',
     '^expo-clipboard$': '<rootDir>/../src/web/expo-clipboard-mock.ts',
     '^expo-background-fetch$': '<rootDir>/../src/web/expo-background-fetch-mock.ts',
     '^expo-task-manager$': '<rootDir>/../src/web/expo-task-manager-mock.ts',
     '^expo-secure-store$': '<rootDir>/../src/web/expo-secure-store-mock.ts',
+    '^expo-image-picker$': '<rootDir>/../src/web/expo-image-picker-mock.ts',
+    '^expo-camera$': '<rootDir>/../src/web/expo-camera-mock.ts',
+    '^expo-contacts$': '<rootDir>/../src/web/expo-contacts-mock.ts',
+    '^expo-sensors$': '<rootDir>/../src/web/expo-sensors-mock.ts',
     '^expo-location$': '<rootDir>/../src/web/expo-location-mock.ts',
     '^expo-localization$': '<rootDir>/../src/web/expo-localization-mock.ts',
     '^expo-speech$': '<rootDir>/../src/web/expo-speech-mock.ts',

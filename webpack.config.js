@@ -54,6 +54,7 @@ module.exports = {
       '@react-native-async-storage/async-storage': path.resolve(__dirname, 'src/web/async-storage-mock.ts'),
       '@env': path.resolve(__dirname, 'src/web/env-mock.ts'),
       // Expo package mocks for web
+      'expo-crypto': path.resolve(__dirname, 'src/web/expo-crypto-mock.ts'),
       'expo-document-picker': path.resolve(__dirname, 'src/web/expo-document-picker-mock.ts'),
       'expo-notifications': path.resolve(__dirname, 'src/web/expo-notifications-mock.ts'),
       'expo-clipboard': path.resolve(__dirname, 'src/web/expo-clipboard-mock.ts'),
