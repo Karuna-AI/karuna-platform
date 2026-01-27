@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: karuna-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: karuna
+      POSTGRES_PASSWORD: ganesh
+      POSTGRES_DB: karuna
+    ports:
+      - "5437:5432"
+    volumes:
+      - karuna_postgres_data:/var/lib/postgresql/data
+      - ./server/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U karuna -d karuna"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  karuna_postgres_data:
