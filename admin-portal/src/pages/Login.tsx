@@ -42,7 +42,7 @@ export default function Login() {
               className="form-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@karuna.com"
+              placeholder="Enter your email"
               required
               disabled={isLoading}
             />

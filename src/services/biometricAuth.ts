@@ -1,15 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as Crypto from 'expo-crypto';
 import { auditLogService } from './auditLog';
 
 const STORAGE_KEYS = {
   PIN_HASH: '@karuna_pin_hash',
+  PIN_SALT: '@karuna_pin_salt',
   BIOMETRIC_ENABLED: '@karuna_biometric_enabled',
   APP_LOCK_ENABLED: '@karuna_app_lock_enabled',
   VAULT_LOCK_ENABLED: '@karuna_vault_lock_enabled',
   LAST_AUTH_TIME: '@karuna_last_auth_time',
   AUTH_TIMEOUT_MINUTES: '@karuna_auth_timeout',
 };
+
+// Number of SHA-256 iterations for PIN hashing (provides brute-force resistance)
+const PIN_HASH_ITERATIONS = 10000;
 
 // Default timeout before re-authentication required (in minutes)
 const DEFAULT_AUTH_TIMEOUT = 5;
@@ -39,6 +44,7 @@ export interface SecuritySettings {
 
 class BiometricAuthService {
   private pinHash: string | null = null;
+  private pinSalt: string | null = null;
   private biometricEnabled: boolean = false;
   private appLockEnabled: boolean = false;
   private vaultLockEnabled: boolean = true;
@@ -50,6 +56,7 @@ class BiometricAuthService {
     try {
       const [
         pinHash,
+        pinSalt,
         biometricEnabled,
         appLockEnabled,
         vaultLockEnabled,
@@ -57,6 +64,7 @@ class BiometricAuthService {
         authTimeout,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.PIN_HASH),
+        AsyncStorage.getItem(STORAGE_KEYS.PIN_SALT),
         AsyncStorage.getItem(STORAGE_KEYS.BIOMETRIC_ENABLED),
         AsyncStorage.getItem(STORAGE_KEYS.APP_LOCK_ENABLED),
         AsyncStorage.getItem(STORAGE_KEYS.VAULT_LOCK_ENABLED),
@@ -65,6 +73,7 @@ class BiometricAuthService {
       ]);
 
       this.pinHash = pinHash;
+      this.pinSalt = pinSalt;
       this.biometricEnabled = biometricEnabled === 'true';
       this.appLockEnabled = appLockEnabled === 'true';
       this.vaultLockEnabled = vaultLockEnabled !== 'false'; // Default true
@@ -140,11 +149,20 @@ class BiometricAuthService {
     }
 
     try {
-      // Hash the PIN (using a simple hash for demo - in production use proper crypto)
-      const hash = await this.hashPIN(pin);
+      // Generate a unique salt for this device/user
+      const salt = await this.generateSalt();
 
-      await AsyncStorage.setItem(STORAGE_KEYS.PIN_HASH, hash);
+      // Hash the PIN with the unique salt
+      const hash = await this.hashPIN(pin, salt);
+
+      // Store both hash and salt
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.PIN_HASH, hash),
+        AsyncStorage.setItem(STORAGE_KEYS.PIN_SALT, salt),
+      ]);
+
       this.pinHash = hash;
+      this.pinSalt = salt;
 
       await auditLogService.log({
         action: 'security_pin_set',
@@ -208,8 +226,33 @@ class BiometricAuthService {
     }
 
     try {
-      const hash = await this.hashPIN(pin);
-      const success = hash === this.pinHash;
+      let success = false;
+
+      // Check if this is a legacy hash (starts with 'pin_' and has no salt)
+      if (this.pinHash.startsWith('pin_') && !this.pinSalt) {
+        // Verify with legacy method
+        success = await this.verifyLegacyPIN(pin);
+
+        // If successful, migrate to new secure hash
+        if (success) {
+          const salt = await this.generateSalt();
+          const newHash = await this.hashPIN(pin, salt);
+
+          await Promise.all([
+            AsyncStorage.setItem(STORAGE_KEYS.PIN_HASH, newHash),
+            AsyncStorage.setItem(STORAGE_KEYS.PIN_SALT, salt),
+          ]);
+
+          this.pinHash = newHash;
+          this.pinSalt = salt;
+
+          console.log('[BiometricAuth] Migrated legacy PIN hash to secure format');
+        }
+      } else if (this.pinSalt) {
+        // Verify with secure method
+        const hash = await this.hashPIN(pin, this.pinSalt);
+        success = hash === this.pinHash;
+      }
 
       if (success) {
         await this.recordAuthentication('pin');
@@ -425,23 +468,51 @@ class BiometricAuthService {
   }
 
   /**
-   * Simple PIN hashing (in production, use proper crypto with salt)
+   * Generate a cryptographically secure random salt
    */
-  private async hashPIN(pin: string): Promise<string> {
-    // For production, use a proper hashing library like react-native-crypto
-    // This is a simplified version for demonstration
-    const salt = 'karuna_pin_salt_v1';
-    const combined = salt + pin + salt;
+  private async generateSalt(): Promise<string> {
+    const randomBytes = await Crypto.getRandomBytesAsync(32);
+    // Convert to hex string
+    return Array.from(randomBytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
 
-    // Simple hash function (replace with proper crypto in production)
+  /**
+   * Secure PIN hashing using iterative SHA-256
+   * Uses a unique per-device salt and multiple iterations for brute-force resistance
+   */
+  private async hashPIN(pin: string, salt: string): Promise<string> {
+    // Combine PIN with salt
+    let hash = `${salt}:${pin}:${salt}`;
+
+    // Apply iterative hashing for key stretching
+    for (let i = 0; i < PIN_HASH_ITERATIONS; i++) {
+      hash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        hash + i.toString()
+      );
+    }
+
+    return hash;
+  }
+
+  /**
+   * Verify PIN against legacy hash format (for migration)
+   */
+  private async verifyLegacyPIN(pin: string): Promise<boolean> {
+    const legacySalt = 'karuna_pin_salt_v1';
+    const combined = legacySalt + pin + legacySalt;
+
     let hash = 0;
     for (let i = 0; i < combined.length; i++) {
       const char = combined.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+      hash = hash & hash;
     }
 
-    return `pin_${Math.abs(hash).toString(36)}`;
+    const legacyHash = `pin_${Math.abs(hash).toString(36)}`;
+    return legacyHash === this.pinHash;
   }
 }
 

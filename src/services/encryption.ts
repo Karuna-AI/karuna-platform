@@ -1,17 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import * as Crypto from 'expo-crypto';
 
 /**
  * Encryption Service for Knowledge Vault
  *
  * Uses AES-256-GCM for encrypting sensitive data at rest.
- * The encryption key is derived from a user PIN + device-specific salt.
+ * The encryption key is derived from a user PIN + device-specific salt using PBKDF2-like iterations.
  *
- * For React Native production:
- * - Use react-native-keychain to store the master key securely
- * - Use expo-crypto or react-native-aes-crypto for native encryption
- *
- * This implementation uses Web Crypto API (works in RN with polyfill)
+ * This implementation uses Web Crypto API which is available on:
+ * - All modern browsers (web platform)
+ * - React Native 0.73+ with Hermes
  */
 
 const STORAGE_KEYS = {
@@ -19,46 +18,26 @@ const STORAGE_KEYS = {
   ENCRYPTION_SALT: '@karuna/vault_salt',
 };
 
-// For web/testing, we'll use a simple implementation
-// In production React Native, use native crypto libraries
-const isWeb = Platform.OS === 'web';
+// Key derivation iterations for brute-force resistance
+const KEY_DERIVATION_ITERATIONS = 100000;
 
 /**
- * Generate a random string for salt
+ * Generate a cryptographically secure random salt using expo-crypto
  */
-function generateSalt(length: number = 32): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  const randomValues = new Uint8Array(length);
-
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(randomValues);
-  } else {
-    // Fallback for environments without crypto
-    for (let i = 0; i < length; i++) {
-      randomValues[i] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  for (let i = 0; i < length; i++) {
-    result += chars[randomValues[i] % chars.length];
-  }
-  return result;
+async function generateSalt(length: number = 32): Promise<string> {
+  const randomBytes = await Crypto.getRandomBytesAsync(length);
+  // Convert to hex string for storage
+  return Array.from(randomBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /**
- * Generate a random IV (Initialization Vector)
+ * Generate a cryptographically secure random IV (Initialization Vector)
  */
-function generateIV(): Uint8Array {
-  const iv = new Uint8Array(12); // 96 bits for AES-GCM
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(iv);
-  } else {
-    for (let i = 0; i < 12; i++) {
-      iv[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  return iv;
+async function generateIV(): Promise<Uint8Array> {
+  // 96 bits (12 bytes) for AES-GCM
+  return await Crypto.getRandomBytesAsync(12);
 }
 
 /**
@@ -99,24 +78,59 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
- * Simple hash function for key derivation (PBKDF2-like)
- * In production, use proper PBKDF2 from native crypto
+ * Derive encryption key from PIN using iterative SHA-256 (PBKDF2-like)
+ * Uses expo-crypto for cross-platform support with high iteration count
  */
 async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
-  // Use Web Crypto API if available
+  // Use Web Crypto API with PBKDF2 if available (preferred)
   if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const pinBytes = stringToBytes(pin + salt);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', pinBytes);
-    return new Uint8Array(hashBuffer);
+    try {
+      const pinBytes = stringToBytes(pin);
+      const saltBytes = stringToBytes(salt);
+
+      // Import PIN as key material for PBKDF2
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        pinBytes,
+        'PBKDF2',
+        false,
+        ['deriveBits']
+      );
+
+      // Derive 256-bit key using PBKDF2-SHA256
+      const derivedBits = await crypto.subtle.deriveBits(
+        {
+          name: 'PBKDF2',
+          salt: saltBytes,
+          iterations: KEY_DERIVATION_ITERATIONS,
+          hash: 'SHA-256',
+        },
+        keyMaterial,
+        256
+      );
+
+      return new Uint8Array(derivedBits);
+    } catch (error) {
+      console.log('[Encryption] Web Crypto PBKDF2 not available, using iterative SHA-256');
+    }
   }
 
-  // Fallback: Simple hash (NOT cryptographically secure - for testing only)
-  const combined = pin + salt;
-  const hash = new Uint8Array(32);
-  for (let i = 0; i < combined.length; i++) {
-    hash[i % 32] ^= combined.charCodeAt(i);
+  // Fallback: Iterative SHA-256 using expo-crypto (still secure, just slower in JS)
+  let hash = `${salt}:${pin}:${salt}`;
+
+  for (let i = 0; i < KEY_DERIVATION_ITERATIONS; i++) {
+    hash = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      hash + i.toString()
+    );
   }
-  return hash;
+
+  // Convert hex string to Uint8Array
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hash.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 /**
@@ -136,15 +150,15 @@ class EncryptionService {
       // Get or create salt
       let salt = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_SALT);
       if (!salt) {
-        salt = generateSalt(32);
+        salt = await generateSalt(32);
         await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, salt);
       }
       this.salt = salt;
 
-      // Derive key from PIN
+      // Derive key from PIN using PBKDF2 or iterative SHA-256
       this.keyBytes = await deriveKey(pin, salt);
 
-      // Try to import as CryptoKey for Web Crypto API
+      // Import as CryptoKey for Web Crypto API - required for AES-GCM encryption
       if (typeof crypto !== 'undefined' && crypto.subtle) {
         try {
           this.cryptoKey = await crypto.subtle.importKey(
@@ -154,10 +168,12 @@ class EncryptionService {
             false,
             ['encrypt', 'decrypt']
           );
-        } catch {
-          // Web Crypto not available, will use fallback
-          console.log('Web Crypto not available, using fallback encryption');
+        } catch (error) {
+          console.error('[Encryption] Failed to import AES-GCM key:', error);
+          throw new Error('Web Crypto API required for secure encryption');
         }
+      } else {
+        throw new Error('Web Crypto API not available - secure encryption requires a modern browser or React Native 0.73+');
       }
 
       // Verify the PIN by trying to decrypt the key check
@@ -203,31 +219,23 @@ class EncryptionService {
   }
 
   /**
-   * Encrypt a string value
+   * Encrypt a string value using AES-256-GCM
    */
   async encrypt(plaintext: string): Promise<string> {
-    if (!this.keyBytes) {
-      throw new Error('Encryption not initialized');
+    if (!this.cryptoKey) {
+      throw new Error('Encryption not initialized - call initialize() first');
     }
 
-    const iv = generateIV();
+    const iv = await generateIV();
     const data = stringToBytes(plaintext);
 
-    let ciphertext: Uint8Array;
-
-    // Use Web Crypto if available
-    if (this.cryptoKey) {
-      const encrypted = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        this.cryptoKey,
-        data
-      );
-      ciphertext = new Uint8Array(encrypted);
-    } else {
-      // Fallback: XOR encryption (NOT secure - for testing only)
-      // In production, use react-native-aes-crypto
-      ciphertext = this.xorEncrypt(data, this.keyBytes, iv);
-    }
+    // Encrypt using AES-GCM (authenticated encryption)
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      this.cryptoKey,
+      data
+    );
+    const ciphertext = new Uint8Array(encrypted);
 
     // Combine IV + ciphertext and encode as base64
     const combined = new Uint8Array(iv.length + ciphertext.length);
@@ -238,45 +246,25 @@ class EncryptionService {
   }
 
   /**
-   * Decrypt an encrypted string
+   * Decrypt an encrypted string using AES-256-GCM
    */
   async decrypt(encryptedData: string): Promise<string> {
-    if (!this.keyBytes) {
-      throw new Error('Encryption not initialized');
+    if (!this.cryptoKey) {
+      throw new Error('Encryption not initialized - call initialize() first');
     }
 
     const combined = base64ToBytes(encryptedData);
     const iv = combined.slice(0, 12);
     const ciphertext = combined.slice(12);
 
-    let decrypted: Uint8Array;
+    // Decrypt using AES-GCM (validates authentication tag)
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      this.cryptoKey,
+      ciphertext
+    );
 
-    // Use Web Crypto if available
-    if (this.cryptoKey) {
-      const decryptedBuffer = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv },
-        this.cryptoKey,
-        ciphertext
-      );
-      decrypted = new Uint8Array(decryptedBuffer);
-    } else {
-      // Fallback: XOR decryption
-      decrypted = this.xorEncrypt(ciphertext, this.keyBytes, iv);
-    }
-
-    return bytesToString(decrypted);
-  }
-
-  /**
-   * Simple XOR encryption fallback (NOT cryptographically secure)
-   * This is only for testing - production should use proper AES
-   */
-  private xorEncrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-    const result = new Uint8Array(data.length);
-    for (let i = 0; i < data.length; i++) {
-      result[i] = data[i] ^ key[i % key.length] ^ iv[i % iv.length];
-    }
-    return result;
+    return bytesToString(new Uint8Array(decryptedBuffer));
   }
 
   /**
@@ -308,8 +296,8 @@ class EncryptionService {
       // Clear the old key check
       await AsyncStorage.removeItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
 
-      // Generate new salt
-      const newSalt = generateSalt(32);
+      // Generate new salt for the new PIN
+      const newSalt = await generateSalt(32);
       await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, newSalt);
 
       // Re-initialize with new PIN

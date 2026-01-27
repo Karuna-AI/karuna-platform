@@ -5,13 +5,19 @@
 
 const { Pool } = require('pg');
 
+// Validate required database configuration
+if (!process.env.DB_PASSWORD) {
+  console.error('ERROR: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 // Database configuration
 const config = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5437'),
   database: process.env.DB_NAME || 'karuna',
   user: process.env.DB_USER || 'karuna',
-  password: process.env.DB_PASSWORD || 'ganesh',
+  password: process.env.DB_PASSWORD,
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

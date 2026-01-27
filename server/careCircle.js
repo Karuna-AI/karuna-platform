@@ -10,14 +10,74 @@
 const express = require('express');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 const db = require('./db');
 const router = express.Router();
+
+const BCRYPT_ROUNDS = 12;
+
+// ============================================================================
+// Rate Limiting Configuration
+// ============================================================================
+
+// Login rate limiter: 5 attempts per minute per IP
+const loginRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: 'Too many login attempts, please try again after a minute' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] Login rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
+
+// Registration rate limiter: 3 attempts per hour per IP
+const registrationRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  message: { error: 'Too many registration attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] Registration rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
+
+// Invitation rate limiter: 10 attempts per minute per IP
+const invitationRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  message: { error: 'Too many invitation attempts, please try again after a minute' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] Invitation rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
+
+// Password reset rate limiter: 3 attempts per hour per IP
+const passwordResetRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  message: { error: 'Too many password reset attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] Password reset rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const JWT_SECRET = process.env.JWT_SECRET || 'karuna-care-circle-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '7d';
 const INVITATION_EXPIRES_HOURS = 72;
 
@@ -102,8 +162,20 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + JWT_SECRET).digest('hex');
+async function hashPassword(password) {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+async function verifyPassword(password, hash) {
+  // Support both bcrypt and legacy SHA-256 hashes for migration
+  if (hash.startsWith('$2b$') || hash.startsWith('$2a$')) {
+    // bcrypt hash
+    return bcrypt.compare(password, hash);
+  } else {
+    // Legacy SHA-256 hash - for backward compatibility during migration
+    const legacyHash = crypto.createHash('sha256').update(password + JWT_SECRET).digest('hex');
+    return hash === legacyHash;
+  }
 }
 
 function createJWT(user) {
@@ -117,7 +189,17 @@ function createJWT(user) {
 function verifyJWT(token) {
   try {
     return jwt.verify(token, JWT_SECRET);
-  } catch {
+  } catch (error) {
+    // Log JWT verification failures for security monitoring
+    if (error.name === 'TokenExpiredError') {
+      console.warn('[Auth] JWT expired:', { expiredAt: error.expiredAt });
+    } else if (error.name === 'JsonWebTokenError') {
+      console.warn('[Auth] Invalid JWT:', { message: error.message });
+    } else if (error.name === 'NotBeforeError') {
+      console.warn('[Auth] JWT not yet valid:', { date: error.date });
+    } else {
+      console.warn('[Auth] JWT verification failed:', { error: error.message });
+    }
     return null;
   }
 }
@@ -185,7 +267,7 @@ function requirePermission(permission) {
 // ============================================================================
 
 // Register caregiver
-router.post('/auth/register', async (req, res) => {
+router.post('/auth/register', registrationRateLimiter, async (req, res) => {
   try {
     const { email, password, name, phone } = req.body;
 
@@ -204,11 +286,12 @@ router.post('/auth/register', async (req, res) => {
     }
 
     // Create user
+    const passwordHash = await hashPassword(password);
     const result = await db.query(
       `INSERT INTO users (email, password_hash, name, phone)
        VALUES ($1, $2, $3, $4)
        RETURNING id, email, name`,
-      [email.toLowerCase(), hashPassword(password), name, phone]
+      [email.toLowerCase(), passwordHash, name, phone]
     );
 
     const user = result.rows[0];
@@ -226,7 +309,7 @@ router.post('/auth/register', async (req, res) => {
 });
 
 // Login
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -245,8 +328,15 @@ router.post('/auth/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    if (user.password_hash !== hashPassword(password)) {
+    const passwordValid = await verifyPassword(password, user.password_hash);
+    if (!passwordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Upgrade legacy hash to bcrypt on successful login
+    if (!user.password_hash.startsWith('$2b$') && !user.password_hash.startsWith('$2a$')) {
+      const newHash = await hashPassword(password);
+      await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, user.id]);
     }
 
     const token = createJWT(user);
@@ -568,7 +658,7 @@ router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canI
 });
 
 // Accept invitation
-router.post('/invitations/:token/accept', async (req, res) => {
+router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
@@ -610,11 +700,12 @@ router.post('/invitations/:token/accept', async (req, res) => {
         return res.status(400).json({ error: 'Password required for new account', needsPassword: true });
       }
 
+      const newPasswordHash = await hashPassword(password);
       const newUserResult = await db.query(
         `INSERT INTO users (email, password_hash, name)
          VALUES ($1, $2, $3)
          RETURNING id, email, name`,
-        [invitation.email, hashPassword(password), invitation.name]
+        [invitation.email, newPasswordHash, invitation.name]
       );
       user = newUserResult.rows[0];
     }
@@ -2405,8 +2496,8 @@ async function handleWebSocket(ws, req) {
       if (message.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
       }
-    } catch {
-      // Ignore invalid messages
+    } catch (error) {
+      console.warn('[WebSocket] Invalid message received:', { error: error.message });
     }
   });
 }

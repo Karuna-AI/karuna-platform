@@ -43,6 +43,17 @@ if (OPENROUTER_API_KEY) {
   console.log('Fallback: OpenRouter configured for chat');
 }
 
+// Validate JWT secrets are configured
+if (!process.env.JWT_SECRET) {
+  console.error('ERROR: JWT_SECRET environment variable is required');
+  process.exit(1);
+}
+
+if (!process.env.ADMIN_JWT_SECRET) {
+  console.error('ERROR: ADMIN_JWT_SECRET environment variable is required');
+  process.exit(1);
+}
+
 // ============================================================================
 // Middleware
 // ============================================================================

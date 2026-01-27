@@ -8,14 +8,35 @@
 const express = require('express');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 const db = require('./db');
 const router = express.Router();
+
+const BCRYPT_ROUNDS = 12;
+
+// ============================================================================
+// Rate Limiting Configuration
+// ============================================================================
+
+// Admin login rate limiter: 5 attempts per 15 minutes per IP (stricter for admin)
+const adminLoginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  message: { error: 'Too many login attempts, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] Admin login rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'karuna-admin-secret-change-in-production';
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
 const ADMIN_JWT_EXPIRES_IN = '24h';
 
 // Admin role permissions
@@ -59,8 +80,20 @@ const ADMIN_ROLE_PERMISSIONS = {
 // Helper Functions
 // ============================================================================
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + ADMIN_JWT_SECRET).digest('hex');
+async function hashPassword(password) {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+async function verifyPassword(password, hash) {
+  // Support both bcrypt and legacy SHA-256 hashes for migration
+  if (hash.startsWith('$2b$') || hash.startsWith('$2a$')) {
+    // bcrypt hash
+    return bcrypt.compare(password, hash);
+  } else {
+    // Legacy SHA-256 hash - for backward compatibility during migration
+    const legacyHash = crypto.createHash('sha256').update(password + ADMIN_JWT_SECRET).digest('hex');
+    return hash === legacyHash;
+  }
 }
 
 function createAdminJWT(admin) {
@@ -74,7 +107,17 @@ function createAdminJWT(admin) {
 function verifyAdminJWT(token) {
   try {
     return jwt.verify(token, ADMIN_JWT_SECRET);
-  } catch {
+  } catch (error) {
+    // Log admin JWT verification failures for security monitoring
+    if (error.name === 'TokenExpiredError') {
+      console.warn('[AdminAuth] JWT expired:', { expiredAt: error.expiredAt });
+    } else if (error.name === 'JsonWebTokenError') {
+      console.warn('[AdminAuth] Invalid JWT:', { message: error.message });
+    } else if (error.name === 'NotBeforeError') {
+      console.warn('[AdminAuth] JWT not yet valid:', { date: error.date });
+    } else {
+      console.warn('[AdminAuth] JWT verification failed:', { error: error.message });
+    }
     return null;
   }
 }
@@ -131,7 +174,7 @@ function requirePermission(permission) {
 // ============================================================================
 
 // Admin login
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -150,8 +193,15 @@ router.post('/auth/login', async (req, res) => {
 
     const admin = result.rows[0];
 
-    if (admin.password_hash !== hashPassword(password)) {
+    const passwordValid = await verifyPassword(password, admin.password_hash);
+    if (!passwordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Upgrade legacy hash to bcrypt on successful login
+    if (!admin.password_hash.startsWith('$2b$') && !admin.password_hash.startsWith('$2a$')) {
+      const newHash = await hashPassword(password);
+      await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, admin.id]);
     }
 
     // Update login stats
@@ -225,11 +275,12 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
       return res.status(400).json({ error: 'Email already exists' });
     }
 
+    const passwordHash = await hashPassword(password);
     const result = await db.query(
       `INSERT INTO admin_users (email, password_hash, name, role, created_by)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, email, name, role`,
-      [email.toLowerCase(), hashPassword(password), name, role || 'admin', req.admin.id]
+      [email.toLowerCase(), passwordHash, name, role || 'admin', req.admin.id]
     );
 
     await logAdminAction(req.admin.id, req.admin.email, 'create_admin', 'admin', result.rows[0].id, null, { email, name, role }, req);
@@ -412,9 +463,8 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    // Use the same hashing as careCircle.js
-    const JWT_SECRET = process.env.JWT_SECRET || 'karuna-care-circle-secret-change-in-production';
-    const passwordHash = crypto.createHash('sha256').update(newPassword + JWT_SECRET).digest('hex');
+    // Use bcrypt for password hashing (same as careCircle.js)
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
     await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
 

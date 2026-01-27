@@ -3,6 +3,8 @@
  * These provide no-op or localStorage-based implementations for web
  */
 
+import * as secureStoreMock from './expo-secure-store-mock';
+
 // expo-document-picker mock
 export const expoDocumentPicker = {
   getDocumentAsync: async (options?: any) => {
@@ -119,26 +121,9 @@ export const expoTaskManager = {
   unregisterTaskAsync: async (taskName: string) => {},
 };
 
-// expo-secure-store mock (uses localStorage with warning)
-export const expoSecureStore = {
-  setItemAsync: async (key: string, value: string) => {
-    console.warn('[SecureStore] Using localStorage on web - not secure for production');
-    localStorage.setItem(`secure_${key}`, value);
-  },
-  getItemAsync: async (key: string) => {
-    return localStorage.getItem(`secure_${key}`);
-  },
-  deleteItemAsync: async (key: string) => {
-    localStorage.removeItem(`secure_${key}`);
-  },
-  WHEN_UNLOCKED: 'WHEN_UNLOCKED',
-  AFTER_FIRST_UNLOCK: 'AFTER_FIRST_UNLOCK',
-  ALWAYS: 'ALWAYS',
-  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'WHEN_UNLOCKED_THIS_DEVICE_ONLY',
-  WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'WHEN_PASSCODE_SET_THIS_DEVICE_ONLY',
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
-  ALWAYS_THIS_DEVICE_ONLY: 'ALWAYS_THIS_DEVICE_ONLY',
-};
+// expo-secure-store mock - uses improved secure storage with encryption
+// See expo-secure-store-mock.ts for full implementation
+export const expoSecureStore = secureStoreMock;
 
 // expo-location mock
 export const expoLocation = {

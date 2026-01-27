@@ -13,6 +13,7 @@ export default function UserDetail() {
   const [suspendReason, setSuspendReason] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [actionError, setActionError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
     if (id) loadUser();
@@ -56,7 +57,8 @@ export default function UserDetail() {
     if (result.success) {
       setShowResetModal(false);
       setNewPassword('');
-      alert('Password reset successfully');
+      setSuccessMessage('Password reset successfully');
+      setTimeout(() => setSuccessMessage(''), 5000); // Auto-dismiss after 5 seconds
     } else {
       setActionError(result.error || 'Failed to reset password');
     }
@@ -87,6 +89,12 @@ export default function UserDetail() {
       <button onClick={() => navigate('/users')} className="btn btn-secondary btn-sm" style={{ marginBottom: '1rem' }}>
         ← Back to Users
       </button>
+
+      {successMessage && (
+        <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+          {successMessage}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <div className="profile-header">
