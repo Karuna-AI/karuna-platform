@@ -135,6 +135,29 @@ ALTER TABLE care_circles ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(20) 
 ALTER TABLE care_circles ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMP WITH TIME ZONE;
 
 -- ============================================================================
+-- AI Usage Logs Table (tracks AI API calls for analytics)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ai_usage_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id),
+    circle_id UUID REFERENCES care_circles(id),
+    request_type VARCHAR(20) NOT NULL, -- chat, stt, tts
+    model VARCHAR(100) NOT NULL,
+    prompt_tokens INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    estimated_cost_usd DECIMAL(10, 6) DEFAULT 0,
+    latency_ms INTEGER,
+    success BOOLEAN DEFAULT true,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ai_usage_logs_created ON ai_usage_logs(created_at DESC);
+CREATE INDEX idx_ai_usage_logs_type ON ai_usage_logs(request_type);
+CREATE INDEX idx_ai_usage_logs_user ON ai_usage_logs(user_id);
+
+-- ============================================================================
 -- Triggers for updated_at
 -- ============================================================================
 CREATE TRIGGER update_admin_users_updated_at BEFORE UPDATE ON admin_users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
