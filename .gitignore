@@ -25,10 +25,36 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# React Native
+# React Native / Expo
 .expo/
+.expo-shared/
+web-build/
+ios/
+android/
+
+# EAS
+.eas/
+eas-credentials/
+
+# Native builds
+*.ipa
+*.apk
+*.aab
+
+# Signing keys
 *.jks
 *.p8
 *.p12
 *.key
+*.keystore
 *.mobileprovision
+google-service-account.json
+GoogleService-Info.plist
+google-services.json
+
+# Metro
+.metro-health-check*
+
+# Testing
+coverage/
+.jest/

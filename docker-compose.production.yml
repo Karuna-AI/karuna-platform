@@ -1,0 +1,150 @@
+# Karuna Platform - Production Docker Compose Configuration
+#
+# Usage:
+#   1. Copy .env.production.example to .env
+#   2. Fill in all required environment variables
+#   3. Build portals: cd caregiver-portal && npm run build && cd ../admin-portal && npm run build
+#   4. Run: docker-compose -f docker-compose.production.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: karuna-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./server/db/admin_tables.sql:/docker-entrypoint-initdb.d/02-admin.sql:ro
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - karuna-internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Backend API Server
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: karuna-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    networks:
+      - karuna-internal
+      - karuna-public
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Caregiver Portal
+  caregiver-portal:
+    image: nginx:alpine
+    container_name: karuna-caregiver
+    restart: always
+    depends_on:
+      - api
+    volumes:
+      - ./caregiver-portal/dist:/usr/share/nginx/html:ro
+      - ./nginx/caregiver.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - karuna-public
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Admin Portal
+  admin-portal:
+    image: nginx:alpine
+    container_name: karuna-admin
+    restart: always
+    depends_on:
+      - api
+    volumes:
+      - ./admin-portal/dist:/usr/share/nginx/html:ro
+      - ./nginx/admin.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - karuna-public
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Nginx Reverse Proxy (handles SSL termination)
+  nginx:
+    image: nginx:alpine
+    container_name: karuna-nginx
+    restart: always
+    depends_on:
+      - api
+      - caregiver-portal
+      - admin-portal
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    networks:
+      - karuna-public
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Certbot for SSL certificate renewal
+  certbot:
+    image: certbot/certbot
+    container_name: karuna-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  karuna-internal:
+    driver: bridge
+    internal: true
+  karuna-public:
+    driver: bridge

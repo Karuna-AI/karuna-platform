@@ -1,24 +1,69 @@
+# Karuna Platform - Docker Compose Configuration
+# Use this for local development or as a template for production
+#
+# Required environment variables:
+#   DB_PASSWORD - PostgreSQL password
+#   JWT_SECRET - JWT signing secret for user authentication
+#   ADMIN_JWT_SECRET - JWT signing secret for admin authentication
+#   OPENAI_API_KEY - OpenAI API key for AI features
+
 version: '3.8'
 
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: karuna-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: karuna
-      POSTGRES_PASSWORD: ganesh
-      POSTGRES_DB: karuna
+      POSTGRES_USER: ${DB_USER:-karuna}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password is required - set DB_PASSWORD env var}
+      POSTGRES_DB: ${DB_NAME:-karuna}
     ports:
-      - "5437:5432"
+      - "${DB_PORT:-5437}:5432"
     volumes:
       - karuna_postgres_data:/var/lib/postgresql/data
-      - ./server/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./server/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./server/db/admin_tables.sql:/docker-entrypoint-initdb.d/02-admin.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U karuna -d karuna"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-karuna} -d ${DB_NAME:-karuna}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - karuna-network
+
+  # Backend API Server (uncomment for full stack deployment)
+  # api:
+  #   build:
+  #     context: ./server
+  #     dockerfile: Dockerfile
+  #   container_name: karuna-api
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     NODE_ENV: ${NODE_ENV:-production}
+  #     PORT: 3000
+  #     DB_HOST: postgres
+  #     DB_PORT: 5432
+  #     DB_NAME: ${DB_NAME:-karuna}
+  #     DB_USER: ${DB_USER:-karuna}
+  #     DB_PASSWORD: ${DB_PASSWORD}
+  #     JWT_SECRET: ${JWT_SECRET}
+  #     ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET}
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
+  #     OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  #     CORS_ORIGIN: ${CORS_ORIGIN:-*}
+  #   ports:
+  #     - "${API_PORT:-3000}:3000"
+  #   networks:
+  #     - karuna-network
 
 volumes:
   karuna_postgres_data:
+
+networks:
+  karuna-network:
+    driver: bridge

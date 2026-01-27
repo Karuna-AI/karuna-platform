@@ -5,32 +5,38 @@
  * Creates an initial super_admin user for the Karuna Admin Portal.
  *
  * Usage:
- *   node scripts/seed-admin.js
- *   node scripts/seed-admin.js --email admin@example.com --password mypassword --name "Admin Name"
+ *   node scripts/seed-admin.js --password <your-secure-password>
+ *   node scripts/seed-admin.js -e admin@example.com -p <password> -n "Admin Name"
  *
  * Environment variables required:
  *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+ *   ADMIN_PASSWORD (optional - admin password, or use --password flag)
  *
  * Or use a .env file in the server directory.
  */
 
 require('dotenv').config();
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const BCRYPT_ROUNDS = 12;
 
-// Default admin credentials (change in production!)
+// Default admin credentials
 const DEFAULT_EMAIL = 'admin@karuna.com';
-const DEFAULT_PASSWORD = 'admin123';
 const DEFAULT_NAME = 'System Admin';
+
+// Generate a random password if none provided (for development only)
+function generateRandomPassword() {
+  return crypto.randomBytes(12).toString('base64').slice(0, 16);
+}
 
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
   const options = {
     email: DEFAULT_EMAIL,
-    password: DEFAULT_PASSWORD,
+    password: process.env.ADMIN_PASSWORD || null, // Will be set via CLI or generated
     name: DEFAULT_NAME,
     role: 'super_admin',
   };
@@ -75,27 +81,31 @@ Usage:
 
 Options:
   -e, --email <email>       Admin email (default: ${DEFAULT_EMAIL})
-  -p, --password <password> Admin password (default: ${DEFAULT_PASSWORD})
+  -p, --password <password> Admin password (required for production, auto-generated for dev)
   -n, --name <name>         Admin name (default: ${DEFAULT_NAME})
   -r, --role <role>         Admin role: super_admin, admin, support (default: super_admin)
   -h, --help                Show this help message
 
 Environment Variables:
-  DB_HOST     PostgreSQL host (default: localhost)
-  DB_PORT     PostgreSQL port (default: 5432)
-  DB_NAME     Database name (default: karuna)
-  DB_USER     Database user
-  DB_PASSWORD Database password
+  DB_HOST        PostgreSQL host (default: localhost)
+  DB_PORT        PostgreSQL port (default: 5432)
+  DB_NAME        Database name (default: karuna)
+  DB_USER        Database user
+  DB_PASSWORD    Database password
+  ADMIN_PASSWORD Admin password (alternative to --password flag)
 
 Examples:
-  # Create default admin
+  # Create admin with generated password (development)
   node scripts/seed-admin.js
 
+  # Create admin with specific password
+  node scripts/seed-admin.js --password <your-secure-password>
+
   # Create custom admin
-  node scripts/seed-admin.js --email john@example.com --password secretpass --name "John Admin"
+  node scripts/seed-admin.js -e admin@example.com -p <password> -n "Admin Name"
 
   # Create support user
-  node scripts/seed-admin.js --email support@example.com --password pass123 --name "Support Staff" --role support
+  node scripts/seed-admin.js -e support@example.com -p <password> -n "Support Staff" -r support
 `);
 }
 
@@ -107,6 +117,15 @@ async function seedAdmin() {
   if (!validRoles.includes(options.role)) {
     console.error(`Error: Invalid role "${options.role}". Must be one of: ${validRoles.join(', ')}`);
     process.exit(1);
+  }
+
+  // Generate password if not provided
+  let generatedPassword = false;
+  if (!options.password) {
+    options.password = generateRandomPassword();
+    generatedPassword = true;
+    console.log('Note: No password provided. Generating random password for development.');
+    console.log('For production, use --password flag or ADMIN_PASSWORD environment variable.\n');
   }
 
   // Check for required environment variables
