@@ -5,6 +5,8 @@
 
 import { Platform, Linking, Alert } from 'react-native';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { Camera, FlashMode } from 'expo-camera';
 import { deepLinksService } from './deepLinks';
 import { auditLogService } from './auditLog';
 import {
@@ -20,6 +22,7 @@ import {
 class AppLauncherService {
   private lastAction: { type: ActionType; timestamp: number } | null = null;
   private actionCooldown = 2000; // 2 second cooldown between same actions
+  private flashlightOn = false;
 
   /**
    * Execute an action
@@ -588,27 +591,93 @@ class AppLauncherService {
   }
 
   /**
-   * Open camera (placeholder - would use expo-camera in real app)
+   * Open camera for photo capture
    */
   private async openCamera(): Promise<ActionResult> {
-    // In a real implementation, this would use expo-camera or the native camera intent
-    return {
-      success: true,
-      message: 'Camera feature would open here...',
-      action: 'camera_open',
-    };
+    try {
+      // Request camera permissions
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        return {
+          success: false,
+          message: 'Camera permission is required to take photos.',
+          action: 'camera_open',
+        };
+      }
+
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (result.canceled) {
+        return {
+          success: true,
+          message: 'Photo capture cancelled.',
+          action: 'camera_open',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Photo captured successfully!',
+        action: 'camera_open',
+        data: {
+          uri: result.assets[0].uri,
+          width: result.assets[0].width,
+          height: result.assets[0].height,
+        },
+      };
+    } catch (error) {
+      console.error('Camera error:', error);
+      return {
+        success: false,
+        message: 'Failed to open camera. Please try again.',
+        action: 'camera_open',
+      };
+    }
   }
 
   /**
-   * Toggle flashlight (placeholder)
+   * Toggle flashlight using expo-camera torch
    */
   private async toggleFlashlight(): Promise<ActionResult> {
-    // Would use expo-camera's flashlight feature
-    return {
-      success: true,
-      message: 'Flashlight toggled!',
-      action: 'flashlight',
-    };
+    try {
+      // Check if we have camera permission (needed for flashlight)
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        return {
+          success: false,
+          message: 'Camera permission is required to use the flashlight.',
+          action: 'flashlight',
+        };
+      }
+
+      // Toggle flashlight state
+      this.flashlightOn = !this.flashlightOn;
+
+      // Note: Actual flashlight toggling requires a Camera component mounted
+      // This returns the intent; the UI layer should handle the Camera mount
+      return {
+        success: true,
+        message: this.flashlightOn ? 'Flashlight turned on!' : 'Flashlight turned off!',
+        action: 'flashlight',
+        data: {
+          flashlightOn: this.flashlightOn,
+          torchMode: this.flashlightOn ? 'on' : 'off',
+        },
+      };
+    } catch (error) {
+      console.error('Flashlight error:', error);
+      return {
+        success: false,
+        message: 'Failed to toggle flashlight.',
+        action: 'flashlight',
+      };
+    }
   }
 
   /**

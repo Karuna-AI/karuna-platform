@@ -1,4 +1,5 @@
 import { Platform, PermissionsAndroid, Linking, Alert } from 'react-native';
+import * as ExpoContacts from 'expo-contacts';
 
 export interface Contact {
   id: string;
@@ -23,7 +24,7 @@ class ContactsService {
   private permissionGranted: boolean = false;
 
   /**
-   * Request contact permission
+   * Request contact permission using expo-contacts
    */
   async requestPermission(): Promise<boolean> {
     if (Platform.OS === 'web') {
@@ -32,34 +33,18 @@ class ContactsService {
       return true;
     }
 
-    if (Platform.OS === 'android') {
-      try {
-        const result = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
-          {
-            title: 'Contact Permission',
-            message:
-              'Karuna needs access to your contacts so you can easily call or message your family and friends.',
-            buttonPositive: 'Allow',
-            buttonNegative: 'Deny',
-          }
-        );
-
-        this.permissionGranted = result === PermissionsAndroid.RESULTS.GRANTED;
-        return this.permissionGranted;
-      } catch (error) {
-        console.error('Contact permission error:', error);
-        return false;
-      }
+    try {
+      const { status } = await ExpoContacts.requestPermissionsAsync();
+      this.permissionGranted = status === 'granted';
+      return this.permissionGranted;
+    } catch (error) {
+      console.error('Contact permission error:', error);
+      return false;
     }
-
-    // iOS - permission is requested when we try to access contacts
-    this.permissionGranted = true;
-    return true;
   }
 
   /**
-   * Load contacts from device
+   * Load contacts from device using expo-contacts
    */
   async loadContacts(): Promise<Contact[]> {
     if (!this.permissionGranted) {
@@ -77,15 +62,34 @@ class ContactsService {
     }
 
     try {
-      // For native, we would use react-native-contacts here
-      // This is a placeholder that returns mock data
-      // In production, replace with: const contacts = await Contacts.getAll();
-      this.contacts = this.getMockContacts();
+      // Use expo-contacts to get real device contacts
+      const { data } = await ExpoContacts.getContactsAsync({
+        fields: [
+          ExpoContacts.Fields.Name,
+          ExpoContacts.Fields.PhoneNumbers,
+          ExpoContacts.Fields.Image,
+        ],
+      });
+
+      // Transform expo contacts to our Contact interface
+      this.contacts = data
+        .filter((c) => c.name && c.phoneNumbers && c.phoneNumbers.length > 0)
+        .map((c) => ({
+          id: c.id || `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: c.name || 'Unknown',
+          phoneNumbers: c.phoneNumbers?.map((p) => p.number || '').filter(Boolean) || [],
+          thumbnailPath: c.image?.uri,
+        }));
+
       this.isLoaded = true;
+      console.log('[Contacts] Loaded', this.contacts.length, 'contacts from device');
       return this.contacts;
     } catch (error) {
       console.error('Error loading contacts:', error);
-      return [];
+      // Fall back to mock contacts if real contacts fail
+      this.contacts = this.getMockContacts();
+      this.isLoaded = true;
+      return this.contacts;
     }
   }
 

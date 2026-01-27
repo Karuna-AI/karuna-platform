@@ -1,11 +1,15 @@
 /**
  * Weather Service
  * Fetches weather data for proactive assistance
+ * Uses OpenWeatherMap API when configured, falls back to simulated data
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import { Platform } from 'react-native';
+import { OPENWEATHER_API_KEY } from '@env';
 import { WeatherCondition } from '../types/proactive';
+import { logger } from './logger';
 
 const STORAGE_KEYS = {
   WEATHER_CACHE: '@karuna_weather_cache',
@@ -14,6 +18,9 @@ const STORAGE_KEYS = {
 
 // Cache duration in milliseconds (30 minutes)
 const CACHE_DURATION = 30 * 60 * 1000;
+
+// OpenWeatherMap API configuration
+const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
 
 export interface WeatherData {
   temperature: number; // Fahrenheit
@@ -50,16 +57,37 @@ interface WeatherCache {
 }
 
 class WeatherService {
-  private apiKey: string = ''; // Set via configure()
+  private apiKey: string;
   private cache: WeatherCache | null = null;
   private locationCache: LocationData | null = null;
+  private isInitialized: boolean = false;
+
+  constructor() {
+    // Load API key from environment variable
+    this.apiKey = OPENWEATHER_API_KEY || '';
+
+    if (this.apiKey) {
+      logger.weather.info('OpenWeatherMap API configured');
+    } else {
+      logger.weather.info('No API key configured, using simulated weather data');
+    }
+  }
 
   /**
-   * Configure the weather service with API key
-   * In production, use OpenWeatherMap, WeatherAPI, or similar
+   * Configure the weather service with API key (runtime override)
    */
   configure(apiKey: string): void {
     this.apiKey = apiKey;
+    if (apiKey) {
+      logger.weather.info('API key updated');
+    }
+  }
+
+  /**
+   * Check if real weather API is available
+   */
+  isApiConfigured(): boolean {
+    return !!this.apiKey;
   }
 
   /**
@@ -86,7 +114,7 @@ class WeatherService {
     try {
       const location = await this.getLocation();
       if (!location) {
-        console.log('[Weather] Could not get location');
+        logger.weather.warn('Could not get location, using simulated data');
         return this.getSimulatedWeather();
       }
 
@@ -103,7 +131,7 @@ class WeatherService {
 
       return weather;
     } catch (error) {
-      console.error('[Weather] Error fetching weather:', error);
+      logger.weather.error('Error fetching weather', error);
       return this.getSimulatedWeather();
     }
   }
@@ -123,7 +151,7 @@ class WeatherService {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        console.log('[Weather] Location permission denied');
+        logger.weather.info('Location permission denied');
         return null;
       }
 
@@ -149,34 +177,52 @@ class WeatherService {
 
       return locationData;
     } catch (error) {
-      console.error('[Weather] Error getting location:', error);
+      logger.weather.error('Error getting location', error);
       return null;
     }
   }
 
   /**
-   * Fetch weather from API
-   * In production, replace with actual API call
+   * Fetch weather from OpenWeatherMap API
+   * Falls back to simulated data if API is unavailable
    */
   private async fetchWeatherFromAPI(location: LocationData): Promise<WeatherData> {
     // If API key is configured, make real API call
     if (this.apiKey) {
       try {
-        // Example with OpenWeatherMap API
-        const response = await fetch(
-          `https://api.openweathermap.org/data/2.5/weather?lat=${location.latitude}&lon=${location.longitude}&appid=${this.apiKey}&units=imperial`
-        );
+        const url = `${OPENWEATHER_BASE_URL}/weather?lat=${location.latitude}&lon=${location.longitude}&appid=${this.apiKey}&units=imperial`;
+
+        logger.weather.info('Fetching weather from OpenWeatherMap');
+
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
 
         if (response.ok) {
           const data = await response.json();
+          logger.weather.info('Successfully fetched weather data', { city: location.city || 'unknown' });
           return this.parseOpenWeatherResponse(data, location);
+        } else {
+          const errorText = await response.text();
+          logger.weather.warn('API returned error', { status: response.status, error: errorText });
+
+          // Handle specific error codes
+          if (response.status === 401) {
+            logger.weather.error('Invalid API key - check OPENWEATHER_API_KEY');
+          } else if (response.status === 429) {
+            logger.weather.warn('Rate limit exceeded - using cached/simulated data');
+          }
         }
       } catch (error) {
-        console.error('[Weather] API call failed:', error);
+        logger.weather.error('API call failed', error);
       }
     }
 
     // Fall back to simulated data
+    logger.weather.debug('Using simulated weather data');
     return this.getSimulatedWeather(location);
   }
 
@@ -396,7 +442,7 @@ class WeatherService {
         }
       }
     } catch (error) {
-      console.error('[Weather] Error loading cache:', error);
+      logger.weather.error('Error loading cache', error);
     }
     return null;
   }
@@ -412,7 +458,7 @@ class WeatherService {
       };
       await AsyncStorage.setItem(STORAGE_KEYS.WEATHER_CACHE, JSON.stringify(cache));
     } catch (error) {
-      console.error('[Weather] Error saving cache:', error);
+      logger.weather.error('Error saving cache', error);
     }
   }
 }

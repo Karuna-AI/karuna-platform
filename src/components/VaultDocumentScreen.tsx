@@ -10,6 +10,7 @@ import {
   Image,
   Platform,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { vaultService } from '../services/vault';
 import { VaultDocument, DocumentCategory } from '../types/vault';
 import {
@@ -99,18 +100,17 @@ export function VaultDocumentScreen({
   };
 
   const handleCaptureImage = async () => {
-    // In a real implementation, this would use expo-image-picker or react-native-image-picker
     Alert.alert(
       'Capture Document',
       'How would you like to add the document?',
       [
         {
           text: 'Take Photo',
-          onPress: () => simulateImageCapture('camera'),
+          onPress: () => launchCamera(),
         },
         {
           text: 'Choose from Gallery',
-          onPress: () => simulateImageCapture('gallery'),
+          onPress: () => launchGallery(),
         },
         {
           text: 'Cancel',
@@ -120,25 +120,62 @@ export function VaultDocumentScreen({
     );
   };
 
-  const simulateImageCapture = (source: 'camera' | 'gallery') => {
-    // This is a placeholder. In production, use:
-    // - expo-image-picker: ImagePicker.launchCameraAsync() or ImagePicker.launchImageLibraryAsync()
-    // - react-native-image-picker: launchCamera() or launchImageLibrary()
+  const launchCamera = async () => {
+    try {
+      // Request camera permission
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Camera permission is needed to take photos. Please enable it in your device settings.'
+        );
+        return;
+      }
 
-    // For demo, we'll show a success message
-    Alert.alert(
-      'Image Captured',
-      `Document captured from ${source}. In the full app, this would save the actual image.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Set a placeholder to indicate an image was captured
-            setCapturedImage('captured_' + Date.now());
-          },
-        },
-      ]
-    );
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setCapturedImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      Alert.alert('Error', 'Failed to capture image. Please try again.');
+    }
+  };
+
+  const launchGallery = async () => {
+    try {
+      // Request media library permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Photo library permission is needed to select images. Please enable it in your device settings.'
+        );
+        return;
+      }
+
+      // Launch image library
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setCapturedImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Gallery error:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
   };
 
   const handleSave = async () => {

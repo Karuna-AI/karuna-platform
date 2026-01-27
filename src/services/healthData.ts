@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Pedometer } from 'expo-sensors';
 import { consentService } from './consent';
 import { auditLogService } from './auditLog';
 import {
@@ -179,18 +180,48 @@ class HealthDataService {
   }
 
   /**
-   * Fetch steps from health platform (simulated)
+   * Fetch steps from health platform using expo-sensors Pedometer
+   * Falls back to simulated data if Pedometer is not available
    */
   private async fetchStepsFromPlatform(): Promise<StepsData | null> {
-    // In real implementation:
-    // iOS: await HealthKit.getStepCount({ startDate, endDate })
-    // Android: await HealthConnect.readRecords('Steps', { startTime, endTime })
-
-    // Return simulated data
     const today = new Date().toISOString().split('T')[0];
+
+    try {
+      // Check if Pedometer is available on this device
+      const isAvailable = await Pedometer.isAvailableAsync();
+
+      if (isAvailable && Platform.OS !== 'web') {
+        // Get step count for today
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date();
+
+        const result = await Pedometer.getStepCountAsync(start, end);
+
+        console.log('[HealthData] Pedometer steps:', result.steps);
+
+        // Estimate distance and calories based on steps
+        // Average stride length ~0.75m, ~0.04 calories per step
+        const distance = Math.round(result.steps * 0.75);
+        const caloriesBurned = Math.round(result.steps * 0.04);
+
+        return {
+          date: today,
+          count: result.steps,
+          goal: this.stepsGoal,
+          distance,
+          caloriesBurned,
+        };
+      }
+    } catch (error) {
+      console.warn('[HealthData] Pedometer error, using simulated data:', error);
+    }
+
+    // Fallback: Return simulated data for demo/web
+    console.debug('[HealthData] Using simulated step data');
     return {
       date: today,
-      count: Math.floor(Math.random() * 5000) + 3000, // 3000-8000 steps
+      count: Math.floor(Math.random() * 5000) + 3000,
       goal: this.stepsGoal,
       distance: Math.floor(Math.random() * 3000) + 1000,
       caloriesBurned: Math.floor(Math.random() * 200) + 100,
@@ -198,18 +229,34 @@ class HealthDataService {
   }
 
   /**
-   * Fetch heart rate from health platform (simulated)
+   * Fetch heart rate from health platform
+   * Note: Real heart rate requires HealthKit (iOS) or Health Connect (Android)
+   * which need native module configuration. Falls back to manual entry.
    */
   private async fetchHeartRateFromPlatform(): Promise<HeartRateData | null> {
-    // In real implementation:
-    // iOS: await HealthKit.getHeartRate({ startDate, endDate })
-    // Android: await HealthConnect.readRecords('HeartRate', { startTime, endTime })
+    // Heart rate monitoring requires native health APIs:
+    // - iOS: HealthKit with NSHealthShareUsageDescription
+    // - Android: Health Connect with appropriate permissions
+    //
+    // For production, integrate:
+    // - expo-apple-healthkit or react-native-healthkit for iOS
+    // - react-native-health-connect for Android
+    //
+    // For now, return null to indicate no automatic reading available
+    // Users can manually log heart rate readings
 
-    return {
-      timestamp: new Date().toISOString(),
-      bpm: Math.floor(Math.random() * 30) + 65, // 65-95 bpm
-      context: 'resting',
-    };
+    if (Platform.OS === 'web') {
+      // Simulated data for web demo
+      return {
+        timestamp: new Date().toISOString(),
+        bpm: Math.floor(Math.random() * 30) + 65,
+        context: 'resting',
+      };
+    }
+
+    // On native, return null - users should manually log heart rate
+    // until proper HealthKit/Health Connect integration is added
+    return null;
   }
 
   /**

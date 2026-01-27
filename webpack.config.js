@@ -60,11 +60,15 @@ module.exports = {
       'expo-background-fetch': path.resolve(__dirname, 'src/web/expo-background-fetch-mock.ts'),
       'expo-task-manager': path.resolve(__dirname, 'src/web/expo-task-manager-mock.ts'),
       'expo-secure-store': path.resolve(__dirname, 'src/web/expo-secure-store-mock.ts'),
+      'expo-image-picker': path.resolve(__dirname, 'src/web/expo-image-picker-mock.ts'),
+      'expo-camera': path.resolve(__dirname, 'src/web/expo-camera-mock.ts'),
+      'expo-contacts': path.resolve(__dirname, 'src/web/expo-contacts-mock.ts'),
       'expo-location': path.resolve(__dirname, 'src/web/expo-location-mock.ts'),
       'expo-localization': path.resolve(__dirname, 'src/web/expo-localization-mock.ts'),
       'expo-speech': path.resolve(__dirname, 'src/web/expo-speech-mock.ts'),
       'expo-local-authentication': path.resolve(__dirname, 'src/web/expo-local-authentication-mock.ts'),
       'expo-calendar': path.resolve(__dirname, 'src/web/expo-calendar-mock.ts'),
+      'expo-sensors': path.resolve(__dirname, 'src/web/expo-sensors-mock.ts'),
       'expo-file-system': path.resolve(__dirname, 'src/web/expo-file-system-mock.ts'),
       '@react-native-community/slider': path.resolve(__dirname, 'src/web/slider-mock.tsx'),
     },
@@ -79,6 +83,7 @@ module.exports = {
     new webpack.DefinePlugin({
       'process.env': JSON.stringify({
         OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+        OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || '',
         TELEMETRY_ENDPOINT: process.env.TELEMETRY_ENDPOINT || '',
         NODE_ENV: process.env.NODE_ENV || 'development',
       }),

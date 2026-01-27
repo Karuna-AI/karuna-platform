@@ -4,6 +4,8 @@
  */
 
 import * as secureStoreMock from './expo-secure-store-mock';
+import * as imagePickerMock from './expo-image-picker-mock';
+import * as cameraMock from './expo-camera-mock';
 
 // expo-document-picker mock
 export const expoDocumentPicker = {
@@ -146,6 +148,14 @@ export const expoTaskManager = {
 // See expo-secure-store-mock.ts for full implementation
 export const expoSecureStore = secureStoreMock;
 
+// expo-image-picker mock - uses native file input on web
+// See expo-image-picker-mock.ts for full implementation
+export const expoImagePicker = imagePickerMock;
+
+// expo-camera mock - uses MediaDevices API on web
+// See expo-camera-mock.ts for full implementation
+export const expoCamera = cameraMock;
+
 // expo-location mock
 export const expoLocation = {
   requestForegroundPermissionsAsync: async () => {
@@ -252,6 +262,8 @@ export default {
   backgroundFetch: expoBackgroundFetch,
   taskManager: expoTaskManager,
   secureStore: expoSecureStore,
+  imagePicker: expoImagePicker,
+  camera: expoCamera,
   location: expoLocation,
   localization: expoLocalization,
 };
