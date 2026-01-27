@@ -30,6 +30,11 @@ const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
+// AI Model Configuration (configurable via environment variables)
+const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini';
+const OPENROUTER_CHAT_MODEL = process.env.OPENROUTER_CHAT_MODEL || 'mistralai/mistral-small-24b-instruct-2501';
+const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'whisper-1';
+
 if (!OPENAI_API_KEY && !OPENROUTER_API_KEY) {
   console.error('ERROR: At least one of OPENAI_API_KEY or OPENROUTER_API_KEY is required');
   process.exit(1);
@@ -332,13 +337,13 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
     let response;
     let provider = 'openai';
 
-    // Try OpenAI first if available (using GPT-4o-mini for cost efficiency)
+    // Try OpenAI first if available
     if (OPENAI_API_KEY) {
       try {
         response = await axios.post(
           `${OPENAI_API_BASE}/chat/completions`,
           {
-            model: 'gpt-4o-mini',  // 99% cheaper than GPT-4
+            model: OPENAI_CHAT_MODEL,
             messages: messagesWithSystem,
             temperature: 0.7,
             max_tokens: 500,
@@ -354,13 +359,13 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
       } catch (openaiError) {
         console.warn('OpenAI failed, attempting fallback:', openaiError.message);
 
-        // Try OpenRouter fallback if available (using Mistral Small for cost efficiency)
+        // Try OpenRouter fallback if available
         if (OPENROUTER_API_KEY) {
           provider = 'openrouter';
           response = await axios.post(
             `${OPENROUTER_API_BASE}/chat/completions`,
             {
-              model: 'mistralai/mistral-small-24b-instruct-2501',  // Very cheap fallback
+              model: OPENROUTER_CHAT_MODEL,
               messages: messagesWithSystem,
               temperature: 0.7,
               max_tokens: 500,
@@ -375,7 +380,7 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
               timeout: 30000,
             }
           );
-          console.log('Fallback to OpenRouter (Mistral Small) successful');
+          console.log(`Fallback to OpenRouter (${OPENROUTER_CHAT_MODEL}) successful`);
         } else {
           throw openaiError; // Re-throw if no fallback available
         }
@@ -386,7 +391,7 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
       response = await axios.post(
         `${OPENROUTER_API_BASE}/chat/completions`,
         {
-          model: 'mistralai/mistral-small-24b-instruct-2501',  // Very cheap
+          model: OPENROUTER_CHAT_MODEL,
           messages: messagesWithSystem,
           temperature: 0.7,
           max_tokens: 500,
@@ -417,7 +422,7 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
       const usage = response.data.usage || {};
       // GPT-4o-mini pricing: $0.15/1M input, $0.60/1M output
       const estimatedCost = ((usage.prompt_tokens || 0) * 0.00000015 + (usage.completion_tokens || 0) * 0.0000006);
-      const modelName = provider === 'openai' ? 'gpt-4o-mini' : 'mistral-small';
+      const modelName = provider === 'openai' ? OPENAI_CHAT_MODEL : OPENROUTER_CHAT_MODEL;
       await db.query(
         `INSERT INTO ai_usage_logs (request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, latency_ms, success)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
