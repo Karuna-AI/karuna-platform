@@ -2028,10 +2028,15 @@ router.post('/circles/:circleId/activity', authMiddleware, async (req, res) => {
 
     let logged = 0;
     for (const activity of activities) {
+      // Support both 'activityType' (camelCase from client) and 'type' (shorthand)
+      const activityType = activity.activityType || activity.type;
+      if (!activityType) {
+        continue; // Skip activities without a type
+      }
       await db.query(
         `INSERT INTO activity_logs (circle_id, activity_type, details, recorded_at, source)
          VALUES ($1, $2, $3, $4, $5)`,
-        [circleId, activity.type, JSON.stringify(activity.details || {}), activity.recordedAt || new Date(), activity.source || 'device']
+        [circleId, activityType, JSON.stringify(activity.details || {}), activity.recordedAt || new Date(), activity.source || 'device']
       );
       logged++;
     }
