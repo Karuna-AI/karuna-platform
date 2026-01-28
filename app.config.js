@@ -13,9 +13,9 @@ const getApiUrl = () => {
     return 'http://localhost:3000';
   }
   if (IS_PREVIEW) {
-    return process.env.PREVIEW_API_URL || 'https://preview-api.karuna.app';
+    return process.env.PREVIEW_API_URL || 'https://karuna-api-production.up.railway.app';
   }
-  return process.env.API_URL || 'https://api.karuna.app';
+  return process.env.API_URL || 'https://karuna-api-production.up.railway.app';
 };
 
 const getAppName = () => {
