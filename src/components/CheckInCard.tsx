@@ -275,7 +275,7 @@ export const CheckInBanner: React.FC<CheckInBannerProps> = ({
           </View>
         )}
       </View>
-      <Text style={styles.bannerChevron}>></Text>
+      <Text style={styles.bannerChevron}>{'>'}</Text>
     </TouchableOpacity>
   );
 };

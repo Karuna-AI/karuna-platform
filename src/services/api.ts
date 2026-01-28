@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import Constants from 'expo-constants';
 import { OpenAIMessage } from '../types';
 import { telemetryService } from './telemetry';
 
@@ -8,11 +9,11 @@ import { telemetryService } from './telemetry';
  * In production, set GATEWAY_URL to your server URL
  * For local development, it uses the local gateway or falls back to direct OpenAI
  */
-const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3021';
-const USE_GATEWAY = process.env.USE_GATEWAY !== 'false';
+const GATEWAY_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3021';
+const USE_GATEWAY = true; // Always use gateway in production
 
-// Fallback to direct OpenAI (development only - remove in production!)
-import { OPENAI_API_KEY } from '@env';
+// Fallback to direct OpenAI (development only - not used in production)
+const OPENAI_API_KEY = ''; // API key should be on server, not in client
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 
 interface ChatResponse {

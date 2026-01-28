@@ -195,7 +195,7 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
               {VITAL_TYPE_INFO.heart_rate ? '💊' : '💊'}
             </Text>
             <Text style={styles.cardTitle}>Medications</Text>
-            <Text style={styles.cardAction}>View All ></Text>
+            <Text style={styles.cardAction}>View All {'>'}</Text>
           </View>
           <View style={styles.medContent}>
             <View style={styles.medStats}>

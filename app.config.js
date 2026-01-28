@@ -27,7 +27,7 @@ const getAppName = () => {
 module.exports = {
   expo: {
     name: getAppName(),
-    slug: 'karuna',
+    slug: 'karuna-ai',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -84,7 +84,6 @@ module.exports = {
       bundler: 'metro',
     },
     plugins: [
-      'expo-router',
       [
         'expo-image-picker',
         {
@@ -98,7 +97,7 @@ module.exports = {
         {
           icon: './assets/notification-icon.png',
           color: '#4F46E5',
-          sounds: ['./assets/notification-sound.wav'],
+          sounds: ['./assets/notification_sound.wav'],
         },
       ],
       [
@@ -118,18 +117,13 @@ module.exports = {
     extra: {
       apiUrl: getApiUrl(),
       eas: {
-        projectId: process.env.EAS_PROJECT_ID || 'your-project-id-here',
+        projectId: 'b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
       },
     },
-    owner: process.env.EXPO_OWNER || 'your-expo-username',
-    runtimeVersion: {
-      policy: 'appVersion',
-    },
+    owner: process.env.EXPO_OWNER || 'snehal2026',
+    runtimeVersion: '1.0.0',
     updates: {
-      url: `https://u.expo.dev/${process.env.EAS_PROJECT_ID || 'your-project-id-here'}`,
-    },
-    experiments: {
-      typedRoutes: true,
+      url: 'https://u.expo.dev/b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
     },
   },
 };

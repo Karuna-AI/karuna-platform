@@ -1,11 +1,4 @@
-import AudioRecorderPlayer, {
-  AudioSet,
-  AVEncoderAudioQualityIOSType,
-  AVEncodingOption,
-  AudioSourceAndroidType,
-  OutputFormatAndroidType,
-  AudioEncoderAndroidType,
-} from 'react-native-audio-recorder-player';
+import { Audio } from 'expo-av';
 import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
 
@@ -29,14 +22,28 @@ export class RecordingException extends Error {
 }
 
 class VoiceRecorder {
-  private audioRecorderPlayer: AudioRecorderPlayer;
-  private currentRecordingPath: string | null = null;
+  private recording: Audio.Recording | null = null;
   private recordingDuration: number = 0;
   private lastPermissionResult: PermissionResult | null = null;
+  private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.audioRecorderPlayer = new AudioRecorderPlayer();
-    this.audioRecorderPlayer.setSubscriptionDuration(0.1);
+    // Configure audio mode for recording
+    this.configureAudio();
+  }
+
+  private async configureAudio(): Promise<void> {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error('Error configuring audio mode:', error);
+    }
   }
 
   /**
@@ -90,33 +97,53 @@ class VoiceRecorder {
       );
     }
 
-    const audioSet: AudioSet = {
-      AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-      AudioSourceAndroid: AudioSourceAndroidType.MIC,
-      AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
-      AVNumberOfChannelsKeyIOS: 1,
-      AVFormatIDKeyIOS: AVEncodingOption.aac,
-      OutputFormatAndroid: OutputFormatAndroidType.AAC_ADTS,
-    };
-
-    const path = Platform.select({
-      ios: 'karuna_recording.m4a',
-      android: `${Date.now()}_karuna_recording.m4a`,
-    });
+    // Ensure audio mode is configured for recording
+    await this.configureAudio();
 
     try {
-      const uri = await this.audioRecorderPlayer.startRecorder(path, audioSet);
-      this.currentRecordingPath = uri;
+      // Create a new recording instance
+      const { recording } = await Audio.Recording.createAsync(
+        {
+          android: {
+            extension: '.m4a',
+            outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+            audioEncoder: Audio.AndroidAudioEncoder.AAC,
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          ios: {
+            extension: '.m4a',
+            outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+            audioQuality: Audio.IOSAudioQuality.HIGH,
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            bitRate: 128000,
+            linearPCMBitDepth: 16,
+            linearPCMIsBigEndian: false,
+            linearPCMIsFloat: false,
+          },
+          web: {
+            mimeType: 'audio/webm',
+            bitsPerSecond: 128000,
+          },
+        },
+        (status) => {
+          if (status.isRecording && status.durationMillis !== undefined) {
+            this.recordingDuration = status.durationMillis;
+            if (onProgress) {
+              onProgress(status.durationMillis);
+            }
+          }
+        },
+        100 // Update interval in ms
+      );
+
+      this.recording = recording;
       this.recordingDuration = 0;
 
-      this.audioRecorderPlayer.addRecordBackListener((e) => {
-        this.recordingDuration = e.currentPosition;
-        if (onProgress) {
-          onProgress(e.currentPosition);
-        }
-      });
-
-      return uri;
+      const uri = recording.getURI();
+      return uri || '';
     } catch (error) {
       console.error('Start recording error:', error);
       if (error instanceof RecordingException) {
@@ -132,13 +159,29 @@ class VoiceRecorder {
 
   async stopRecording(): Promise<{ path: string; duration: number }> {
     try {
-      const result = await this.audioRecorderPlayer.stopRecorder();
-      this.audioRecorderPlayer.removeRecordBackListener();
+      if (!this.recording) {
+        throw new RecordingException(
+          'recording_failed',
+          'No active recording to stop.',
+          true
+        );
+      }
 
-      const duration = this.recordingDuration;
-      const path = this.currentRecordingPath || result;
+      // Get the status before stopping
+      const status = await this.recording.getStatusAsync();
+      const duration = status.durationMillis || this.recordingDuration;
 
-      this.currentRecordingPath = null;
+      // Stop and unload the recording
+      await this.recording.stopAndUnloadAsync();
+
+      // Reset audio mode for playback
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const uri = this.recording.getURI();
+      this.recording = null;
       this.recordingDuration = 0;
 
       if (duration < 500) {
@@ -149,9 +192,10 @@ class VoiceRecorder {
         );
       }
 
-      return { path, duration };
+      return { path: uri || '', duration };
     } catch (error) {
-      this.audioRecorderPlayer.removeRecordBackListener();
+      this.recording = null;
+      this.recordingDuration = 0;
 
       if (error instanceof RecordingException) {
         throw error;
@@ -168,12 +212,21 @@ class VoiceRecorder {
 
   async cancelRecording(): Promise<void> {
     try {
-      await this.audioRecorderPlayer.stopRecorder();
-      this.audioRecorderPlayer.removeRecordBackListener();
-      this.currentRecordingPath = null;
-      this.recordingDuration = 0;
+      if (this.recording) {
+        await this.recording.stopAndUnloadAsync();
+        this.recording = null;
+        this.recordingDuration = 0;
+
+        // Reset audio mode
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+      }
     } catch (error) {
       console.error('Cancel recording error:', error);
+      this.recording = null;
+      this.recordingDuration = 0;
     }
   }
 
@@ -182,7 +235,7 @@ class VoiceRecorder {
   }
 
   isRecording(): boolean {
-    return this.currentRecordingPath !== null;
+    return this.recording !== null;
   }
 }
 

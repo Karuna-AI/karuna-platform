@@ -6,8 +6,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
-import { Platform } from 'react-native';
-import { OPENWEATHER_API_KEY } from '@env';
+import Constants from 'expo-constants';
 import { WeatherCondition } from '../types/proactive';
 import { logger } from './logger';
 
@@ -63,8 +62,8 @@ class WeatherService {
   private isInitialized: boolean = false;
 
   constructor() {
-    // Load API key from environment variable
-    this.apiKey = OPENWEATHER_API_KEY || '';
+    // Load API key from app config
+    this.apiKey = Constants.expoConfig?.extra?.openWeatherApiKey || '';
 
     if (this.apiKey) {
       logger.weather.info('OpenWeatherMap API configured');
