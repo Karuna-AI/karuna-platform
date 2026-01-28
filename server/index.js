@@ -63,6 +63,11 @@ if (!process.env.ADMIN_JWT_SECRET) {
 // Middleware
 // ============================================================================
 
+// Trust proxy for Railway/Vercel/etc (required for rate limiting behind reverse proxy)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Security headers
 app.use(helmet());
 
