@@ -67,7 +67,7 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 2,
+      versionCode: 3,
       targetSdkVersion: 35,
       compileSdkVersion: 35,
       permissions: [
@@ -86,6 +86,16 @@ module.exports = {
       bundler: 'metro',
     },
     plugins: [
+      [
+        'expo-build-properties',
+        {
+          android: {
+            compileSdkVersion: 35,
+            targetSdkVersion: 35,
+            minSdkVersion: 24,
+          },
+        },
+      ],
       [
         'expo-image-picker',
         {
