@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { ChatProvider } from './context/ChatContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ChatScreen } from './components/ChatScreen';
@@ -9,6 +9,9 @@ import { VaultScreen } from './components/VaultScreen';
 import { VaultAccountScreen } from './components/VaultAccountScreen';
 import { VaultMedicationScreen } from './components/VaultMedicationScreen';
 import { VaultDocumentScreen } from './components/VaultDocumentScreen';
+import { VaultDoctorScreen } from './components/VaultDoctorScreen';
+import { VaultAppointmentScreen } from './components/VaultAppointmentScreen';
+import { VaultContactScreen } from './components/VaultContactScreen';
 import CareCircleScreen from './components/CareCircleScreen';
 import LockScreen from './components/LockScreen';
 import SecuritySettingsScreen from './components/SecuritySettingsScreen';
@@ -42,15 +45,20 @@ import { calendarService } from './services/calendar';
 import { CheckInBanner, CheckInOverlay } from './components/CheckInCard';
 import { ProactiveSettingsScreen } from './components/ProactiveSettingsScreen';
 import { CheckIn } from './types/proactive';
+import { onboardingStore } from './services/onboardingStore';
+import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 
 // Gateway URL - configure for your environment
-const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3021';
+const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
 
 type Screen = 'chat' | 'settings' | 'vault' | 'vault_accounts' | 'vault_medications' | 'vault_documents' | 'vault_doctors' | 'vault_appointments' | 'vault_contacts' | 'care_circle' | 'security' | 'consent' | 'audit_log' | 'health_dashboard' | 'proactive_settings';
 
 function App(): JSX.Element {
   // Navigation state
   const [currentScreen, setCurrentScreen] = useState<Screen>('chat');
+
+  // Onboarding state (null = still loading)
+  const [isOnboardingComplete, setIsOnboardingComplete] = useState<boolean | null>(null);
 
   // Security state
   const [isAppLocked, setIsAppLocked] = useState(false);
@@ -82,6 +90,10 @@ function App(): JSX.Element {
         await encryptedDatabaseService.open();
         console.log('Security services initialized');
 
+        // Initialize onboarding store
+        await onboardingStore.initialize();
+        setIsOnboardingComplete(onboardingStore.isComplete());
+
         // Check if app lock is required
         if (biometricAuthService.requiresAuthentication('app')) {
           setIsAppLocked(true);
@@ -103,16 +115,18 @@ function App(): JSX.Element {
       // Initialize telemetry
       telemetryService.initialize(GATEWAY_URL);
 
-      // Check gateway health
-      try {
-        const isHealthy = await checkGatewayHealth();
-        if (!isHealthy) {
-          console.warn('AI Gateway is not available - using fallback mode');
-        } else {
-          console.log('AI Gateway connected successfully');
+      // Check gateway health (skip on web to avoid CORS errors)
+      if (Platform.OS !== 'web') {
+        try {
+          const isHealthy = await checkGatewayHealth();
+          if (!isHealthy) {
+            console.warn('AI Gateway is not available - using fallback mode');
+          } else {
+            console.debug('AI Gateway connected successfully');
+          }
+        } catch (error) {
+          console.error('Failed to connect to AI Gateway:', error);
         }
-      } catch (error) {
-        console.error('Failed to connect to AI Gateway:', error);
       }
 
       // Load contacts
@@ -532,6 +546,20 @@ function App(): JSX.Element {
 
   // Render current screen
   const renderScreen = () => {
+    // Show nothing while loading onboarding state
+    if (isOnboardingComplete === null) {
+      return null;
+    }
+
+    // Show onboarding if not complete
+    if (!isOnboardingComplete) {
+      return (
+        <OnboardingFlow
+          onComplete={() => setIsOnboardingComplete(true)}
+        />
+      );
+    }
+
     // Show app lock screen if required
     if (isAppLocked && isSecurityInitialized) {
       return (
@@ -584,15 +612,13 @@ function App(): JSX.Element {
         return <VaultDocumentScreen onClose={handleVaultSubClose} />;
 
       case 'vault_doctors':
+        return <VaultDoctorScreen onClose={handleVaultSubClose} />;
+
       case 'vault_appointments':
+        return <VaultAppointmentScreen onClose={handleVaultSubClose} />;
+
       case 'vault_contacts':
-        // Placeholder for other vault screens - reuse existing or create new
-        return (
-          <VaultScreen
-            onClose={handleCloseVault}
-            onNavigate={handleVaultNavigate}
-          />
-        );
+        return <VaultContactScreen onClose={handleVaultSubClose} />;
 
       case 'care_circle':
         return <CareCircleScreen onBack={handleCloseCareCircle} />;

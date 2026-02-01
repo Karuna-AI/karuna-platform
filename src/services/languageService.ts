@@ -46,7 +46,7 @@ class LanguageService {
     // Load available TTS voices
     await this.loadAvailableTTSVoices();
 
-    console.log(`[LanguageService] Initialized with language: ${languageCode}`);
+    console.debug(`[LanguageService] Initialized with language: ${languageCode}`);
     return languageCode;
   }
 
@@ -108,7 +108,7 @@ class LanguageService {
   setLanguage(code: LanguageCode): void {
     if (code in LANGUAGES) {
       this.currentLanguage = code;
-      console.log(`[LanguageService] Language set to: ${code}`);
+      console.debug(`[LanguageService] Language set to: ${code}`);
     } else {
       console.warn(`[LanguageService] Unknown language code: ${code}`);
     }

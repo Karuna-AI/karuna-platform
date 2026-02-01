@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
+import { Platform } from 'react-native';
 import { auditLogService } from './auditLog';
 import { consentService } from './consent';
 import { MedicalRecord, MedicalRecordType, MEDICAL_RECORD_CATEGORIES } from '../types/health';
@@ -9,7 +10,7 @@ const STORAGE_KEYS = {
   RECORDS: '@karuna_medical_records',
 };
 
-const DOCUMENTS_DIR = `${FileSystem.documentDirectory}medical_records/`;
+const DOCUMENTS_DIR = Platform.OS !== 'web' ? `${FileSystem.documentDirectory}medical_records/` : '';
 
 /**
  * Medical Records Service
@@ -23,10 +24,12 @@ class MedicalRecordsService {
     if (this.isInitialized) return;
 
     try {
-      // Ensure documents directory exists
-      const dirInfo = await FileSystem.getInfoAsync(DOCUMENTS_DIR);
-      if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(DOCUMENTS_DIR, { intermediates: true });
+      // Ensure documents directory exists (native only)
+      if (Platform.OS !== 'web') {
+        const dirInfo = await FileSystem.getInfoAsync(DOCUMENTS_DIR);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(DOCUMENTS_DIR, { intermediates: true });
+        }
       }
 
       // Load stored records
@@ -102,8 +105,8 @@ class MedicalRecordsService {
     let fileUri: string | undefined;
     let thumbnail: string | undefined;
 
-    // Copy document to app storage if provided
-    if (params.documentUri) {
+    // Copy document to app storage if provided (native only)
+    if (params.documentUri && Platform.OS !== 'web') {
       try {
         const extension = params.documentName?.split('.').pop() || 'pdf';
         const destPath = `${DOCUMENTS_DIR}${recordId}.${extension}`;
@@ -194,8 +197,8 @@ class MedicalRecordsService {
 
     const record = this.records[index];
 
-    // Delete the file if it exists
-    if (record.fileUri) {
+    // Delete the file if it exists (native only)
+    if (record.fileUri && Platform.OS !== 'web') {
       try {
         await FileSystem.deleteAsync(record.fileUri, { idempotent: true });
       } catch (error) {
@@ -362,6 +365,10 @@ class MedicalRecordsService {
       throw new Error('Consent not granted for AI access to medical documents');
     }
 
+    if (Platform.OS === 'web') {
+      return null;
+    }
+
     try {
       const content = await FileSystem.readAsStringAsync(record.fileUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -425,13 +432,15 @@ class MedicalRecordsService {
    * Clear all records (with confirmation)
    */
   async clearAllRecords(): Promise<void> {
-    // Delete all files
-    for (const record of this.records) {
-      if (record.fileUri) {
-        try {
-          await FileSystem.deleteAsync(record.fileUri, { idempotent: true });
-        } catch (error) {
-          console.error('[MedicalRecords] File delete error:', error);
+    // Delete all files (native only)
+    if (Platform.OS !== 'web') {
+      for (const record of this.records) {
+        if (record.fileUri) {
+          try {
+            await FileSystem.deleteAsync(record.fileUri, { idempotent: true });
+          } catch (error) {
+            console.error('[MedicalRecords] File delete error:', error);
+          }
         }
       }
     }

@@ -9,6 +9,7 @@ import {
   PanResponder,
   GestureResponderEvent,
   PanResponderGestureState,
+  Platform,
 } from 'react-native';
 import {
   getColors,
@@ -386,11 +387,15 @@ const styles = StyleSheet.create({
     borderRadius: TOUCH_TARGETS.voiceButton / 2,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: { boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.25)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+      },
+    }),
   },
   iconContainer: {
     justifyContent: 'center',

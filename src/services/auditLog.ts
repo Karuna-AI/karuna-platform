@@ -9,6 +9,8 @@ export type AuditCategory =
   | 'vault'
   | 'consent'
   | 'caregiver'
+  | 'care_circle'
+  | 'ai'
   | 'data_access'
   | 'data_modification'
   | 'system';
@@ -105,7 +107,7 @@ class AuditLogService {
         await this.pruneOldEntries();
       }
       this.isInitialized = true;
-      console.log('[AuditLog] Initialized with', this.logs.length, 'entries');
+      console.debug('[AuditLog] Initialized with', this.logs.length, 'entries');
     } catch (error) {
       console.error('[AuditLog] Initialization error:', error);
       this.logs = [];
@@ -367,7 +369,7 @@ class AuditLogService {
     );
 
     if (this.logs.length < originalCount) {
-      console.log(
+      console.debug(
         '[AuditLog] Pruned',
         originalCount - this.logs.length,
         'old entries'

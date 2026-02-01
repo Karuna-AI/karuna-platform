@@ -9,12 +9,7 @@ import { telemetryService } from './telemetry';
  * In production, set GATEWAY_URL to your server URL
  * For local development, it uses the local gateway or falls back to direct OpenAI
  */
-const GATEWAY_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3021';
-const USE_GATEWAY = true; // Always use gateway in production
-
-// Fallback to direct OpenAI (development only - not used in production)
-const OPENAI_API_KEY = ''; // API key should be on server, not in client
-const OPENAI_API_BASE = 'https://api.openai.com/v1';
+const GATEWAY_URL = Constants.expoConfig?.extra?.apiUrl || 'https://karuna-api-production.up.railway.app';
 
 interface ChatResponse {
   message: string;
@@ -36,11 +31,7 @@ export async function sendChatMessage(
   messages: OpenAIMessage[],
   memoryContext?: string
 ): Promise<string> {
-  if (USE_GATEWAY) {
-    return sendChatViaGateway(messages, memoryContext);
-  } else {
-    return sendChatDirect(messages);
-  }
+  return sendChatViaGateway(messages, memoryContext);
 }
 
 /**
@@ -98,46 +89,10 @@ async function sendChatViaGateway(
 }
 
 /**
- * Chat direct to OpenAI (development fallback - REMOVE IN PRODUCTION)
- */
-async function sendChatDirect(messages: OpenAIMessage[]): Promise<string> {
-  console.warn('[API] Using direct OpenAI connection - NOT SECURE FOR PRODUCTION');
-
-  try {
-    const response = await axios.post(
-      `${OPENAI_API_BASE}/chat/completions`,
-      {
-        model: 'gpt-4',
-        messages,
-        temperature: 0.7,
-        max_tokens: 500,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        timeout: 30000,
-      }
-    );
-
-    return response.data.choices[0]?.message?.content || '';
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    telemetryService.trackChatError(axiosError.message, axiosError.response?.status);
-    throw new Error('Unable to get response. Please try again.');
-  }
-}
-
-/**
  * Transcribe audio via gateway
  */
 export async function transcribeAudio(audioBlob: Blob, language = 'en'): Promise<string> {
-  if (USE_GATEWAY) {
-    return transcribeViaGateway(audioBlob, language);
-  } else {
-    return transcribeDirect(audioBlob, language);
-  }
+  return transcribeViaGateway(audioBlob, language);
 }
 
 /**
@@ -183,42 +138,9 @@ async function transcribeViaGateway(audioBlob: Blob, language: string): Promise<
 }
 
 /**
- * STT direct to OpenAI (development fallback)
- */
-async function transcribeDirect(audioBlob: Blob, language: string): Promise<string> {
-  console.warn('[API] Using direct OpenAI STT - NOT SECURE FOR PRODUCTION');
-
-  try {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.webm');
-    formData.append('model', 'whisper-1');
-    formData.append('language', language);
-
-    const response = await axios.post(
-      `${OPENAI_API_BASE}/audio/transcriptions`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        timeout: 60000,
-      }
-    );
-
-    return response.data.text;
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    telemetryService.trackSTTFailure(axiosError.message);
-    throw new Error('Could not understand the audio. Please try again.');
-  }
-}
-
-/**
  * Send telemetry event to gateway
  */
 export async function sendTelemetry(event: string, data: Record<string, any>): Promise<void> {
-  if (!USE_GATEWAY) return;
 
   try {
     await axios.post(
@@ -239,8 +161,7 @@ export async function sendTelemetry(event: string, data: Record<string, any>): P
  * Check gateway health
  */
 export async function checkGatewayHealth(): Promise<boolean> {
-  if (!USE_GATEWAY) return true;
-
+  
   try {
     const response = await axios.get(`${GATEWAY_URL}/health`, { timeout: 5000 });
     return response.data.status === 'healthy';
@@ -253,8 +174,7 @@ export async function checkGatewayHealth(): Promise<boolean> {
  * Get gateway metrics (for debugging)
  */
 export async function getGatewayMetrics(): Promise<any> {
-  if (!USE_GATEWAY) return null;
-
+  
   try {
     const response = await axios.get(`${GATEWAY_URL}/metrics`, { timeout: 5000 });
     return response.data;

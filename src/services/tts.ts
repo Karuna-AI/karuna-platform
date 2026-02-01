@@ -28,6 +28,13 @@ class TextToSpeechService {
     }
 
     try {
+      if (Platform.OS === 'web') {
+        // react-native-tts is not available on web; use Web Speech API fallback
+        this.isInitialized = true;
+        console.debug('[TTS] Web platform - using Web Speech API fallback');
+        return;
+      }
+
       await Tts.getInitStatus();
 
       // Load available voices for language selection
@@ -57,7 +64,7 @@ class TextToSpeechService {
       });
 
       this.isInitialized = true;
-      console.log(`[TTS] Initialized with language: ${deviceLanguage}`);
+      console.debug(`[TTS] Initialized with language: ${deviceLanguage}`);
     } catch (error) {
       console.error('TTS initialization error:', error);
 
@@ -82,7 +89,7 @@ class TextToSpeechService {
   private async loadAvailableVoices(): Promise<void> {
     try {
       this.availableVoices = await Tts.voices();
-      console.log(`[TTS] Loaded ${this.availableVoices.length} voices`);
+      console.debug(`[TTS] Loaded ${this.availableVoices.length} voices`);
     } catch (error) {
       console.error('[TTS] Error loading voices:', error);
       this.availableVoices = [];
@@ -129,6 +136,8 @@ class TextToSpeechService {
    */
   async setLanguage(language: LanguageCode): Promise<void> {
     this.currentLanguage = language;
+    if (Platform.OS === 'web') return;
+
     const config = getLanguageConfig(language);
     const pipelineConfig = languageService.getVoicePipelineConfig(language);
 
@@ -150,7 +159,7 @@ class TextToSpeechService {
 
         if (matchingVoice) {
           await this.setVoice(matchingVoice.id);
-          console.log(`[TTS] Selected voice: ${matchingVoice.name} for ${language}`);
+          console.debug(`[TTS] Selected voice: ${matchingVoice.name} for ${language}`);
           return;
         }
       }
@@ -159,7 +168,7 @@ class TextToSpeechService {
       const languageVoices = this.getVoicesForLanguage(language);
       if (languageVoices.length > 0) {
         await this.setVoice(languageVoices[0].id);
-        console.log(`[TTS] Using fallback voice: ${languageVoices[0].name} for ${language}`);
+        console.debug(`[TTS] Using fallback voice: ${languageVoices[0].name} for ${language}`);
       } else {
         console.warn(`[TTS] No voice found for language: ${language}`);
       }
@@ -215,6 +224,25 @@ class TextToSpeechService {
     }
 
     try {
+      if (Platform.OS === 'web') {
+        // Use Web Speech API on web
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = this.currentLanguage;
+          utterance.onstart = () => {
+            this.isSpeaking = true;
+            this.onSpeakStartCallbacks.forEach((cb) => cb());
+          };
+          utterance.onend = () => {
+            this.isSpeaking = false;
+            this.onSpeakFinishCallbacks.forEach((cb) => cb());
+            this.processQueue();
+          };
+          window.speechSynthesis.speak(utterance);
+        }
+        return;
+      }
       await Tts.speak(text);
     } catch (error) {
       console.error('TTS speak error:', error);
@@ -233,6 +261,13 @@ class TextToSpeechService {
 
   async stop(): Promise<void> {
     try {
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+        this.isSpeaking = false;
+        return;
+      }
       await Tts.stop();
       this.isSpeaking = false;
     } catch (error) {

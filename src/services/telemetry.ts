@@ -12,7 +12,27 @@ export type TelemetryEvent =
   | 'action_cancelled'
   | 'emergency_call'
   | 'chat_error'
-  | 'network_error';
+  | 'network_error'
+  | 'call_executed'
+  // Onboarding events
+  | 'onboarding_started'
+  | 'onboarding_role_selected'
+  | 'onboarding_language_selected'
+  | 'onboarding_voice_tested'
+  | 'onboarding_permission_mic_granted'
+  | 'onboarding_permission_mic_denied'
+  | 'onboarding_permission_mic_skipped'
+  | 'onboarding_permission_notify_granted'
+  | 'onboarding_permission_notify_denied'
+  | 'onboarding_permission_notify_skipped'
+  | 'onboarding_security_setup'
+  | 'onboarding_security_skipped'
+  | 'onboarding_quick_setup_saved'
+  | 'onboarding_caregiver_invite_shared'
+  | 'onboarding_caregiver_invite_skipped'
+  | 'onboarding_tutorial_viewed'
+  | 'onboarding_completed'
+  | 'onboarding_skipped';
 
 export interface TelemetryData {
   errorType?: string;
@@ -52,7 +72,7 @@ class TelemetryService {
     }
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL);
 
-    console.log('Telemetry service initialized');
+    console.debug('Telemetry service initialized');
   }
 
   /**
@@ -87,7 +107,7 @@ class TelemetryService {
     });
 
     // Log locally for debugging
-    console.log(`[Telemetry] ${event}`, enrichedData);
+    console.debug(`[Telemetry] ${event}`, enrichedData);
 
     // Auto-flush if queue is full
     if (this.queue.length >= BATCH_SIZE) {
@@ -171,9 +191,9 @@ class TelemetryService {
     const events = [...this.queue];
     this.queue = [];
 
-    // If no gateway URL, just log locally
-    if (!this.gatewayUrl) {
-      console.log('[Telemetry] No gateway URL - events logged locally only');
+    // If no gateway URL or on web (CORS issues), just log locally
+    if (!this.gatewayUrl || Platform.OS === 'web') {
+      console.debug('[Telemetry] No gateway URL or web platform - events logged locally only');
       return;
     }
 

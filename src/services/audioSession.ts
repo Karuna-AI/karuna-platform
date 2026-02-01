@@ -57,7 +57,7 @@ class AudioSessionService {
 
     if (wasActive && !isNowActive) {
       // App went to background
-      console.log('[AudioSession] App moved to background');
+      console.debug('[AudioSession] App moved to background');
 
       // If recording, we should stop safely
       if (this.isRecording) {
@@ -67,7 +67,7 @@ class AudioSessionService {
       this.callbacks.onAppBackground?.();
     } else if (!wasActive && isNowActive) {
       // App came to foreground
-      console.log('[AudioSession] App moved to foreground');
+      console.debug('[AudioSession] App moved to foreground');
       this.callbacks.onAppForeground?.();
     }
 
@@ -93,7 +93,7 @@ class AudioSessionService {
    * This should be called from native code via event emitter
    */
   handleInterruptionBegan(): void {
-    console.log('[AudioSession] Audio interruption began');
+    console.debug('[AudioSession] Audio interruption began');
 
     if (this.isRecording) {
       this.callbacks.onInterruptionBegan?.();
@@ -104,7 +104,7 @@ class AudioSessionService {
    * Handle audio interruption ended
    */
   handleInterruptionEnded(): void {
-    console.log('[AudioSession] Audio interruption ended');
+    console.debug('[AudioSession] Audio interruption ended');
     this.callbacks.onInterruptionEnded?.();
   }
 

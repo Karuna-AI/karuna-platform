@@ -1,4 +1,6 @@
 import { Linking, Platform, Alert } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { SchedulableTriggerInputTypes } from 'expo-notifications';
 import { Contact, contactsService } from './contacts';
 import { ParsedIntent, IntentType } from '../types';
 import { telemetryService } from './telemetry';
@@ -261,7 +263,7 @@ class IntentActionsService {
       if (canOpen) {
         await Linking.openURL(url);
         // Track successful call execution (no PII - just the action type)
-        telemetryService.track('action_cancelled', { errorType: 'call_executed' });
+        telemetryService.track('call_executed', { actionType: 'phone_call' });
         return true;
       } else {
         Alert.alert(
@@ -415,8 +417,28 @@ class IntentActionsService {
         return true;
       }
 
-      // For native, we would use a notification library here
-      // This is a placeholder for native implementation
+      // Schedule native notification via expo-notifications
+      try {
+        const delay = time.getTime() - Date.now();
+        if (delay > 0) {
+          const notificationId = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Karuna Reminder',
+              body: message,
+              sound: true,
+              data: { reminderId: reminder.id },
+            },
+            trigger: {
+              type: SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: Math.floor(delay / 1000),
+            },
+          });
+          reminder.notificationId = notificationId;
+        }
+      } catch (notifError) {
+        console.warn('[Reminders] Native notification scheduling failed:', notifError);
+      }
+
       this.pendingReminders.push(reminder);
 
       Alert.alert(

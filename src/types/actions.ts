@@ -74,6 +74,7 @@ export interface ActionResult {
   error?: string;
   requiresConfirmation?: boolean;
   confirmationData?: ActionConfirmation;
+  data?: Record<string, any>;
 }
 
 // Action Confirmation

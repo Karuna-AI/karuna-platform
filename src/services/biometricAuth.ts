@@ -80,7 +80,7 @@ class BiometricAuthService {
       this.lastAuthTime = lastAuthTime ? parseInt(lastAuthTime, 10) : 0;
       this.authTimeoutMinutes = authTimeout ? parseInt(authTimeout, 10) : DEFAULT_AUTH_TIMEOUT;
 
-      console.log('[BiometricAuth] Initialized:', {
+      console.debug('[BiometricAuth] Initialized:', {
         hasPIN: !!this.pinHash,
         biometricEnabled: this.biometricEnabled,
         appLockEnabled: this.appLockEnabled,
@@ -246,7 +246,7 @@ class BiometricAuthService {
           this.pinHash = newHash;
           this.pinSalt = salt;
 
-          console.log('[BiometricAuth] Migrated legacy PIN hash to secure format');
+          console.debug('[BiometricAuth] Migrated legacy PIN hash to secure format');
         }
       } else if (this.pinSalt) {
         // Verify with secure method

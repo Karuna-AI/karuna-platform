@@ -4,6 +4,7 @@ import {
   Linking,
   Alert,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
 export type PermissionStatus =
   | 'granted'
@@ -138,6 +139,27 @@ class PermissionsService {
     }
 
     return { status: 'granted', canAskAgain: true };
+  }
+
+  /**
+   * Request notification permission
+   */
+  async requestNotificationPermission(): Promise<PermissionResult> {
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      if (existingStatus === 'granted') {
+        return { status: 'granted', canAskAgain: true };
+      }
+
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status === 'granted') {
+        return { status: 'granted', canAskAgain: true };
+      }
+      return { status: 'denied', canAskAgain: false };
+    } catch (error) {
+      console.error('Notification permission error:', error);
+      return { status: 'denied', canAskAgain: true };
+    }
   }
 
   /**

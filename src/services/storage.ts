@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Message } from '../types';
+import { LanguageCode } from '../i18n/languages';
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -46,7 +47,7 @@ export interface UserPreferences {
 
 export type FontSize = 'small' | 'medium' | 'large' | 'extraLarge';
 export type SpeechRate = 0.7 | 0.8 | 0.9 | 1.0;
-export type Language = 'en' | 'hi' | 'es' | 'zh';
+export type Language = LanguageCode;
 
 export interface EmergencyContact {
   id: string;

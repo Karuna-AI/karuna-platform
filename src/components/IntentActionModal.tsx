@@ -18,7 +18,7 @@ import {
   announceForAccessibility,
 } from '../utils/accessibility';
 import { Contact, ContactSearchResult, contactsService } from '../services/contacts';
-import { ConfirmationData } from '../services/intentActions';
+import { ConfirmationData, intentActionsService } from '../services/intentActions';
 import { ActionConfirmation } from '../types/actions';
 
 interface IntentActionModalProps {
@@ -300,8 +300,10 @@ export function IntentActionModal({
             {/* WhatsApp option */}
             <TouchableOpacity
               style={[styles.whatsappButton, { backgroundColor: '#25D366' }]}
-              onPress={() => {
-                // Handle WhatsApp send
+              onPress={async () => {
+                const phone = confirmationData?.phoneNumber || '';
+                await intentActionsService.executeWhatsApp(phone, messageText);
+                onCancel();
               }}
               accessible={true}
               accessibilityLabel="Send via WhatsApp"

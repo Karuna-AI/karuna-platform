@@ -45,7 +45,7 @@ const LATIN_TO_DEVANAGARI: Record<string, string> = {
   'kya': 'क्या', 'hai': 'है', 'hain': 'हैं', 'ho': 'हो',
   'mein': 'में', 'main': 'मैं', 'aur': 'और', 'ke': 'के',
   'ki': 'की', 'ko': 'को', 'se': 'से', 'ne': 'ने',
-  'ka': 'का', 'par': 'पर', 'bhi': 'भी', 'hi': 'ही',
+  'par': 'पर', 'bhi': 'भी', 'hi': 'ही',
   'nahi': 'नहीं', 'nahin': 'नहीं', 'haan': 'हाँ', 'ji': 'जी',
   'namaste': 'नमस्ते', 'dhanyavaad': 'धन्यवाद',
   'kaise': 'कैसे', 'kaisa': 'कैसा', 'kaisi': 'कैसी',

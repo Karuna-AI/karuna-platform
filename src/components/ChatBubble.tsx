@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, AccessibilityInfo } from 'react-native';
+import { View, Text, StyleSheet, AccessibilityInfo, Platform } from 'react-native';
 import { Message } from '../types';
 import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
 
@@ -95,11 +95,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm + 2,
     borderRadius: 20,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...Platform.select({
+      web: { boxShadow: '0px 1px 2px rgba(0, 0, 0, 0.1)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      },
+    }),
   },
   userBubble: {
     borderBottomRightRadius: 4,

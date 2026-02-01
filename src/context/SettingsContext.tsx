@@ -123,7 +123,7 @@ export function SettingsProvider({ children }: SettingsProviderProps): JSX.Eleme
           setSettings({ ...DEFAULT_SETTINGS, language: deviceLanguage });
         }
 
-        console.log(`[Settings] Loaded with language: ${saved?.language || deviceLanguage}`);
+        console.debug(`[Settings] Loaded with language: ${saved?.language || deviceLanguage}`);
       } catch (error) {
         console.error('Error loading settings:', error);
       } finally {
@@ -184,7 +184,7 @@ export function SettingsProvider({ children }: SettingsProviderProps): JSX.Eleme
       console.error('[Settings] Error updating TTS language:', error);
     }
 
-    console.log(`[Settings] Language changed to: ${language}`);
+    console.debug(`[Settings] Language changed to: ${language}`);
   }, [updateSettings]);
 
   // Language helpers

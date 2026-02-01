@@ -65,7 +65,7 @@ class HealthDataService {
       }
 
       this.isInitialized = true;
-      console.log('[HealthData] Initialized with', this.vitals.length, 'readings');
+      console.debug('[HealthData] Initialized with', this.vitals.length, 'readings');
     } catch (error) {
       console.error('[HealthData] Initialization error:', error);
       this.isInitialized = true;
@@ -86,19 +86,33 @@ class HealthDataService {
       return { granted: [], denied: types };
     }
 
-    // In a real implementation, this would call platform-specific APIs
-    // For now, we'll simulate permission granting
-    if (Platform.OS === 'ios') {
-      // Would call: await HealthKit.requestAuthorization(types)
-      console.log('[HealthData] iOS HealthKit permission request for:', types);
-    } else if (Platform.OS === 'android') {
-      // Would call: await HealthConnect.requestPermissions(types)
-      console.log('[HealthData] Android Health Connect permission request for:', types);
-    }
-
-    // Simulate granting permissions (in real app, this comes from the API)
-    const granted = types;
+    // Platform-specific health API permissions
+    // Steps use expo-sensors Pedometer (works cross-platform)
+    // Heart rate, blood pressure, etc. require HealthKit (iOS) or Health Connect (Android)
+    // which are not yet integrated - those are manual-entry only for now
+    const granted: VitalType[] = [];
     const denied: VitalType[] = [];
+
+    for (const type of types) {
+      if (type === 'steps') {
+        // Pedometer is available via expo-sensors
+        try {
+          const isAvailable = await Pedometer.isAvailableAsync();
+          if (isAvailable && Platform.OS !== 'web') {
+            granted.push(type);
+          } else {
+            // Steps still work via manual entry
+            granted.push(type);
+          }
+        } catch {
+          granted.push(type); // Allow manual entry
+        }
+      } else {
+        // Other vital types: no native health API integrated yet
+        // Grant permission for manual entry
+        granted.push(type);
+      }
+    }
 
     this.syncStatus.permissionsGranted = granted;
     this.syncStatus.isConnected = granted.length > 0;
@@ -198,7 +212,7 @@ class HealthDataService {
 
         const result = await Pedometer.getStepCountAsync(start, end);
 
-        console.log('[HealthData] Pedometer steps:', result.steps);
+        console.debug('[HealthData] Pedometer steps:', result.steps);
 
         // Estimate distance and calories based on steps
         // Average stride length ~0.75m, ~0.04 calories per step
@@ -217,15 +231,10 @@ class HealthDataService {
       console.warn('[HealthData] Pedometer error, using simulated data:', error);
     }
 
-    // Fallback: Return simulated data for demo/web
-    console.debug('[HealthData] Using simulated step data');
-    return {
-      date: today,
-      count: Math.floor(Math.random() * 5000) + 3000,
-      goal: this.stepsGoal,
-      distance: Math.floor(Math.random() * 3000) + 1000,
-      caloriesBurned: Math.floor(Math.random() * 200) + 100,
-    };
+    // On web, return null (no pedometer available)
+    // On native without pedometer, return null - user can manually log
+    console.debug('[HealthData] Pedometer not available, steps require manual entry');
+    return null;
   }
 
   /**
@@ -245,17 +254,8 @@ class HealthDataService {
     // For now, return null to indicate no automatic reading available
     // Users can manually log heart rate readings
 
-    if (Platform.OS === 'web') {
-      // Simulated data for web demo
-      return {
-        timestamp: new Date().toISOString(),
-        bpm: Math.floor(Math.random() * 30) + 65,
-        context: 'resting',
-      };
-    }
-
-    // On native, return null - users should manually log heart rate
-    // until proper HealthKit/Health Connect integration is added
+    // Heart rate requires HealthKit (iOS) or Health Connect (Android)
+    // Return null on all platforms - users should manually log heart rate
     return null;
   }
 

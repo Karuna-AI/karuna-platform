@@ -86,8 +86,7 @@ class ContactsService {
       return this.contacts;
     } catch (error) {
       console.error('Error loading contacts:', error);
-      // Fall back to mock contacts if real contacts fail
-      this.contacts = this.getMockContacts();
+      this.contacts = [];
       this.isLoaded = true;
       return this.contacts;
     }

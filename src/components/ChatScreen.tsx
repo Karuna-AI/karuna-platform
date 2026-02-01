@@ -683,11 +683,15 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    ...Platform.select({
+      web: { boxShadow: '0px -2px 8px rgba(0, 0, 0, 0.1)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+    }),
   },
   textInputContainer: {
     flexDirection: 'row',

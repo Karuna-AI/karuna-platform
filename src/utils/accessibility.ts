@@ -4,6 +4,7 @@ import { AccessibilityConfig, ACCESSIBILITY_DEFAULTS } from '../types';
 export const FONT_SIZES = {
   normal: {
     body: 16,
+    bodySmall: 14,
     bodyLarge: 18,
     header: 20,
     headerLarge: 24,
@@ -11,6 +12,7 @@ export const FONT_SIZES = {
   },
   large: {
     body: 18,
+    bodySmall: 16,
     bodyLarge: 20,
     header: 24,
     headerLarge: 28,
@@ -18,6 +20,7 @@ export const FONT_SIZES = {
   },
   extraLarge: {
     body: 22,
+    bodySmall: 18,
     bodyLarge: 24,
     header: 28,
     headerLarge: 32,

@@ -60,7 +60,7 @@ class CalendarService {
       }
 
       this.isInitialized = true;
-      console.log('[Calendar] Initialized with', this.appointments.length, 'appointments');
+      console.debug('[Calendar] Initialized with', this.appointments.length, 'appointments');
     } catch (error) {
       console.error('[Calendar] Initialization error:', error);
       this.isInitialized = true;
@@ -110,7 +110,7 @@ class CalendarService {
           : { isLocalAccount: true, name: 'Karuna', type: Calendar.SourceType.LOCAL };
 
       if (!defaultCalendarSource) {
-        console.log('[Calendar] No suitable calendar source found');
+        console.debug('[Calendar] No suitable calendar source found');
         return null;
       }
 
@@ -348,7 +348,7 @@ class CalendarService {
     await this.saveReminders();
 
     // Reschedule notification if needed
-    if (updated.notificationId) {
+    if (updated.notificationId && Platform.OS !== 'web') {
       await Notifications.cancelScheduledNotificationAsync(updated.notificationId);
     }
     if (updated.enabled) {
@@ -366,7 +366,7 @@ class CalendarService {
     if (index === -1) return false;
 
     const reminder = this.reminders[index];
-    if (reminder.notificationId) {
+    if (reminder.notificationId && Platform.OS !== 'web') {
       await Notifications.cancelScheduledNotificationAsync(reminder.notificationId);
     }
 
@@ -416,7 +416,7 @@ class CalendarService {
    * Schedule appointment reminder notification
    */
   private async scheduleAppointmentReminder(appointment: Appointment): Promise<void> {
-    if (!appointment.reminderTime) return;
+    if (!appointment.reminderTime || Platform.OS === 'web') return;
 
     try {
       const appointmentTime = new Date(`${appointment.date}T${appointment.time}`);
@@ -429,7 +429,7 @@ class CalendarService {
             body: `${appointment.title} with ${appointment.doctorName} in ${appointment.reminderTime} minutes`,
             data: { appointmentId: appointment.id, type: 'appointment_reminder' },
           },
-          trigger: reminderTime,
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: reminderTime },
         });
       }
     } catch (error) {
@@ -441,6 +441,7 @@ class CalendarService {
    * Schedule reminder notification
    */
   private async scheduleReminderNotification(reminder: Reminder): Promise<void> {
+    if (Platform.OS === 'web') return;
     try {
       const [hours, minutes] = reminder.time.split(':').map(Number);
 

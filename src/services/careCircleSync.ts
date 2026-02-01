@@ -57,7 +57,7 @@ class CareCircleSyncService {
     if (savedToken) this.authToken = savedToken;
     if (savedChanges) this.pendingChanges = JSON.parse(savedChanges);
 
-    console.log('[CareCircleSync] Initialized with device:', this.deviceId);
+    console.debug('[CareCircleSync] Initialized with device:', this.deviceId);
   }
 
   // Join a care circle using invitation token
@@ -127,7 +127,7 @@ class CareCircleSyncService {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log('[CareCircleSync] WebSocket connected');
+        console.debug('[CareCircleSync] WebSocket connected');
         this.reconnectAttempts = 0;
 
         // Authenticate
@@ -155,7 +155,7 @@ class CareCircleSyncService {
       };
 
       this.ws.onclose = () => {
-        console.log('[CareCircleSync] WebSocket disconnected');
+        console.debug('[CareCircleSync] WebSocket disconnected');
         this.notifyListeners('disconnected');
         this.attemptReconnect();
       };
@@ -177,14 +177,14 @@ class CareCircleSyncService {
 
   private attemptReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('[CareCircleSync] Max reconnect attempts reached');
+      console.debug('[CareCircleSync] Max reconnect attempts reached');
       return;
     }
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
 
-    console.log(`[CareCircleSync] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    console.debug(`[CareCircleSync] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     setTimeout(() => {
       if (this.careCircleId) {
@@ -209,7 +209,7 @@ class CareCircleSyncService {
         break;
 
       default:
-        console.log('[CareCircleSync] Unknown message type:', message.type);
+        console.debug('[CareCircleSync] Unknown message type:', message.type);
     }
   }
 
@@ -349,13 +349,11 @@ class CareCircleSyncService {
     notes?: unknown[];
   }): Promise<void> {
     if (!vaultService.isUnlocked()) {
-      console.log('[CareCircleSync] Vault locked, skipping data apply');
+      console.debug('[CareCircleSync] Vault locked, skipping data apply');
       return;
     }
 
-    // This would merge remote data with local data
-    // For now, just log that we received data
-    console.log('[CareCircleSync] Received remote data:', {
+    console.debug('[CareCircleSync] Merging remote data:', {
       medications: data.medications?.length || 0,
       doctors: data.doctors?.length || 0,
       appointments: data.appointments?.length || 0,
@@ -363,16 +361,87 @@ class CareCircleSyncService {
       notes: data.notes?.length || 0,
     });
 
-    // The actual merge logic would depend on your conflict resolution strategy
-    // For caregivers syncing with elderly device, typically:
-    // - Elderly device is source of truth for their data
-    // - Caregivers can add notes and view data
-    // - Updates from caregivers need to be approved or auto-merged
+    // Merge strategy: last-write-wins based on updatedAt timestamp
+    // Remote items with newer updatedAt overwrite local; new items are added
+    if (data.medications) {
+      await this.mergeEntities(
+        data.medications as any[],
+        () => vaultService.getMedications(),
+        (item: any) => vaultService.addMedication(item),
+        (id: string, item: any) => vaultService.updateMedication(id, item),
+      );
+    }
+
+    if (data.doctors) {
+      await this.mergeEntities(
+        data.doctors as any[],
+        () => vaultService.getDoctors(),
+        (item: any) => vaultService.addDoctor(item),
+        (id: string, item: any) => vaultService.updateDoctor(id, item),
+      );
+    }
+
+    if (data.appointments) {
+      await this.mergeEntities(
+        data.appointments as any[],
+        () => vaultService.getAppointments(),
+        (item: any) => vaultService.addAppointment(item),
+        (id: string, item: any) => vaultService.updateAppointment(id, item),
+      );
+    }
+
+    if (data.contacts) {
+      await this.mergeEntities(
+        data.contacts as any[],
+        () => vaultService.getContacts(),
+        (item: any) => vaultService.addContact(item),
+        (id: string, item: any) => vaultService.updateContact(id, item),
+      );
+    }
+
+    if (data.notes) {
+      await this.mergeEntities(
+        data.notes as any[],
+        () => vaultService.getNotes(),
+        (item: any) => vaultService.addNote(item),
+        (_id: string, _item: any) => Promise.resolve(null), // Notes are append-only
+      );
+    }
+  }
+
+  private async mergeEntities<T extends { id: string; updatedAt?: string }>(
+    remoteItems: T[],
+    getLocal: () => Promise<T[]>,
+    addItem: (item: any) => Promise<any>,
+    updateItem: (id: string, item: any) => Promise<any>,
+  ): Promise<void> {
+    try {
+      const localItems = await getLocal();
+      const localMap = new Map(localItems.map(item => [item.id, item]));
+
+      for (const remoteItem of remoteItems) {
+        const localItem = localMap.get(remoteItem.id);
+
+        if (!localItem) {
+          // New item from remote - add it
+          const { id, ...rest } = remoteItem as any;
+          await addItem(rest);
+        } else if (remoteItem.updatedAt && localItem.updatedAt &&
+                   new Date(remoteItem.updatedAt) > new Date(localItem.updatedAt)) {
+          // Remote is newer - update local
+          const { id, createdAt, createdBy, ...updates } = remoteItem as any;
+          await updateItem(remoteItem.id, updates);
+        }
+        // Otherwise local is newer or same - keep local
+      }
+    } catch (error) {
+      console.error('[CareCircleSync] Entity merge error:', error);
+    }
   }
 
   // Handle real-time changes from other devices
   private async handleRemoteChanges(changes: SyncChange[]): Promise<void> {
-    console.log('[CareCircleSync] Received', changes.length, 'remote changes');
+    console.debug('[CareCircleSync] Received', changes.length, 'remote changes');
 
     // Filter out our own changes
     const remoteChanges = changes.filter((c) => c.deviceId !== this.deviceId);

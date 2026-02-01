@@ -129,7 +129,7 @@ IMPORTANT:
     // Update preferred name
     if (extracted.preferredName && extracted.preferredName !== currentMemory.preferredName) {
       updates.preferredName = extracted.preferredName;
-      console.log('Memory: Updated preferred name to', extracted.preferredName);
+      console.debug('Memory: Updated preferred name to', extracted.preferredName);
     }
 
     // Add new people
@@ -137,7 +137,7 @@ IMPORTANT:
       for (const person of extracted.newPeople) {
         if (person.name && person.relationship) {
           await storageService.addKeyPerson(person as KeyPerson);
-          console.log('Memory: Added key person', person.name, '-', person.relationship);
+          console.debug('Memory: Added key person', person.name, '-', person.relationship);
         }
       }
     }
@@ -150,13 +150,13 @@ IMPORTANT:
       if (extracted.preferences.speechRate) {
         newPrefs.speechRate = extracted.preferences.speechRate;
         prefsChanged = true;
-        console.log('Memory: Updated speech rate to', extracted.preferences.speechRate);
+        console.debug('Memory: Updated speech rate to', extracted.preferences.speechRate);
       }
 
       if (extracted.preferences.language) {
         newPrefs.language = extracted.preferences.language;
         prefsChanged = true;
-        console.log('Memory: Updated language to', extracted.preferences.language);
+        console.debug('Memory: Updated language to', extracted.preferences.language);
       }
 
       if (prefsChanged) {
@@ -169,7 +169,7 @@ IMPORTANT:
       for (const instruction of extracted.customInstructions) {
         if (instruction && typeof instruction === 'string') {
           await storageService.addCustomInstruction(instruction);
-          console.log('Memory: Added custom instruction:', instruction);
+          console.debug('Memory: Added custom instruction:', instruction);
         }
       }
     }
@@ -192,12 +192,12 @@ IMPORTANT:
       const memory = await storageService.loadMemory();
       memory.preferences.speechRate = 'slower';
       await storageService.saveMemory(memory);
-      console.log('Quick extract: Set speech rate to slower');
+      console.debug('Quick extract: Set speech rate to slower');
     } else if (lower.includes('speak faster') || lower.includes('talk faster') || lower.includes('speed up')) {
       const memory = await storageService.loadMemory();
       memory.preferences.speechRate = 'faster';
       await storageService.saveMemory(memory);
-      console.log('Quick extract: Set speech rate to faster');
+      console.debug('Quick extract: Set speech rate to faster');
     }
 
     // Name extraction: "call me X" or "my name is X"
@@ -205,7 +205,7 @@ IMPORTANT:
     if (nameMatch) {
       const name = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1);
       await storageService.updateMemory({ preferredName: name });
-      console.log('Quick extract: Set preferred name to', name);
+      console.debug('Quick extract: Set preferred name to', name);
     }
 
     // Relationship extraction: "my [relationship] is [name]" or "my [relationship] [name]"
@@ -216,7 +216,7 @@ IMPORTANT:
       const relationship = relationshipMatch[1];
       const name = relationshipMatch[2].charAt(0).toUpperCase() + relationshipMatch[2].slice(1);
       await storageService.addKeyPerson({ name, relationship });
-      console.log('Quick extract: Added', relationship, name);
+      console.debug('Quick extract: Added', relationship, name);
     }
 
     // Nickname: "call my [relationship] [nickname]" or "[name] as [nickname]"
@@ -235,7 +235,7 @@ IMPORTANT:
       if (personIndex >= 0) {
         memory.keyPeople[personIndex].nickname = nickname;
         await storageService.saveMemory(memory);
-        console.log('Quick extract: Set nickname for', relationship, 'to', nickname);
+        console.debug('Quick extract: Set nickname for', relationship, 'to', nickname);
       } else {
         // Create new entry with nickname
         await storageService.addKeyPerson({ name: nickname, relationship, nickname });

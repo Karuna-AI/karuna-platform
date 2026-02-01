@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { auditLogService } from './auditLog';
 import {
   Medication,
@@ -15,14 +16,16 @@ const STORAGE_KEYS = {
   NOTIFICATION_IDS: '@karuna_medication_notification_ids',
 };
 
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Configure notifications (native only)
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 class MedicationService {
   private medications: Medication[] = [];
@@ -70,6 +73,7 @@ class MedicationService {
    * Request notification permissions
    */
   private async requestNotificationPermissions(): Promise<boolean> {
+    if (Platform.OS === 'web') return false;
     try {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -424,6 +428,7 @@ class MedicationService {
    * Schedule notifications for a medication
    */
   private async scheduleNotifications(medication: Medication): Promise<void> {
+    if (Platform.OS === 'web') return;
     const ids: string[] = [];
 
     for (const schedule of medication.schedule) {
@@ -438,9 +443,9 @@ class MedicationService {
             sound: true,
           },
           trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
             hour: hours,
             minute: minutes,
-            repeats: true,
           },
         });
 
@@ -458,6 +463,7 @@ class MedicationService {
    * Cancel notifications for a medication
    */
   private async cancelNotifications(medicationId: string): Promise<void> {
+    if (Platform.OS === 'web') return;
     const ids = this.notificationIds.get(medicationId) || [];
 
     for (const id of ids) {
@@ -476,6 +482,7 @@ class MedicationService {
    * Reschedule all notifications
    */
   private async rescheduleAllNotifications(): Promise<void> {
+    if (Platform.OS === 'web') return;
     // Cancel all existing notifications
     await Notifications.cancelAllScheduledNotificationsAsync();
     this.notificationIds.clear();

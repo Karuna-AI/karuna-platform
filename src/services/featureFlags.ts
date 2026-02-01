@@ -113,7 +113,7 @@ class FeatureFlagsService {
     }
 
     try {
-      const API_URL = process.env.API_URL || 'http://localhost:3021';
+      const API_URL = process.env.API_URL || 'https://karuna-api-production.up.railway.app';
       const response = await fetch(`${API_URL}/api/admin/feature-flags`);
 
       if (!response.ok) {

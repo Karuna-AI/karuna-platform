@@ -145,7 +145,7 @@ class EncryptedDatabaseService {
       await this.loadMetadata();
       this.isOpen = true;
 
-      console.log('[EncryptedDB] Database opened successfully');
+      console.debug('[EncryptedDB] Database opened successfully');
       return { success: true };
     } catch (error) {
       console.error('[EncryptedDB] Open error:', error);
@@ -158,7 +158,7 @@ class EncryptedDatabaseService {
    */
   async close(): Promise<void> {
     this.isOpen = false;
-    console.log('[EncryptedDB] Database closed');
+    console.debug('[EncryptedDB] Database closed');
   }
 
   /**
@@ -503,7 +503,10 @@ class EncryptedDatabaseService {
         await this.saveMetadata();
       }
     } catch (error) {
-      console.error('[EncryptedDB] Load metadata error:', error);
+      console.debug('[EncryptedDB] Load metadata error (stale data cleared):', (error as Error).message);
+      // Clear stale encrypted data that can't be decrypted (e.g., key mismatch on web)
+      const key = DB_PREFIX + '_metadata';
+      await AsyncStorage.removeItem(key).catch(() => {});
       this.metadata = {
         version: DB_VERSION,
         createdAt: new Date().toISOString(),
@@ -511,6 +514,7 @@ class EncryptedDatabaseService {
         collections: [],
         encryptionEnabled: true,
       };
+      await this.saveMetadata();
     }
   }
 

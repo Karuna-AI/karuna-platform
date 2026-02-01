@@ -49,14 +49,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         const savedMessages = await storageService.loadMessages();
         if (savedMessages.length > 0) {
           setMessages(savedMessages);
-          console.log(`Loaded ${savedMessages.length} messages from storage`);
+          console.debug(`Loaded ${savedMessages.length} messages from storage`);
         }
 
         // Load memory and update system prompt
         const memoryContext = await memoryService.formatMemoryForPrompt();
         if (memoryContext) {
           updateSystemPromptWithMemory(memoryContext);
-          console.log('Memory context loaded into system prompt');
+          console.debug('Memory context loaded into system prompt');
         }
       } catch (err) {
         console.error('Error loading chat history:', err);
@@ -180,7 +180,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
         // Process conversation for deeper memory extraction (every N turns)
         // This runs in background and doesn't block the response
-        const updatedMessages = [...messages, { id: '', role: 'user' as const, content: text }, { id: '', role: 'assistant' as const, content: response }];
+        const updatedMessages = [...messages, { id: '', role: 'user' as const, content: text, timestamp: Date.now() }, { id: '', role: 'assistant' as const, content: response, timestamp: Date.now() }];
         memoryService.processConversation(updatedMessages).then(async () => {
           // Update system prompt with any new memory
           const memoryContext = await memoryService.formatMemoryForPrompt();
@@ -215,7 +215,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     setLastUserMessage(null);
     // Clear storage but keep memory
     await storageService.clearMessages();
-    console.log('Chat history cleared');
+    console.debug('Chat history cleared');
   }, []);
 
   const retryLastMessage = useCallback(async () => {

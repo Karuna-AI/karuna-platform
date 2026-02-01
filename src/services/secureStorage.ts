@@ -24,6 +24,7 @@ class SecureStorageService {
    * Check if secure storage is available on this device
    */
   async isAvailable(): Promise<boolean> {
+    if (Platform.OS === 'web') return false;
     try {
       return await SecureStore.isAvailableAsync();
     } catch {
@@ -39,6 +40,9 @@ class SecureStorageService {
     value: string,
     options: SecureStorageOptions = {}
   ): Promise<{ success: boolean; error?: string }> {
+    if (Platform.OS === 'web') {
+      return { success: false, error: 'Secure storage not available on web' };
+    }
     const fullKey = KEY_PREFIX + key;
 
     try {
@@ -84,6 +88,9 @@ class SecureStorageService {
     key: string,
     options: SecureStorageOptions = {}
   ): Promise<{ success: boolean; value?: string; error?: string }> {
+    if (Platform.OS === 'web') {
+      return { success: false, error: 'Secure storage not available on web' };
+    }
     const fullKey = KEY_PREFIX + key;
 
     try {
@@ -131,6 +138,9 @@ class SecureStorageService {
    * Delete a value from secure storage
    */
   async deleteItem(key: string): Promise<{ success: boolean; error?: string }> {
+    if (Platform.OS === 'web') {
+      return { success: false, error: 'Secure storage not available on web' };
+    }
     const fullKey = KEY_PREFIX + key;
 
     try {

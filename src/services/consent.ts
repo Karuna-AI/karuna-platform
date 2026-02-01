@@ -62,7 +62,7 @@ class ConsentService {
       }
 
       this.isInitialized = true;
-      console.log('[Consent] Initialized with', this.preferences.consents.length, 'consent records');
+      console.debug('[Consent] Initialized with', this.preferences?.consents.length ?? 0, 'consent records');
     } catch (error) {
       console.error('[Consent] Initialization error:', error);
       // Create minimal preferences

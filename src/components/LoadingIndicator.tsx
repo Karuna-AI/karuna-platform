@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, Platform } from 'react-native';
 import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
 
 interface LoadingIndicatorProps {
@@ -29,13 +29,13 @@ export function LoadingIndicator({
             toValue: 1,
             duration: 300,
             easing: Easing.ease,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(anim, {
             toValue: 0,
             duration: 300,
             easing: Easing.ease,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       );

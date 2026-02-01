@@ -461,7 +461,7 @@ const zh: Translations = {
   },
 };
 
-const translations: Record<Language, Translations> = {
+const translations: Partial<Record<Language, Translations>> = {
   en,
   hi,
   es,
@@ -469,10 +469,10 @@ const translations: Record<Language, Translations> = {
 };
 
 export function getTranslations(language: Language): Translations {
-  return translations[language] || translations.en;
+  return translations[language] || translations.en!;
 }
 
-export const LANGUAGE_NAMES: Record<Language, string> = {
+export const LANGUAGE_NAMES: Partial<Record<Language, string>> = {
   en: 'English',
   hi: 'हिंदी',
   es: 'Español',

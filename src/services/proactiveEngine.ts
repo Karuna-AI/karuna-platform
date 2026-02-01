@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { signalsService } from './signals';
 import { proactiveRulesEngine } from './proactiveRules';
 import { aiMessageCrafterService } from './aiMessageCrafter';
@@ -29,14 +29,16 @@ const STORAGE_KEYS = {
 
 const BACKGROUND_FETCH_TASK = 'KARUNA_PROACTIVE_CHECK';
 
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Configure notification handler (native only)
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 class ProactiveEngineService {
   private preferences: ProactivePreferences = DEFAULT_PROACTIVE_PREFERENCES;
@@ -98,7 +100,7 @@ class ProactiveEngineService {
       AppState.addEventListener('change', this.handleAppStateChange);
 
       this.isInitialized = true;
-      console.log('[ProactiveEngine] Initialized');
+      console.debug('[ProactiveEngine] Initialized');
 
       // Start if enabled
       if (this.preferences.enabled) {
@@ -127,7 +129,7 @@ class ProactiveEngineService {
       this.runCheck();
     }, 15 * 60 * 1000);
 
-    console.log('[ProactiveEngine] Started');
+    console.debug('[ProactiveEngine] Started');
   }
 
   /**
@@ -142,7 +144,7 @@ class ProactiveEngineService {
       this.checkInterval = null;
     }
 
-    console.log('[ProactiveEngine] Stopped');
+    console.debug('[ProactiveEngine] Stopped');
   }
 
   /**
@@ -271,6 +273,7 @@ class ProactiveEngineService {
    * Send a notification for a check-in
    */
   private async sendCheckInNotification(checkIn: CheckIn): Promise<void> {
+    if (Platform.OS === 'web') return;
     const typeInfo = CHECK_IN_TYPE_INFO[checkIn.type];
 
     try {
@@ -365,15 +368,17 @@ class ProactiveEngineService {
       // Update expiry time
       checkIn.expiresAt = new Date(Date.now() + minutes * 60 * 1000 + 60 * 60 * 1000).toISOString();
 
-      // Schedule a reminder notification
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: CHECK_IN_TYPE_INFO[checkIn.type]?.icon + ' Reminder',
-          body: checkIn.message,
-          data: { checkInId: checkIn.id, type: 'proactive_checkin' },
-        },
-        trigger: { seconds: minutes * 60 },
-      });
+      // Schedule a reminder notification (native only)
+      if (Platform.OS !== 'web') {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: CHECK_IN_TYPE_INFO[checkIn.type]?.icon + ' Reminder',
+            body: checkIn.message,
+            data: { checkInId: checkIn.id, type: 'proactive_checkin' },
+          },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: minutes * 60 },
+        });
+      }
 
       await this.savePendingCheckIns();
       this.notifyListeners();
@@ -446,6 +451,7 @@ class ProactiveEngineService {
    * Request notification permissions
    */
   private async requestNotificationPermissions(): Promise<boolean> {
+    if (Platform.OS === 'web') return false;
     try {
       const { status } = await Notifications.requestPermissionsAsync();
       return status === 'granted';
@@ -459,6 +465,7 @@ class ProactiveEngineService {
    * Register background fetch task
    */
   private async registerBackgroundTask(): Promise<void> {
+    if (Platform.OS === 'web') return;
     try {
       // Define the task
       TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
@@ -478,7 +485,7 @@ class ProactiveEngineService {
         startOnBoot: true,
       });
 
-      console.log('[ProactiveEngine] Background task registered');
+      console.debug('[ProactiveEngine] Background task registered');
     } catch (error) {
       console.error('[ProactiveEngine] Background task registration error:', error);
     }
