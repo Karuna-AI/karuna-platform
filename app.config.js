@@ -67,7 +67,9 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 1,
+      versionCode: 2,
+      targetSdkVersion: 35,
+      compileSdkVersion: 35,
       permissions: [
         'android.permission.RECORD_AUDIO',
         'android.permission.CAMERA',
