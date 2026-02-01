@@ -1307,7 +1307,7 @@ router.post('/circles/:circleId/vault/appointments', authMiddleware, requirePerm
 
     const result = await db.query(
       `INSERT INTO vault_appointments
-       (circle_id, doctor_id, doctor_name, purpose, appointment_date, appointment_time, location, notes, reminder, status, created_by)
+       (circle_id, doctor_id, doctor_name, purpose, date, time, location, preparation_notes, reminder_sent, status, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [circleId, doctorId, doctorName, purpose, date, time, location, notes, reminder || false, status || 'scheduled', req.member.name]
@@ -1338,9 +1338,9 @@ router.put('/circles/:circleId/vault/appointments/:appointmentId', authMiddlewar
     const result = await db.query(
       `UPDATE vault_appointments
        SET doctor_id = COALESCE($1, doctor_id), doctor_name = COALESCE($2, doctor_name),
-           purpose = COALESCE($3, purpose), appointment_date = COALESCE($4, appointment_date),
-           appointment_time = COALESCE($5, appointment_time), location = COALESCE($6, location),
-           notes = COALESCE($7, notes), reminder = COALESCE($8, reminder),
+           purpose = COALESCE($3, purpose), date = COALESCE($4, date),
+           time = COALESCE($5, time), location = COALESCE($6, location),
+           preparation_notes = COALESCE($7, preparation_notes), reminder_sent = COALESCE($8, reminder_sent),
            status = COALESCE($9, status), updated_by = $10, updated_at = CURRENT_TIMESTAMP
        WHERE id = $11 AND circle_id = $12
        RETURNING *`,
@@ -1463,18 +1463,19 @@ router.delete('/circles/:circleId/vault/accounts/:accountId', authMiddleware, re
 router.post('/circles/:circleId/vault/documents', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
   try {
     const { circleId } = req.params;
-    const { name, type, description, fileUri, thumbnail } = req.body;
+    const { title, name, type, description, fileName, fileType, fileSize, expiryDate, isSensitive } = req.body;
+    const docTitle = title || name;
 
-    if (!name) {
-      return res.status(400).json({ error: 'Document name is required' });
+    if (!docTitle) {
+      return res.status(400).json({ error: 'Document title is required' });
     }
 
     const result = await db.query(
       `INSERT INTO vault_documents
-       (circle_id, name, type, description, file_uri, thumbnail, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (circle_id, title, type, description, file_name, file_type, file_size, expiry_date, is_sensitive, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [circleId, name, type || 'other', description, fileUri, thumbnail, req.member.name]
+      [circleId, docTitle, type || 'other', description, fileName, fileType, fileSize, expiryDate, isSensitive || false, req.member.name]
     );
 
     res.json({ success: true, document: result.rows[0] });
@@ -1488,7 +1489,8 @@ router.post('/circles/:circleId/vault/documents', authMiddleware, requirePermiss
 router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
   try {
     const { circleId, documentId } = req.params;
-    const { name, type, description, fileUri, thumbnail } = req.body;
+    const { title, name, type, description, fileName, fileType, fileSize, expiryDate, isSensitive } = req.body;
+    const docTitle = title || name;
 
     const existing = await db.query(
       'SELECT id FROM vault_documents WHERE id = $1 AND circle_id = $2',
@@ -1501,12 +1503,14 @@ router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, req
 
     const result = await db.query(
       `UPDATE vault_documents
-       SET name = COALESCE($1, name), type = COALESCE($2, type),
-           description = COALESCE($3, description), file_uri = COALESCE($4, file_uri),
-           thumbnail = COALESCE($5, thumbnail), updated_by = $6, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 AND circle_id = $8
+       SET title = COALESCE($1, title), type = COALESCE($2, type),
+           description = COALESCE($3, description), file_name = COALESCE($4, file_name),
+           file_type = COALESCE($5, file_type), file_size = COALESCE($6, file_size),
+           expiry_date = COALESCE($7, expiry_date), is_sensitive = COALESCE($8, is_sensitive),
+           updated_by = $9, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $10 AND circle_id = $11
        RETURNING *`,
-      [name, type, description, fileUri, thumbnail, req.member.name, documentId, circleId]
+      [docTitle, type, description, fileName, fileType, fileSize, expiryDate, isSensitive, req.member.name, documentId, circleId]
     );
 
     res.json({ success: true, document: result.rows[0] });
