@@ -45,13 +45,55 @@ import { calendarService } from './services/calendar';
 import { CheckInBanner, CheckInOverlay } from './components/CheckInCard';
 import { ProactiveSettingsScreen } from './components/ProactiveSettingsScreen';
 import { CheckIn } from './types/proactive';
+import { useChatContext } from './context/ChatContext';
 import { onboardingStore } from './services/onboardingStore';
 import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
+import { MemoryViewer } from './components/MemoryViewer';
+import { parseKarunaUrl } from './services/incomingLinks';
+import * as Linking from 'expo-linking';
 
 // Gateway URL - configure for your environment
 const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
 
-type Screen = 'chat' | 'settings' | 'vault' | 'vault_accounts' | 'vault_medications' | 'vault_documents' | 'vault_doctors' | 'vault_appointments' | 'vault_contacts' | 'care_circle' | 'security' | 'consent' | 'audit_log' | 'health_dashboard' | 'proactive_settings';
+type Screen = 'chat' | 'settings' | 'vault' | 'vault_accounts' | 'vault_medications' | 'vault_documents' | 'vault_doctors' | 'vault_appointments' | 'vault_contacts' | 'care_circle' | 'security' | 'consent' | 'audit_log' | 'health_dashboard' | 'proactive_settings' | 'memories';
+
+/**
+ * Wrapper that renders check-in components inside ChatProvider
+ * so follow-up messages can be injected into the chat history.
+ */
+function CheckInWithChat({
+  pendingCheckIns,
+  showOverlay,
+  activeCheckIn,
+  onBannerTap,
+  onDismiss,
+}: {
+  pendingCheckIns: CheckIn[];
+  showOverlay: boolean;
+  activeCheckIn: CheckIn | null;
+  onBannerTap: () => void;
+  onDismiss: () => void;
+}): JSX.Element | null {
+  const { injectMessage } = useChatContext();
+
+  const handleRespond = useCallback((followUp: string) => {
+    injectMessage('assistant', followUp);
+  }, [injectMessage]);
+
+  return (
+    <>
+      {pendingCheckIns.length > 0 && !showOverlay && (
+        <CheckInBanner checkIns={pendingCheckIns} onTap={onBannerTap} />
+      )}
+      <CheckInOverlay
+        visible={showOverlay}
+        checkIn={activeCheckIn}
+        onDismiss={onDismiss}
+        onRespond={handleRespond}
+      />
+    </>
+  );
+}
 
 function App(): JSX.Element {
   // Navigation state
@@ -214,6 +256,29 @@ function App(): JSX.Element {
     loadCheckIns();
 
     return () => unsubscribe();
+  }, []);
+
+  // Handle incoming deep links
+  useEffect(() => {
+    const handleUrl = (url: string) => {
+      const parsed = parseKarunaUrl(url);
+      if (parsed) {
+        console.debug('[DeepLink] Navigating to:', parsed.screen);
+        setCurrentScreen(parsed.screen as Screen);
+      }
+    };
+
+    // Handle URL that launched the app
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    });
+
+    // Handle URLs while app is running
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleUrl(event.url);
+    });
+
+    return () => subscription.remove();
   }, []);
 
   /**
@@ -502,6 +567,14 @@ function App(): JSX.Element {
     setCurrentScreen('settings');
   }, []);
 
+  const handleOpenMemories = useCallback(() => {
+    setCurrentScreen('memories');
+  }, []);
+
+  const handleCloseMemories = useCallback(() => {
+    setCurrentScreen('settings');
+  }, []);
+
   // Handle check-in interactions
   const handleCheckInBannerTap = useCallback(() => {
     if (pendingCheckIns.length > 0) {
@@ -515,10 +588,7 @@ function App(): JSX.Element {
     setActiveCheckIn(null);
   }, []);
 
-  const handleCheckInRespond = useCallback((followUp: string) => {
-    // Could show the follow-up in the chat or as a toast
-    console.log('Check-in follow-up:', followUp);
-  }, []);
+  // handleCheckInRespond is now handled by CheckInWithChat component inside ChatProvider
 
   // Handle app unlock
   const handleAppUnlock = useCallback(() => {
@@ -591,6 +661,7 @@ function App(): JSX.Element {
             onClose={handleCloseSettings}
             onOpenSecurity={handleOpenSecurity}
             onOpenProactive={handleOpenProactiveSettings}
+            onOpenMemories={handleOpenMemories}
           />
         );
 
@@ -649,6 +720,9 @@ function App(): JSX.Element {
       case 'proactive_settings':
         return <ProactiveSettingsScreen onBack={handleCloseProactiveSettings} />;
 
+      case 'memories':
+        return <MemoryViewer onClose={handleCloseMemories} />;
+
       default:
         return (
           <>
@@ -659,20 +733,15 @@ function App(): JSX.Element {
                 onOpenCareCircle={handleOpenCareCircle}
                 onOpenHealth={handleOpenHealthDashboard}
               />
+              {/* Check-in components inside ChatProvider for chat injection */}
+              <CheckInWithChat
+                pendingCheckIns={pendingCheckIns}
+                showOverlay={showCheckInOverlay}
+                activeCheckIn={activeCheckIn}
+                onBannerTap={handleCheckInBannerTap}
+                onDismiss={handleCheckInDismiss}
+              />
             </ChatProvider>
-
-            {/* Proactive check-in banner */}
-            {pendingCheckIns.length > 0 && !showCheckInOverlay && (
-              <CheckInBanner checkIns={pendingCheckIns} onTap={handleCheckInBannerTap} />
-            )}
-
-            {/* Check-in overlay for urgent/high priority */}
-            <CheckInOverlay
-              visible={showCheckInOverlay}
-              checkIn={activeCheckIn}
-              onDismiss={handleCheckInDismiss}
-              onRespond={handleCheckInRespond}
-            />
 
             <IntentActionModal
               visible={showIntentModal}

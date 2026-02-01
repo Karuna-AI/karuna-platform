@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../services/api';
+import { isTokenExpired } from '../hooks/useIdleTimeout';
 
 interface Admin {
   id: string;
@@ -25,6 +26,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem('admin_token');
     if (token) {
+      if (isTokenExpired(token)) {
+        localStorage.removeItem('admin_token');
+        api.clearToken();
+        setIsLoading(false);
+        return;
+      }
       api.setToken(token);
       loadProfile();
     } else {

@@ -38,7 +38,9 @@ export default function Register() {
     });
 
     if (result.success) {
-      navigate('/', { replace: true });
+      const searchParams = new URLSearchParams(window.location.search);
+      const redirectParam = searchParams.get('redirect');
+      navigate(redirectParam || '/', { replace: true });
     } else {
       setError(result.error || 'Registration failed');
     }
@@ -141,7 +143,7 @@ export default function Register() {
 
         <p style={{ textAlign: 'center', marginTop: '1.5rem' }}>
           Already have an account?{' '}
-          <Link to="/login">Sign in</Link>
+          <Link to={`/login${new URLSearchParams(window.location.search).get('redirect') ? `?redirect=${encodeURIComponent(new URLSearchParams(window.location.search).get('redirect')!)}` : ''}`}>Sign in</Link>
         </p>
       </div>
     </div>

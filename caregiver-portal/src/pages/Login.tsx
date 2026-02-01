@@ -12,7 +12,9 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as { from?: string })?.from || '/';
+  const searchParams = new URLSearchParams(window.location.search);
+  const redirectParam = searchParams.get('redirect');
+  const from = redirectParam || (location.state as { from?: string })?.from || '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,7 +86,7 @@ export default function Login() {
 
         <p style={{ textAlign: 'center', marginTop: '1.5rem' }}>
           Don't have an account?{' '}
-          <Link to="/register">Create one</Link>
+          <Link to={`/register${redirectParam ? `?redirect=${encodeURIComponent(redirectParam)}` : ''}`}>Create one</Link>
         </p>
       </div>
     </div>

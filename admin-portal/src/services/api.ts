@@ -15,6 +15,7 @@ class AdminApiService {
       baseURL: '/api/admin',
       headers: {
         'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
       },
     });
 
@@ -239,14 +240,20 @@ export const adminAPI = {
   get: async (url: string) => {
     const token = localStorage.getItem('admin_token');
     const response = await axios.get(`/api/admin${url}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
     return response;
   },
   post: async (url: string, data?: any) => {
     const token = localStorage.getItem('admin_token');
     const response = await axios.post(`/api/admin${url}`, data, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
     return response;
   },

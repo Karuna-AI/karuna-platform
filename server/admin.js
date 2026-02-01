@@ -8,10 +8,21 @@
 const express = require('express');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const db = require('./db');
 const router = express.Router();
+
+// Defense-in-depth: Verify custom header on mutating requests
+// Browsers won't send X-Requested-With cross-origin without CORS preflight
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    if (req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+      return res.status(403).json({ error: 'Forbidden: missing required header' });
+    }
+  }
+  next();
+});
 
 const BCRYPT_ROUNDS = 12;
 

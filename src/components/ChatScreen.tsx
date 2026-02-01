@@ -18,6 +18,7 @@ import { Message } from '../types';
 import { VoiceButton } from './VoiceButton';
 import { ChatBubble } from './ChatBubble';
 import { LoadingIndicator } from './LoadingIndicator';
+import { WeatherWidget } from './WeatherWidget';
 import {
   getColors,
   getFontSizes,
@@ -440,6 +441,9 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
           )}
         </View>
       </View>
+
+      {/* Weather widget */}
+      <WeatherWidget />
 
       {/* Speaking indicator */}
       {renderSpeakingIndicator()}

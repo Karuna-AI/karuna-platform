@@ -52,6 +52,9 @@ interface ChatContextValue {
   // Permission actions
   openSettings: () => Promise<void>;
   clearError: () => void;
+
+  // Message injection (for external systems like check-ins)
+  injectMessage: (role: Message['role'], content: string) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -130,6 +133,7 @@ export function ChatProvider({
     sendMessage: sendChatMessage,
     clearMessages,
     retryLastMessage,
+    injectMessage,
   } = useChat({
     onResponse: handleResponse,
     onError: handleError,
@@ -287,6 +291,9 @@ export function ChatProvider({
     // Permission actions
     openSettings,
     clearError,
+
+    // Message injection
+    injectMessage,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

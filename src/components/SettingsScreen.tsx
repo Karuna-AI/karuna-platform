@@ -29,6 +29,7 @@ interface SettingsScreenProps {
   onClose: () => void;
   onOpenSecurity?: () => void;
   onOpenProactive?: () => void;
+  onOpenMemories?: () => void;
 }
 
 interface OptionButtonProps<T> {
@@ -72,7 +73,7 @@ function OptionButton<T>({
   );
 }
 
-export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive }: SettingsScreenProps): JSX.Element {
+export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpenMemories }: SettingsScreenProps): JSX.Element {
   const { t } = useTranslation();
   const {
     settings,
@@ -539,6 +540,30 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive }: Set
                 </Text>
                 <Text style={[styles.securityDescription, { fontSize: sectionFont }]}>
                   Reminders, nudges, quiet hours
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.securityArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Memory Viewer */}
+        {onOpenMemories && (
+          <TouchableOpacity
+            style={styles.securityButton}
+            onPress={onOpenMemories}
+            accessible={true}
+            accessibilityLabel="View what Karuna remembers about you"
+            accessibilityRole="button"
+          >
+            <View style={styles.securityButtonContent}>
+              <Text style={styles.securityIcon}>🧠</Text>
+              <View style={styles.securityInfo}>
+                <Text style={[styles.securityTitle, { fontSize: bodyFont }]}>
+                  What Karuna Knows
+                </Text>
+                <Text style={[styles.securityDescription, { fontSize: sectionFont }]}>
+                  Your name, family, preferences
                 </Text>
               </View>
             </View>

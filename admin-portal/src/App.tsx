@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { useIdleTimeout } from './hooks/useIdleTimeout';
+import SessionTimeoutModal from './components/SessionTimeoutModal';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
@@ -15,7 +17,8 @@ import MedicationReports from './pages/MedicationReports';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { admin, isLoading } = useAuth();
+  const { admin, isLoading, logout } = useAuth();
+  const { showWarning, remainingSeconds, resetTimer } = useIdleTimeout(logout);
 
   if (isLoading) {
     return (
@@ -25,7 +28,22 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return admin ? <>{children}</> : <Navigate to="/login" />;
+  if (!admin) {
+    return <Navigate to="/login" />;
+  }
+
+  return (
+    <>
+      {children}
+      {showWarning && (
+        <SessionTimeoutModal
+          remainingSeconds={remainingSeconds}
+          onStayLoggedIn={resetTimer}
+          onLogout={logout}
+        />
+      )}
+    </>
+  );
 }
 
 export default function App() {

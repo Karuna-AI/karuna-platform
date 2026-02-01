@@ -28,6 +28,7 @@ module.exports = {
   expo: {
     name: getAppName(),
     slug: 'karuna-ai',
+    scheme: 'karuna',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -79,6 +80,14 @@ module.exports = {
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
+      ],
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [{ scheme: 'karuna' }],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
       ],
     },
     web: {

@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import type { CareCircle, CareCircleMember, SyncData, CareCircleRole, VaultNote, DashboardData } from '../types';
 import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor } from '../components/dashboard';
+import ErrorBoundary from '../components/ErrorBoundary';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 type TabType = 'dashboard' | 'overview' | 'members' | 'vault' | 'notes';
 
@@ -42,6 +44,8 @@ export default function CareCircleDetail() {
   const canViewVault = currentMember?.permissions.canViewVault;
   const canViewSensitive = currentMember?.permissions.canViewSensitive;
 
+  const { isConnected, subscribe } = useWebSocket(id);
+
   const loadDashboardData = useCallback(async () => {
     if (!id) return;
     setIsDashboardLoading(true);
@@ -58,14 +62,32 @@ export default function CareCircleDetail() {
     }
   }, [id]);
 
-  // Auto-refresh dashboard every 30 seconds when on dashboard tab
+  // Auto-refresh dashboard: use WebSocket when connected, fall back to polling
   useEffect(() => {
     if (activeTab === 'dashboard' && id) {
       loadDashboardData();
-      const interval = setInterval(loadDashboardData, 30000);
-      return () => clearInterval(interval);
+
+      if (!isConnected) {
+        // Fallback: poll every 30 seconds when WebSocket is not connected
+        const interval = setInterval(loadDashboardData, 30000);
+        return () => clearInterval(interval);
+      }
     }
-  }, [activeTab, id, loadDashboardData]);
+  }, [activeTab, id, loadDashboardData, isConnected]);
+
+  // Subscribe to WebSocket events for real-time updates
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const unsubs = [
+      subscribe('health_update', () => loadDashboardData()),
+      subscribe('alert', () => loadDashboardData()),
+      subscribe('activity_update', () => loadDashboardData()),
+      subscribe('alert_acknowledged', () => loadDashboardData()),
+    ];
+
+    return () => unsubs.forEach(unsub => unsub());
+  }, [isConnected, subscribe, loadDashboardData]);
 
   const loadCircleData = async () => {
     setIsLoading(true);
@@ -210,6 +232,18 @@ export default function CareCircleDetail() {
           <div>
             <h1 style={{ marginBottom: '0.25rem' }}>{circle.name}</h1>
             <p className="text-muted">Caring for {circle.elderlyName}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: isConnected ? '#38a169' : '#a0aec0',
+                display: 'inline-block',
+              }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {isConnected ? 'Live updates' : 'Polling updates'}
+              </span>
+            </div>
           </div>
           {currentMember && (
             <span className={`badge badge-${currentMember.role}`}>
@@ -263,11 +297,13 @@ export default function CareCircleDetail() {
             <>
               {/* Alerts Section - Show first if there are alerts */}
               {dashboardData.alerts.count > 0 && (
-                <AlertsPanel
-                  alerts={dashboardData.alerts.active}
-                  onAcknowledge={handleAcknowledgeAlert}
-                  onDismiss={handleDismissAlert}
-                />
+                <ErrorBoundary>
+                  <AlertsPanel
+                    alerts={dashboardData.alerts.active}
+                    onAcknowledge={handleAcknowledgeAlert}
+                    onDismiss={handleDismissAlert}
+                  />
+                </ErrorBoundary>
               )}
 
               {/* Quick Stats Row */}
@@ -363,30 +399,38 @@ export default function CareCircleDetail() {
               {/* Detailed Cards Row */}
               <div className="grid grid-2" style={{ gap: '1.5rem' }}>
                 {/* Health Vitals */}
-                <HealthCard readings={dashboardData.health.latest} />
+                <ErrorBoundary>
+                  <HealthCard readings={dashboardData.health.latest} />
+                </ErrorBoundary>
 
                 {/* Medication Adherence Detail */}
-                <AdherenceCard
-                  data={dashboardData.adherence.today}
-                  onViewDetails={() => setActiveTab('vault')}
-                />
+                <ErrorBoundary>
+                  <AdherenceCard
+                    data={dashboardData.adherence.today}
+                    onViewDetails={() => setActiveTab('vault')}
+                  />
+                </ErrorBoundary>
               </div>
 
               {/* Activity Monitor */}
-              <ActivityMonitor
-                lastActivity={dashboardData.activity.lastActivity}
-                inactivityMinutes={dashboardData.activity.inactivityMinutes}
-                inactivityStatus={dashboardData.activity.inactivityStatus}
-                checkinResponseRate={dashboardData.checkins.responseRate}
-              />
+              <ErrorBoundary>
+                <ActivityMonitor
+                  lastActivity={dashboardData.activity.lastActivity}
+                  inactivityMinutes={dashboardData.activity.inactivityMinutes}
+                  inactivityStatus={dashboardData.activity.inactivityStatus}
+                  checkinResponseRate={dashboardData.checkins.responseRate}
+                />
+              </ErrorBoundary>
 
               {/* No alerts message */}
               {dashboardData.alerts.count === 0 && (
-                <AlertsPanel
-                  alerts={[]}
-                  onAcknowledge={handleAcknowledgeAlert}
-                  onDismiss={handleDismissAlert}
-                />
+                <ErrorBoundary>
+                  <AlertsPanel
+                    alerts={[]}
+                    onAcknowledge={handleAcknowledgeAlert}
+                    onDismiss={handleDismissAlert}
+                  />
+                </ErrorBoundary>
               )}
 
               {/* Last updated */}

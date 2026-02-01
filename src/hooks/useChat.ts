@@ -7,6 +7,7 @@ import { memoryService } from '../services/memory';
 import { detectVaultQuery, executeVaultQuery, getVaultContextForAI } from '../services/vaultTools';
 import { vaultService } from '../services/vault';
 import { detectHealthQuery, executeHealthQuery, getHealthContextForAI } from '../services/healthChatTools';
+import { weatherService } from '../services/weather';
 
 interface UseChatOptions {
   onResponse?: (response: string) => void;
@@ -22,6 +23,7 @@ interface UseChatReturn {
   sendMessage: (text: string) => Promise<void>;
   clearMessages: () => void;
   retryLastMessage: () => Promise<void>;
+  injectMessage: (role: Message['role'], content: string) => void;
 }
 
 function generateId(): string {
@@ -168,9 +170,20 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
         const healthContext = await getHealthContextForAI();
 
+        // Add weather context if available
+        let weatherContext = '';
+        try {
+          const weather = await weatherService.getCurrentWeather();
+          if (weather && !weather.isSimulated) {
+            weatherContext = `\n[Current weather: ${Math.round(weather.temperature)}°F, ${weather.description}, feels like ${Math.round(weather.feelsLike)}°F, humidity ${weather.humidity}%, in ${weather.location.city}]`;
+          }
+        } catch {
+          // Weather context is optional
+        }
+
         const messagesForAPI: OpenAIMessage[] = [
           ...openAIMessages,
-          { role: 'user', content: text + vaultContext + healthContext },
+          { role: 'user', content: text + vaultContext + healthContext + weatherContext },
         ];
 
         const response = await chatWithRetry(messagesForAPI);
@@ -232,6 +245,13 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }
   }, [lastUserMessage, sendMessage]);
 
+  const injectMessage = useCallback(
+    (role: Message['role'], content: string) => {
+      addMessage(role, content);
+    },
+    [addMessage]
+  );
+
   return {
     messages,
     isLoading,
@@ -240,6 +260,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     sendMessage,
     clearMessages,
     retryLastMessage,
+    injectMessage,
   };
 }
 
