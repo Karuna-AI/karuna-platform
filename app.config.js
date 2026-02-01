@@ -40,7 +40,7 @@ module.exports = {
     assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: IS_DEV ? 'com.karuna.app.dev' : 'com.karuna.app',
+      bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
       buildNumber: '1',
       infoPlist: {
         NSMicrophoneUsageDescription:
@@ -66,7 +66,7 @@ module.exports = {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#4F46E5',
       },
-      package: IS_DEV ? 'com.karuna.app.dev' : 'com.karuna.app',
+      package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
       versionCode: 1,
       permissions: [
         'android.permission.RECORD_AUDIO',
