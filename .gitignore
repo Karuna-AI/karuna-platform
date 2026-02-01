@@ -13,6 +13,9 @@ server/.env.*
 dist/
 build/
 
+# Claude Code local settings (may contain sensitive context)
+.claude/settings.local.json
+
 # IDE
 .idea/
 .vscode/

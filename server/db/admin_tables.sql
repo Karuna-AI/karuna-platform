@@ -194,7 +194,7 @@ INSERT INTO feature_flags (name, description, is_enabled, enabled_for_all) VALUE
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================================
--- Create default super admin (password: admin123 - CHANGE IN PRODUCTION!)
--- Password hash for 'admin123' with the same hashing as careCircle.js
+-- Create default super admin (CHANGE PASSWORD IN PRODUCTION!)
+-- Password hash generated with bcryptjs - update via seed script or API
 -- ============================================================================
 -- Note: You should create the admin user through the API or manually update the password hash

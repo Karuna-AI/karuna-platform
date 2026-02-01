@@ -285,7 +285,7 @@ This section provides detailed technical information about how the Caregiver Por
 │              │  Container: karuna-postgres                                  │
 │              │  Port: 5437 → 5432      │                                    │
 │              │  User: karuna           │                                    │
-│              │  Password: ganesh       │                                    │
+│              │  Password: <your-password> │                                    │
 │              │  Database: karuna       │                                    │
 │              └─────────────────────────┘                                    │
 │                                                                             │
@@ -382,7 +382,7 @@ Mobile App                Server                  Database
 | **Database** | PostgreSQL 16 (Alpine) via Docker |
 | **Container** | `karuna-postgres` |
 | **Port** | 5437 (host) → 5432 (container) |
-| **Credentials** | User: `karuna`, Password: `ganesh`, DB: `karuna` |
+| **Credentials** | User: `karuna`, Password: *(from .env)*, DB: `karuna` |
 | **Connection** | `pg` library with connection pooling (max 20) |
 | **Key Files** | `server/db/index.js`, `server/db/init.sql` |
 
@@ -393,7 +393,7 @@ Mobile App                Server                  Database
   port: 5437,
   database: 'karuna',
   user: 'karuna',
-  password: 'ganesh',
+  password: '<your-password>',
   max: 20,                      // Max connections
   idleTimeoutMillis: 30000,     // 30s idle timeout
   connectionTimeoutMillis: 2000  // 2s connection timeout
@@ -1484,7 +1484,7 @@ docker-compose down -v
 | Port | 5437 |
 | Database | karuna |
 | User | karuna |
-| Password | ganesh |
+| Password | *(from .env)* |
 
 ### Caregiver Portal Setup
 
@@ -1504,9 +1504,9 @@ npm run dev  # Runs on port 3040
 
 **Default Admin Credentials:**
 - Email: `admin@karuna.com`
-- Password: `admin123`
+- Password: *(set during seed — see `server/scripts/seed-admin.js`)*
 
-> **Important:** Change the admin password in production!
+> **Important:** Always set a strong admin password. Never use defaults in production!
 
 ### Environment Variables
 
@@ -1526,7 +1526,7 @@ DB_HOST=localhost
 DB_PORT=5437
 DB_NAME=karuna
 DB_USER=karuna
-DB_PASSWORD=ganesh
+DB_PASSWORD=<your-password>
 DB_LOG_QUERIES=false
 ```
 
