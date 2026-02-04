@@ -86,7 +86,7 @@ jobs:
           VITE_API_URL: ${{ secrets.API_URL }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: caregiver-portal-dist
           path: caregiver-portal/dist
@@ -116,7 +116,7 @@ jobs:
           VITE_API_URL: ${{ secrets.API_URL }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: admin-portal-dist
           path: admin-portal/dist
