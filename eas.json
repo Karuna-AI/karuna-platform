@@ -19,6 +19,10 @@
     },
     "preview": {
       "distribution": "internal",
+      "ios": {
+        "distribution": "store",
+        "image": "latest"
+      },
       "android": {
         "buildType": "apk",
         "credentialsSource": "remote",
@@ -30,6 +34,9 @@
     },
     "production": {
       "distribution": "store",
+      "ios": {
+        "image": "latest"
+      },
       "android": {
         "buildType": "app-bundle",
         "credentialsSource": "local"
@@ -40,11 +47,18 @@
     }
   },
   "submit": {
+    "preview": {
+      "ios": {
+        "appleId": "admin@karunaapp.in",
+        "ascAppId": "6760266687",
+        "appleTeamId": "9K4Q978949"
+      }
+    },
     "production": {
       "ios": {
-        "appleId": "your-apple-id@example.com",
-        "ascAppId": "your-app-store-connect-app-id",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "admin@karunaapp.in",
+        "ascAppId": "6760266687",
+        "appleTeamId": "9K4Q978949"
       },
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",
