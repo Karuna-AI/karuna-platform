@@ -3,6 +3,9 @@
  * Global configuration and mocks for all tests
  */
 
+// Define React Native globals
+(global as any).__DEV__ = true;
+
 // Mock timers
 jest.useFakeTimers();
 

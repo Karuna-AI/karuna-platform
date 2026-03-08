@@ -51,6 +51,8 @@ module.exports = {
     '^expo-local-authentication$': '<rootDir>/../src/web/expo-local-authentication-mock.ts',
     '^expo-calendar$': '<rootDir>/../src/web/expo-calendar-mock.ts',
     '^expo-file-system$': '<rootDir>/../src/web/expo-file-system-mock.ts',
+    '^expo-constants$': '<rootDir>/../src/web/expo-constants-mock.ts',
+    '^expo-av$': '<rootDir>/../src/web/expo-av-mock.ts',
     '^@react-native-community/slider$': '<rootDir>/../src/web/slider-mock.tsx',
   },
 
