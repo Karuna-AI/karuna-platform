@@ -207,10 +207,16 @@ function App(): JSX.Element {
       }
     };
 
-    initializeApp();
+    let cancelled = false;
+
+    initializeApp().catch((error) => {
+      if (!cancelled) {
+        console.error('App initialization failed:', error);
+      }
+    });
 
     // Handle app state changes for auto-lock
-    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         // Lock vault when app goes to background
         setIsVaultLocked(true);
@@ -226,13 +232,15 @@ function App(): JSX.Element {
 
     // Cleanup on unmount
     return () => {
+      cancelled = true;
       subscription.remove();
       telemetryService.destroy();
+      // Fire-and-forget: catch to avoid unhandled rejection
       auditLogService.log({
         action: 'app_closed',
         category: 'system',
         description: 'App was closed',
-      });
+      }).catch(() => {});
     };
   }, []);
 
@@ -247,11 +255,14 @@ function App(): JSX.Element {
       }
     });
 
-    // Load initial check-ins
+    // Load initial check-ins (don't re-initialize, already done in initializeApp)
     const loadCheckIns = async () => {
-      await proactiveEngineService.initialize();
-      const pending = proactiveEngineService.getPendingCheckIns();
-      setPendingCheckIns(pending);
+      try {
+        const pending = proactiveEngineService.getPendingCheckIns();
+        setPendingCheckIns(pending);
+      } catch (error) {
+        console.error('Failed to load check-ins:', error);
+      }
     };
     loadCheckIns();
 
@@ -271,6 +282,8 @@ function App(): JSX.Element {
     // Handle URL that launched the app
     Linking.getInitialURL().then((url) => {
       if (url) handleUrl(url);
+    }).catch((error) => {
+      console.error('Failed to get initial URL:', error);
     });
 
     // Handle URLs while app is running
@@ -597,7 +610,7 @@ function App(): JSX.Element {
       action: 'auth_biometric_success',
       category: 'security',
       description: 'App unlocked',
-    });
+    }).catch(() => {});
   }, []);
 
   // Handle vault unlock
@@ -611,7 +624,7 @@ function App(): JSX.Element {
       action: 'vault_unlocked',
       category: 'vault',
       description: 'Vault unlocked',
-    });
+    }).catch(() => {});
   }, [pendingVaultNavigation]);
 
   // Render current screen
