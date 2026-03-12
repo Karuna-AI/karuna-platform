@@ -55,7 +55,14 @@ class CareCircleSyncService {
 
     if (savedCircleId) this.careCircleId = savedCircleId;
     if (savedToken) this.authToken = savedToken;
-    if (savedChanges) this.pendingChanges = JSON.parse(savedChanges);
+    if (savedChanges) {
+      try {
+        this.pendingChanges = JSON.parse(savedChanges);
+      } catch {
+        console.warn('[CareCircleSync] Corrupted pending changes, resetting');
+        this.pendingChanges = [];
+      }
+    }
 
     console.debug('[CareCircleSync] Initialized with device:', this.deviceId);
   }
