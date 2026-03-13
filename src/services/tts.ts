@@ -210,7 +210,12 @@ class TextToSpeechService {
 
   async speak(text: string, immediate: boolean = false): Promise<void> {
     if (!this.isInitialized) {
-      await this.initialize();
+      try {
+        await this.initialize();
+      } catch (error) {
+        console.error('TTS initialization failed during speak:', error);
+        return;
+      }
     }
 
     if (immediate) {
@@ -246,7 +251,7 @@ class TextToSpeechService {
       await Tts.speak(text);
     } catch (error) {
       console.error('TTS speak error:', error);
-      throw new Error('Could not speak the text. Please try again.');
+      this.isSpeaking = false;
     }
   }
 

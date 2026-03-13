@@ -29,7 +29,7 @@ class VoiceRecorder {
 
   constructor() {
     // Configure audio mode for recording
-    this.configureAudio();
+    this.configureAudio().catch(() => {});
   }
 
   private async configureAudio(): Promise<void> {

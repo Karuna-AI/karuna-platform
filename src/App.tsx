@@ -298,57 +298,61 @@ function App(): JSX.Element {
    * Handle intent detection from chat
    */
   const handleIntentDetected = useCallback(async (intent: ParsedIntent) => {
-    const displayMessage = formatIntentForDisplay(intent);
-    const suggestion = getIntentSuggestion(intent);
+    try {
+      const displayMessage = formatIntentForDisplay(intent);
+      const suggestion = getIntentSuggestion(intent);
 
-    console.log('Intent detected:', {
-      type: intent.type,
-      confidence: intent.confidence,
-      entities: intent.entities,
-      display: displayMessage,
-      suggestion,
-    });
+      console.log('Intent detected:', {
+        type: intent.type,
+        confidence: intent.confidence,
+        entities: intent.entities,
+        display: displayMessage,
+        suggestion,
+      });
 
-    // Only process actionable intents
-    if (!isActionableIntent(intent)) {
-      return;
-    }
-
-    setCurrentIntent(intent);
-
-    // Process the intent
-    const result = await intentActionsService.processIntent(intent);
-
-    if (result.requiresConfirmation) {
-      // Phase 13: Handle new action confirmations
-      if (result.actionConfirmation) {
-        setActionConfirmation(result.actionConfirmation);
-        setConfirmationData(null);
-        setShowIntentModal(true);
-      } else if (result.confirmationData) {
-        // Legacy confirmation data (call, message, reminder)
-        // Check if we have multiple contact matches
-        if (intent.entities.contact) {
-          let contacts = contactsService.findByRelationship(intent.entities.contact);
-          if (contacts.length === 0) {
-            contacts = contactsService.searchContacts(intent.entities.contact);
-          }
-
-          if (contacts.length > 1 && contacts[0].matchScore <= 0.8) {
-            // Multiple ambiguous matches - show picker
-            setMultipleContacts(contacts);
-          } else {
-            setMultipleContacts([]);
-          }
-        }
-
-        setConfirmationData(result.confirmationData);
-        setActionConfirmation(null);
-        setShowIntentModal(true);
+      // Only process actionable intents
+      if (!isActionableIntent(intent)) {
+        return;
       }
-    } else if (!result.success) {
-      // Intent processing failed - could show error or let AI handle it
-      console.log('Intent processing failed:', result.message);
+
+      setCurrentIntent(intent);
+
+      // Process the intent
+      const result = await intentActionsService.processIntent(intent);
+
+      if (result.requiresConfirmation) {
+        // Phase 13: Handle new action confirmations
+        if (result.actionConfirmation) {
+          setActionConfirmation(result.actionConfirmation);
+          setConfirmationData(null);
+          setShowIntentModal(true);
+        } else if (result.confirmationData) {
+          // Legacy confirmation data (call, message, reminder)
+          // Check if we have multiple contact matches
+          if (intent.entities.contact) {
+            let contacts = contactsService.findByRelationship(intent.entities.contact);
+            if (contacts.length === 0) {
+              contacts = contactsService.searchContacts(intent.entities.contact);
+            }
+
+            if (contacts.length > 1 && contacts[0].matchScore <= 0.8) {
+              // Multiple ambiguous matches - show picker
+              setMultipleContacts(contacts);
+            } else {
+              setMultipleContacts([]);
+            }
+          }
+
+          setConfirmationData(result.confirmationData);
+          setActionConfirmation(null);
+          setShowIntentModal(true);
+        }
+      } else if (!result.success) {
+        // Intent processing failed - could show error or let AI handle it
+        console.log('Intent processing failed:', result.message);
+      }
+    } catch (error) {
+      console.error('Intent detection handler error:', error);
     }
   }, []);
 

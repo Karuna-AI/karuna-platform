@@ -3,6 +3,7 @@ import React, {
   useContext,
   useCallback,
   useState,
+  useRef,
   ReactNode,
   useEffect,
 } from 'react';
@@ -89,34 +90,13 @@ export function ChatProvider({
     setTTSLanguage(settings.language);
   }, [settings.language, setTTSLanguage]);
 
-  // Initialize audio session manager
-  useEffect(() => {
-    audioSessionService.initialize({
-      onInterruptionBegan: () => {
-        // Stop recording if interrupted (phone call, etc.)
-        if (isRecording) {
-          cancelRecording();
-        }
-      },
-      onInterruptionEnded: () => {
-        // Could auto-resume or just let user restart
-      },
-      onAppBackground: () => {
-        // Stop recording when app goes to background
-        if (isRecording) {
-          cancelRecording();
-        }
-      },
-    });
-
-    return () => {
-      audioSessionService.cleanup();
-    };
-  }, []);
+  // Audio session initialization is deferred until after useVoiceInput (see below)
 
   const handleResponse = useCallback(
     (response: string) => {
-      speak(response, true);
+      speak(response, true).catch((error: unknown) => {
+        console.error('TTS speak failed in handleResponse:', error);
+      });
     },
     [speak]
   );
@@ -167,6 +147,35 @@ export function ChatProvider({
     enableHaptics: settings.hapticFeedback,
     language: languageConfig.voice.whisperCode, // Pass Whisper language code for STT
   });
+
+  // Use refs to avoid stale closures in audio session callbacks
+  const isRecordingRef = useRef(false);
+  const cancelRecordingRef = useRef(cancelVoiceRecording);
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { cancelRecordingRef.current = cancelVoiceRecording; }, [cancelVoiceRecording]);
+
+  // Initialize audio session manager
+  useEffect(() => {
+    audioSessionService.initialize({
+      onInterruptionBegan: () => {
+        if (isRecordingRef.current) {
+          cancelRecordingRef.current();
+        }
+      },
+      onInterruptionEnded: () => {
+        // Could auto-resume or just let user restart
+      },
+      onAppBackground: () => {
+        if (isRecordingRef.current) {
+          cancelRecordingRef.current();
+        }
+      },
+    });
+
+    return () => {
+      audioSessionService.cleanup();
+    };
+  }, []);
 
   // Track recording state for audio session
   useEffect(() => {
