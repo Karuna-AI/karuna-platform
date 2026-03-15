@@ -5,7 +5,7 @@ name: Mobile Build
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
     paths:
       - 'src/**'
       - 'app.json'
@@ -37,6 +37,8 @@ jobs:
   build:
     name: Build ${{ github.event.inputs.platform || 'all' }} (${{ github.event.inputs.profile || 'preview' }})
     runs-on: ubuntu-latest
+    # Skip if EXPO_TOKEN is not configured
+    if: ${{ secrets.EXPO_TOKEN != '' }}
 
     steps:
       - name: Checkout code
@@ -62,14 +64,14 @@ jobs:
         run: eas build --platform android --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
-          API_URL: ${{ secrets.API_URL }}
+          API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
 
       - name: Build iOS
         if: github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' || github.event.inputs.platform == ''
         run: eas build --platform ios --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
-          API_URL: ${{ secrets.API_URL }}
+          API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
 
   submit-android:
     name: Submit to Google Play
