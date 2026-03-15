@@ -40,6 +40,24 @@ if (Platform.OS !== 'web') {
   });
 }
 
+// IMPORTANT: TaskManager.defineTask MUST be called at module level (Expo requirement).
+// Calling it inside an async function causes native crashes on iOS.
+if (Platform.OS !== 'web') {
+  try {
+    TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+      try {
+        await proactiveEngineService.runCheck();
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+      } catch (error) {
+        console.error('[ProactiveEngine] Background task error:', error);
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+      }
+    });
+  } catch (error) {
+    console.error('[ProactiveEngine] Failed to define background task:', error);
+  }
+}
+
 class ProactiveEngineService {
   private preferences: ProactivePreferences = DEFAULT_PROACTIVE_PREFERENCES;
   private pendingCheckIns: CheckIn[] = [];
@@ -47,6 +65,7 @@ class ProactiveEngineService {
   private isInitialized: boolean = false;
   private checkInterval: NodeJS.Timeout | null = null;
   private listeners: Set<(checkIns: CheckIn[]) => void> = new Set();
+  private appStateSubscription: { remove: () => void } | null = null;
 
   constructor() {
     this.state = {
@@ -96,8 +115,8 @@ class ProactiveEngineService {
       // Register background task
       await this.registerBackgroundTask();
 
-      // Set up app state listener
-      AppState.addEventListener('change', this.handleAppStateChange);
+      // Set up app state listener (store subscription for cleanup)
+      this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
 
       this.isInitialized = true;
       console.debug('[ProactiveEngine] Initialized');
@@ -463,22 +482,12 @@ class ProactiveEngineService {
 
   /**
    * Register background fetch task
+   * Note: TaskManager.defineTask is called at module level (Expo requirement).
    */
   private async registerBackgroundTask(): Promise<void> {
     if (Platform.OS === 'web') return;
     try {
-      // Define the task
-      TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
-        try {
-          await this.runCheck();
-          return BackgroundFetch.BackgroundFetchResult.NewData;
-        } catch (error) {
-          console.error('[ProactiveEngine] Background task error:', error);
-          return BackgroundFetch.BackgroundFetchResult.Failed;
-        }
-      });
-
-      // Register the task
+      // Register the task (defineTask already called at module level)
       await BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
         minimumInterval: 15 * 60, // 15 minutes
         stopOnTerminate: false,

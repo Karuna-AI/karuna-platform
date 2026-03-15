@@ -1,4 +1,4 @@
-import Tts, { Voice } from 'react-native-tts';
+import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import { languageService } from './languageService';
 import { LanguageCode, getLanguageConfig } from '../i18n/languages';
@@ -18,9 +18,11 @@ class TextToSpeechService {
   private speechQueue: string[] = [];
   private onSpeakStartCallbacks: TTSEventCallback[] = [];
   private onSpeakFinishCallbacks: TTSEventCallback[] = [];
-  private availableVoices: Voice[] = [];
+  private availableVoices: Speech.Voice[] = [];
   private currentLanguage: LanguageCode = 'en';
   private currentVoiceId: string | null = null;
+  private currentRate: number = Platform.OS === 'ios' ? 0.45 : 0.8;
+  private currentPitch: number = 1.0;
 
   async initialize(): Promise<void> {
     if (this.isInitialized) {
@@ -29,57 +31,25 @@ class TextToSpeechService {
 
     try {
       if (Platform.OS === 'web') {
-        // react-native-tts is not available on web; use Web Speech API fallback
         this.isInitialized = true;
         console.debug('[TTS] Web platform - using Web Speech API fallback');
         return;
       }
 
-      await Tts.getInitStatus();
-
-      // Load available voices for language selection
+      // expo-speech doesn't need explicit initialization - it just works
+      // Load available voices
       await this.loadAvailableVoices();
-
-      Tts.setDefaultRate(Platform.OS === 'ios' ? 0.45 : 0.8);
-      Tts.setDefaultPitch(1.0);
 
       // Set initial language based on device locale
       const deviceLanguage = languageService.getCurrentLanguage();
       await this.setLanguage(deviceLanguage);
 
-      Tts.addEventListener('tts-start', () => {
-        this.isSpeaking = true;
-        this.onSpeakStartCallbacks.forEach((cb) => cb());
-      });
-
-      Tts.addEventListener('tts-finish', () => {
-        this.isSpeaking = false;
-        this.onSpeakFinishCallbacks.forEach((cb) => cb());
-        this.processQueue();
-      });
-
-      Tts.addEventListener('tts-cancel', () => {
-        this.isSpeaking = false;
-        this.onSpeakFinishCallbacks.forEach((cb) => cb());
-      });
-
       this.isInitialized = true;
       console.debug(`[TTS] Initialized with language: ${deviceLanguage}`);
     } catch (error) {
       console.error('TTS initialization error:', error);
-
-      if (Platform.OS === 'android') {
-        try {
-          await Tts.requestInstallEngine();
-        } catch (installError) {
-          console.error('TTS engine install error:', installError);
-          throw new Error(
-            'Text-to-speech is not available. Please install a TTS engine.'
-          );
-        }
-      }
-
-      throw new Error('Could not initialize text-to-speech.');
+      // Still mark as initialized - expo-speech may work even if voice loading fails
+      this.isInitialized = true;
     }
   }
 
@@ -88,7 +58,7 @@ class TextToSpeechService {
    */
   private async loadAvailableVoices(): Promise<void> {
     try {
-      this.availableVoices = await Tts.voices();
+      this.availableVoices = await Speech.getAvailableVoicesAsync();
       console.debug(`[TTS] Loaded ${this.availableVoices.length} voices`);
     } catch (error) {
       console.error('[TTS] Error loading voices:', error);
@@ -100,10 +70,8 @@ class TextToSpeechService {
    * Get available voices for a specific language
    */
   getVoicesForLanguage(language: LanguageCode): TTSVoiceInfo[] {
-    const config = getLanguageConfig(language);
     const languageCode = language.toLowerCase();
 
-    // Filter voices by language (match beginning of language code)
     return this.availableVoices
       .filter(voice => {
         const voiceLang = voice.language.toLowerCase();
@@ -111,12 +79,12 @@ class TextToSpeechService {
                voiceLang.split('-')[0] === languageCode.split('-')[0];
       })
       .map(voice => ({
-        id: voice.id,
+        id: voice.identifier,
         name: voice.name,
         language: voice.language,
-        quality: voice.quality,
+        quality: voice.quality === Speech.VoiceQuality.Enhanced ? 500 : 300,
       }))
-      .sort((a, b) => b.quality - a.quality); // Sort by quality (higher first)
+      .sort((a, b) => b.quality - a.quality);
   }
 
   /**
@@ -124,10 +92,10 @@ class TextToSpeechService {
    */
   getAllVoices(): TTSVoiceInfo[] {
     return this.availableVoices.map(voice => ({
-      id: voice.id,
+      id: voice.identifier,
       name: voice.name,
       language: voice.language,
-      quality: voice.quality,
+      quality: voice.quality === Speech.VoiceQuality.Enhanced ? 500 : 300,
     }));
   }
 
@@ -136,14 +104,9 @@ class TextToSpeechService {
    */
   async setLanguage(language: LanguageCode): Promise<void> {
     this.currentLanguage = language;
-    if (Platform.OS === 'web') return;
-
-    const config = getLanguageConfig(language);
-    const pipelineConfig = languageService.getVoicePipelineConfig(language);
 
     try {
-      // Set the language
-      await Tts.setDefaultLanguage(pipelineConfig.ttsLanguage);
+      const config = getLanguageConfig(language);
 
       // Try to select the best voice for this language
       const preferredVoices = config.voice.ttsVoices[Platform.OS as 'ios' | 'android' | 'web'] ||
@@ -152,13 +115,13 @@ class TextToSpeechService {
       // Find first available preferred voice
       for (const preferredVoice of preferredVoices) {
         const matchingVoice = this.availableVoices.find(v =>
-          v.id === preferredVoice ||
+          v.identifier === preferredVoice ||
           v.name === preferredVoice ||
           v.name.toLowerCase().includes(preferredVoice.toLowerCase())
         );
 
         if (matchingVoice) {
-          await this.setVoice(matchingVoice.id);
+          this.currentVoiceId = matchingVoice.identifier;
           console.debug(`[TTS] Selected voice: ${matchingVoice.name} for ${language}`);
           return;
         }
@@ -167,15 +130,16 @@ class TextToSpeechService {
       // Fallback: find any voice for this language
       const languageVoices = this.getVoicesForLanguage(language);
       if (languageVoices.length > 0) {
-        await this.setVoice(languageVoices[0].id);
+        this.currentVoiceId = languageVoices[0].id;
         console.debug(`[TTS] Using fallback voice: ${languageVoices[0].name} for ${language}`);
       } else {
+        this.currentVoiceId = null;
         console.warn(`[TTS] No voice found for language: ${language}`);
       }
 
       // Apply speech rate multiplier for this language
       const baseRate = Platform.OS === 'ios' ? 0.45 : 0.8;
-      this.setRate(baseRate * config.voice.speechRateMultiplier);
+      this.currentRate = baseRate * config.voice.speechRateMultiplier;
 
     } catch (error) {
       console.error(`[TTS] Error setting language ${language}:`, error);
@@ -186,12 +150,7 @@ class TextToSpeechService {
    * Set a specific voice by ID
    */
   async setVoice(voiceId: string): Promise<void> {
-    try {
-      await Tts.setDefaultVoice(voiceId);
-      this.currentVoiceId = voiceId;
-    } catch (error) {
-      console.error(`[TTS] Error setting voice ${voiceId}:`, error);
-    }
+    this.currentVoiceId = voiceId;
   }
 
   /**
@@ -230,7 +189,6 @@ class TextToSpeechService {
 
     try {
       if (Platform.OS === 'web') {
-        // Use Web Speech API on web
         if (typeof window !== 'undefined' && window.speechSynthesis) {
           window.speechSynthesis.cancel();
           const utterance = new SpeechSynthesisUtterance(text);
@@ -248,7 +206,37 @@ class TextToSpeechService {
         }
         return;
       }
-      await Tts.speak(text);
+
+      // Use expo-speech for native platforms
+      const options: Speech.SpeechOptions = {
+        language: this.currentLanguage,
+        rate: this.currentRate,
+        pitch: this.currentPitch,
+        onStart: () => {
+          this.isSpeaking = true;
+          this.onSpeakStartCallbacks.forEach((cb) => cb());
+        },
+        onDone: () => {
+          this.isSpeaking = false;
+          this.onSpeakFinishCallbacks.forEach((cb) => cb());
+          this.processQueue();
+        },
+        onStopped: () => {
+          this.isSpeaking = false;
+          this.onSpeakFinishCallbacks.forEach((cb) => cb());
+        },
+        onError: (error) => {
+          console.error('[TTS] Speech error:', error);
+          this.isSpeaking = false;
+          this.onSpeakFinishCallbacks.forEach((cb) => cb());
+        },
+      };
+
+      if (this.currentVoiceId) {
+        options.voice = this.currentVoiceId;
+      }
+
+      Speech.speak(text, options);
     } catch (error) {
       console.error('TTS speak error:', error);
       this.isSpeaking = false;
@@ -273,7 +261,7 @@ class TextToSpeechService {
         this.isSpeaking = false;
         return;
       }
-      await Tts.stop();
+      Speech.stop();
       this.isSpeaking = false;
     } catch (error) {
       console.error('TTS stop error:', error);
@@ -287,7 +275,7 @@ class TextToSpeechService {
     }
 
     try {
-      await Tts.pause();
+      Speech.pause();
     } catch (error) {
       console.error('TTS pause error:', error);
     }
@@ -300,20 +288,18 @@ class TextToSpeechService {
     }
 
     try {
-      await Tts.resume();
+      Speech.resume();
     } catch (error) {
       console.error('TTS resume error:', error);
     }
   }
 
   setRate(rate: number): void {
-    const clampedRate = Math.max(0.1, Math.min(1.0, rate));
-    Tts.setDefaultRate(clampedRate);
+    this.currentRate = Math.max(0.1, Math.min(2.0, rate));
   }
 
   setPitch(pitch: number): void {
-    const clampedPitch = Math.max(0.5, Math.min(2.0, pitch));
-    Tts.setDefaultPitch(clampedPitch);
+    this.currentPitch = Math.max(0.5, Math.min(2.0, pitch));
   }
 
   onSpeakStart(callback: TTSEventCallback): () => void {

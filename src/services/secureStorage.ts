@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
 import { auditLogService } from './auditLog';
 
@@ -169,12 +170,11 @@ class SecureStorageService {
     options: SecureStorageOptions = {}
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Generate a random 256-bit key
-      const keyBytes = new Uint8Array(32);
-      crypto.getRandomValues(keyBytes);
+      // Generate a random 256-bit key using expo-crypto (works on all platforms)
+      const keyBytes = await Crypto.getRandomBytesAsync(32);
 
       // Convert to base64 for storage
-      const keyBase64 = btoa(String.fromCharCode(...keyBytes));
+      const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(keyBytes)));
 
       return this.setItem(keyName, keyBase64, options);
     } catch (error) {
