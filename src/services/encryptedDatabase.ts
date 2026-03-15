@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import { secureStorageService } from './secureStorage';
 import { auditLogService } from './auditLog';
 
@@ -6,46 +7,68 @@ const DB_PREFIX = '@karuna_encrypted_';
 const DB_VERSION = 1;
 
 /**
- * Encryption utilities using Web Crypto API
+ * Check if Web Crypto API (crypto.subtle) is available.
+ * Hermes engine in React Native does NOT support crypto.subtle.
+ */
+function hasCryptoSubtle(): boolean {
+  return typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined' &&
+    typeof crypto.subtle.generateKey === 'function';
+}
+
+/**
+ * Encryption utilities with fallback for environments without crypto.subtle.
+ *
+ * When crypto.subtle is available (modern browsers), uses AES-GCM.
+ * When not available (Hermes/React Native), uses expo-crypto SHA-256 based
+ * XOR encryption with a derived key. Data is already sandboxed per-app on
+ * mobile, and the key is stored in the system keychain via SecureStore.
  */
 class EncryptionUtils {
   private key: CryptoKey | null = null;
+  private keyBytes: Uint8Array | null = null;
   private keyString: string | null = null;
+  private useWebCrypto: boolean = false;
 
   async initialize(keyBase64?: string): Promise<boolean> {
     try {
+      this.useWebCrypto = hasCryptoSubtle();
+
       if (keyBase64) {
         this.keyString = keyBase64;
-        this.key = await this.importKey(keyBase64);
+        this.keyBytes = Uint8Array.from(atob(keyBase64), (c) => c.charCodeAt(0));
+        if (this.useWebCrypto) {
+          this.key = await this.importKey(keyBase64);
+        }
       } else {
         // Get or generate key from secure storage
         const result = await secureStorageService.getDatabaseKey();
         if (result.success && result.key) {
           this.keyString = result.key;
-          this.key = await this.importKey(result.key);
+          this.keyBytes = Uint8Array.from(atob(result.key), (c) => c.charCodeAt(0));
+          if (this.useWebCrypto) {
+            this.key = await this.importKey(result.key);
+          }
         } else {
-          // Generate new key
-          this.key = await this.generateKey();
-          this.keyString = await this.exportKey(this.key);
+          // Generate new key using expo-crypto
+          const newKeyBytes = await Crypto.getRandomBytesAsync(32);
+          this.keyBytes = new Uint8Array(newKeyBytes);
+          this.keyString = btoa(String.fromCharCode(...this.keyBytes));
+          if (this.useWebCrypto) {
+            this.key = await this.importKey(this.keyString);
+          }
           await secureStorageService.storeDatabaseKey(this.keyString);
         }
       }
+
+      if (!this.useWebCrypto) {
+        console.debug('[EncryptionUtils] Using expo-crypto fallback (crypto.subtle not available)');
+      }
+
       return true;
     } catch (error) {
       console.error('[EncryptionUtils] Init error:', error);
       return false;
     }
-  }
-
-  private async generateKey(): Promise<CryptoKey> {
-    return crypto.subtle.generateKey(
-      {
-        name: 'AES-GCM',
-        length: 256,
-      },
-      true,
-      ['encrypt', 'decrypt']
-    );
   }
 
   private async importKey(keyBase64: string): Promise<CryptoKey> {
@@ -59,50 +82,95 @@ class EncryptionUtils {
     );
   }
 
-  private async exportKey(key: CryptoKey): Promise<string> {
-    const exported = await crypto.subtle.exportKey('raw', key);
-    return btoa(String.fromCharCode(...new Uint8Array(exported)));
-  }
-
   async encrypt(plaintext: string): Promise<string> {
-    if (!this.key) throw new Error('Encryption not initialized');
+    if (!this.keyBytes) throw new Error('Encryption not initialized');
 
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encodedText = new TextEncoder().encode(plaintext);
+    if (this.useWebCrypto && this.key) {
+      // Use AES-GCM when available
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encodedText = new TextEncoder().encode(plaintext);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        this.key,
+        encodedText
+      );
+      const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv, 0);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      return btoa(String.fromCharCode(...combined));
+    }
 
-    const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      this.key,
-      encodedText
-    );
+    // Fallback: XOR encryption with SHA-256 derived keystream
+    const ivBytes = await Crypto.getRandomBytesAsync(16);
+    const iv = new Uint8Array(ivBytes);
+    const plainBytes = new TextEncoder().encode(plaintext);
+    const encrypted = await this.xorEncrypt(plainBytes, iv);
 
-    // Combine IV + ciphertext
-    const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    // Combine IV + encrypted data
+    const combined = new Uint8Array(iv.length + encrypted.length);
     combined.set(iv, 0);
-    combined.set(new Uint8Array(ciphertext), iv.length);
+    combined.set(encrypted, iv.length);
 
     return btoa(String.fromCharCode(...combined));
   }
 
   async decrypt(encryptedBase64: string): Promise<string> {
-    if (!this.key) throw new Error('Encryption not initialized');
+    if (!this.keyBytes) throw new Error('Encryption not initialized');
 
+    if (this.useWebCrypto && this.key) {
+      const combined = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
+      const iv = combined.slice(0, 12);
+      const ciphertext = combined.slice(12);
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        this.key,
+        ciphertext
+      );
+      return new TextDecoder().decode(decrypted);
+    }
+
+    // Fallback: XOR decryption
     const combined = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
-
-    const iv = combined.slice(0, 12);
-    const ciphertext = combined.slice(12);
-
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      this.key,
-      ciphertext
-    );
+    const iv = combined.slice(0, 16);
+    const cipherBytes = combined.slice(16);
+    const decrypted = await this.xorEncrypt(cipherBytes, iv); // XOR is symmetric
 
     return new TextDecoder().decode(decrypted);
   }
 
+  /**
+   * XOR encryption using SHA-256 derived keystream.
+   * Same operation for encrypt and decrypt (XOR is symmetric).
+   */
+  private async xorEncrypt(data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> {
+    const result = new Uint8Array(data.length);
+    let keystreamOffset = 0;
+    let keystream = new Uint8Array(0);
+    let blockCounter = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      if (keystreamOffset >= keystream.length) {
+        // Generate next 32-byte keystream block using SHA-256
+        const input = `${this.keyString}:${Array.from(iv).map(b => b.toString(16)).join('')}:${blockCounter}`;
+        const hash = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          input
+        );
+        keystream = new Uint8Array(32);
+        for (let j = 0; j < 32; j++) {
+          keystream[j] = parseInt(hash.substring(j * 2, j * 2 + 2), 16);
+        }
+        keystreamOffset = 0;
+        blockCounter++;
+      }
+      result[i] = data[i] ^ keystream[keystreamOffset++];
+    }
+
+    return result;
+  }
+
   isInitialized(): boolean {
-    return this.key !== null;
+    return this.keyBytes !== null;
   }
 }
 

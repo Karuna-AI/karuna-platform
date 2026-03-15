@@ -51,6 +51,7 @@ import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 import { MemoryViewer } from './components/MemoryViewer';
 import { parseKarunaUrl } from './services/incomingLinks';
 import * as Linking from 'expo-linking';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Gateway URL - configure for your environment
 const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
@@ -742,7 +743,7 @@ function App(): JSX.Element {
 
       default:
         return (
-          <>
+          <ErrorBoundary fallbackMessage="Karuna encountered an error loading the chat. Please try again.">
             <ChatProvider onIntentDetected={handleIntentDetected}>
               <ChatScreen
                 onOpenSettings={handleOpenSettings}
@@ -770,7 +771,7 @@ function App(): JSX.Element {
               onCancel={handleCloseModal}
               isLoading={isActionLoading}
             />
-          </>
+          </ErrorBoundary>
         );
     }
   };
