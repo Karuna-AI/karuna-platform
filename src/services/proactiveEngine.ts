@@ -29,19 +29,11 @@ const STORAGE_KEYS = {
 
 const BACKGROUND_FETCH_TASK = 'KARUNA_PROACTIVE_CHECK';
 
-// Configure notification handler (native only)
-if (Platform.OS !== 'web') {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-}
+// Notification handler is configured once in App.tsx (see initializeNotifications)
+// Do NOT set it here at module level - duplicate calls can crash on iOS 26
 
 // IMPORTANT: TaskManager.defineTask MUST be called at module level (Expo requirement).
-// Calling it inside an async function causes native crashes on iOS.
+// Wrapped in try-catch to prevent native crash during module load on iOS 26.
 if (Platform.OS !== 'web') {
   try {
     TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {

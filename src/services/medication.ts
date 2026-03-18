@@ -16,16 +16,8 @@ const STORAGE_KEYS = {
   NOTIFICATION_IDS: '@karuna_medication_notification_ids',
 };
 
-// Configure notifications (native only)
-if (Platform.OS !== 'web') {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-}
+// Notification handler is configured once in App.tsx (see initializeNotifications)
+// Do NOT set it here at module level - duplicate calls can crash on iOS 26
 
 class MedicationService {
   private medications: Medication[] = [];
