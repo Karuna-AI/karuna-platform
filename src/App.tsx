@@ -51,7 +51,24 @@ import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 import { MemoryViewer } from './components/MemoryViewer';
 import { parseKarunaUrl } from './services/incomingLinks';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+// Configure notification handler once at app level (native only).
+// This MUST be at module scope but wrapped in try-catch for iOS 26 safety.
+if (Platform.OS !== 'web') {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  } catch (error) {
+    console.error('[App] Failed to set notification handler:', error);
+  }
+}
 
 // Gateway URL - configure for your environment
 const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
