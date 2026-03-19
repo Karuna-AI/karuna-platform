@@ -381,7 +381,12 @@ function App(): JSX.Element {
     if (!currentIntent) return;
 
     // Update confirmation with selected contact
-    const phoneNumber = contact.phoneNumbers[0];
+    const phoneNumber = contact.phoneNumbers?.[0];
+
+    if (!phoneNumber) {
+      handleCloseModal();
+      return;
+    }
 
     if (currentIntent.type === 'call') {
       setConfirmationData({

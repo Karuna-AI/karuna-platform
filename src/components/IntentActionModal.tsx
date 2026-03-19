@@ -119,7 +119,7 @@ export function IntentActionModal({
                       {item.contact.name}
                     </Text>
                     <Text style={[styles.contactPhone, { color: colors.textSecondary, fontSize: fonts.body }]}>
-                      {item.contact.phoneNumbers[0]}
+                      {item.contact.phoneNumbers?.[0] || 'No phone number'}
                     </Text>
                   </View>
                   <View style={[styles.selectIcon, { backgroundColor: colors.primary }]}>
