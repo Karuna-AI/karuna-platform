@@ -112,7 +112,14 @@ class IntentActionsService {
     if (results.length === 1 || results[0].matchScore > 0.8) {
       // Single clear match - prepare confirmation
       const contact = results[0].contact;
-      const phoneNumber = contact.phoneNumbers[0];
+      const phoneNumber = contact.phoneNumbers?.[0];
+
+      if (!phoneNumber) {
+        return {
+          success: false,
+          message: `${contact.name} doesn't have a phone number saved. Would you like to try someone else?`,
+        };
+      }
 
       return {
         success: true,
@@ -180,7 +187,14 @@ class IntentActionsService {
     }
 
     const contact = results[0].contact;
-    const phoneNumber = contact.phoneNumbers[0];
+    const phoneNumber = contact.phoneNumbers?.[0];
+
+    if (!phoneNumber) {
+      return {
+        success: false,
+        message: `${contact.name} doesn't have a phone number saved. Would you like to try someone else?`,
+      };
+    }
 
     return {
       success: true,
@@ -801,7 +815,14 @@ class IntentActionsService {
     }
 
     const contact = results[0].contact;
-    const phoneNumber = contact.phoneNumbers[0];
+    const phoneNumber = contact.phoneNumbers?.[0];
+
+    if (!phoneNumber) {
+      return {
+        success: false,
+        message: `${contact.name} doesn't have a phone number saved.`,
+      };
+    }
 
     const request: ActionRequest = {
       type: 'whatsapp',
