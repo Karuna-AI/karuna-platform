@@ -143,7 +143,7 @@ jobs:
 
       - name: Deploy to server
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
