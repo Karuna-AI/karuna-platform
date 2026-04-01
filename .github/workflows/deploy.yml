@@ -176,7 +176,7 @@ jobs:
 
       - name: Download artifact
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: caregiver-portal-dist
           path: dist
@@ -213,7 +213,7 @@ jobs:
 
       - name: Download artifact
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: admin-portal-dist
           path: dist
