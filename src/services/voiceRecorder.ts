@@ -1,5 +1,17 @@
-import { Audio } from 'expo-av';
+import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
+
+// Lazy-load expo-av to prevent AVAudioSession crash on iOS 26+
+// The native module initializes AVInputDeviceDiscoverySession on import,
+// which crashes during app launch on iOS 26.4
+let Audio: any = null;
+async function getAudio() {
+  if (!Audio) {
+    const mod = await import('expo-av');
+    Audio = mod.Audio;
+  }
+  return Audio;
+}
 
 export type RecordingError =
   | 'permission_denied'
@@ -21,7 +33,7 @@ export class RecordingException extends Error {
 }
 
 class VoiceRecorder {
-  private recording: Audio.Recording | null = null;
+  private recording: any = null;
   private recordingDuration: number = 0;
   private lastPermissionResult: PermissionResult | null = null;
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
@@ -37,7 +49,8 @@ class VoiceRecorder {
 
   private async configureAudio(): Promise<void> {
     try {
-      await Audio.setAudioModeAsync({
+      const AudioModule = await getAudio();
+      await AudioModule.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
@@ -105,20 +118,21 @@ class VoiceRecorder {
 
     try {
       // Create a new recording instance
-      const { recording } = await Audio.Recording.createAsync(
+      const AudioModule = await getAudio();
+      const { recording } = await AudioModule.Recording.createAsync(
         {
           android: {
             extension: '.m4a',
-            outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-            audioEncoder: Audio.AndroidAudioEncoder.AAC,
+            outputFormat: AudioModule.AndroidOutputFormat.MPEG_4,
+            audioEncoder: AudioModule.AndroidAudioEncoder.AAC,
             sampleRate: 44100,
             numberOfChannels: 1,
             bitRate: 128000,
           },
           ios: {
             extension: '.m4a',
-            outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-            audioQuality: Audio.IOSAudioQuality.HIGH,
+            outputFormat: AudioModule.IOSOutputFormat.MPEG4AAC,
+            audioQuality: AudioModule.IOSAudioQuality.HIGH,
             sampleRate: 44100,
             numberOfChannels: 1,
             bitRate: 128000,
