@@ -127,7 +127,7 @@ export async function getPermissionsAsync(): Promise<PermissionResponse> {
  * Get contacts from device
  * Web: Returns empty array (no direct access to contacts)
  */
-export async function getContactsAsync(options?: {
+export async function getContactsAsync(_options?: {
   fields?: string[];
   pageSize?: number;
   pageOffset?: number;
@@ -165,7 +165,7 @@ export async function getContactsAsync(options?: {
 /**
  * Get a single contact by ID
  */
-export async function getContactByIdAsync(id: string, fields?: string[]): Promise<Contact | undefined> {
+export async function getContactByIdAsync(_id: string, _fields?: string[]): Promise<Contact | undefined> {
   showWebLimitationWarning();
   return undefined;
 }
@@ -173,7 +173,7 @@ export async function getContactByIdAsync(id: string, fields?: string[]): Promis
 /**
  * Add a new contact
  */
-export async function addContactAsync(contact: Partial<Contact>): Promise<string> {
+export async function addContactAsync(_contact: Partial<Contact>): Promise<string> {
   showWebLimitationWarning();
   throw new Error('Adding contacts not supported on web');
 }
@@ -181,7 +181,7 @@ export async function addContactAsync(contact: Partial<Contact>): Promise<string
 /**
  * Update an existing contact
  */
-export async function updateContactAsync(contact: Contact): Promise<string> {
+export async function updateContactAsync(_contact: Contact): Promise<string> {
   showWebLimitationWarning();
   throw new Error('Updating contacts not supported on web');
 }
@@ -189,7 +189,7 @@ export async function updateContactAsync(contact: Contact): Promise<string> {
 /**
  * Remove a contact
  */
-export async function removeContactAsync(contactId: string): Promise<void> {
+export async function removeContactAsync(_contactId: string): Promise<void> {
   showWebLimitationWarning();
   throw new Error('Removing contacts not supported on web');
 }
@@ -198,9 +198,9 @@ export async function removeContactAsync(contactId: string): Promise<void> {
  * Present contact form
  */
 export async function presentFormAsync(
-  contactId?: string,
-  contact?: Contact,
-  formOptions?: any
+  _contactId?: string,
+  _contact?: Contact,
+  _formOptions?: any
 ): Promise<Contact | undefined> {
   showWebLimitationWarning();
   return undefined;

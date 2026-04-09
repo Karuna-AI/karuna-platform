@@ -6,11 +6,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
-  Platform,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { proactiveEngineService } from '../services/proactiveEngine';
-import { ProactivePreferences, CHECK_IN_TYPE_INFO, CheckInType } from '../types/proactive';
+import { ProactivePreferences, CHECK_IN_TYPE_INFO } from '../types/proactive';
 
 interface ProactiveSettingsScreenProps {
   onBack: () => void;

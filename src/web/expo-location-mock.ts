@@ -155,12 +155,12 @@ export async function getLastKnownPositionAsync(): Promise<LocationObject | null
   }
 }
 
-export async function geocodeAsync(address: string): Promise<Array<{ latitude: number; longitude: number }>> {
+export async function geocodeAsync(_address: string): Promise<Array<{ latitude: number; longitude: number }>> {
   console.warn('[Location] Geocoding not implemented on web');
   return [];
 }
 
-export async function reverseGeocodeAsync(location: { latitude: number; longitude: number }): Promise<any[]> {
+export async function reverseGeocodeAsync(_location: { latitude: number; longitude: number }): Promise<any[]> {
   console.warn('[Location] Reverse geocoding not implemented on web');
   return [];
 }

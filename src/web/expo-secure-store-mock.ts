@@ -10,7 +10,7 @@
  */
 
 const STORAGE_PREFIX = '__secure_store__';
-const ENCRYPTION_KEY_NAME = '__secure_store_key__';
+const _ENCRYPTION_KEY_NAME = '__secure_store_key__';
 
 // Session encryption key (generated once per session)
 let sessionKey: CryptoKey | null = null;
@@ -107,7 +107,7 @@ let hasShownSecurityWarning = false;
 export async function setItemAsync(
   key: string,
   value: string,
-  options?: {
+  _options?: {
     keychainAccessible?: string;
   }
 ): Promise<void> {
@@ -126,7 +126,7 @@ export async function setItemAsync(
 
 export async function getItemAsync(
   key: string,
-  options?: {
+  _options?: {
     keychainAccessible?: string;
   }
 ): Promise<string | null> {
@@ -141,7 +141,7 @@ export async function getItemAsync(
 
 export async function deleteItemAsync(
   key: string,
-  options?: {
+  _options?: {
     keychainAccessible?: string;
   }
 ): Promise<void> {

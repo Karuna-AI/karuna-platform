@@ -299,12 +299,12 @@ app.get('/metrics', (req, res) => {
   });
 });
 
-// Public feature flags endpoint (for mobile app)
+// Public feature flags endpoint (for mobile app) — only expose name and enabled status
 app.get('/api/feature-flags', async (req, res) => {
   try {
     const db = require('./db');
-    const result = await db.query('SELECT name, is_enabled, enabled_for_all, rollout_percentage, enabled_user_ids, enabled_circle_ids FROM feature_flags');
-    res.json({ flags: result.rows });
+    const result = await db.query('SELECT name, is_enabled, enabled_for_all FROM feature_flags WHERE is_enabled = true');
+    res.json({ flags: result.rows.map(f => ({ name: f.name, enabled: f.is_enabled && f.enabled_for_all })) });
   } catch (error) {
     console.error('Get feature flags error:', error);
     res.json({ flags: [] });
@@ -425,9 +425,15 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
     try {
       const db = require('./db');
       const usage = response.data.usage || {};
-      // GPT-4o-mini pricing: $0.15/1M input, $0.60/1M output
-      const estimatedCost = ((usage.prompt_tokens || 0) * 0.00000015 + (usage.completion_tokens || 0) * 0.0000006);
+      // Per-provider pricing (cost per token)
+      const PRICING = {
+        'gpt-4o-mini': { input: 0.00000015, output: 0.0000006 },
+        'gpt-4o': { input: 0.0000025, output: 0.00001 },
+        'mistralai/mistral-small-24b-instruct-2501': { input: 0.0000001, output: 0.0000003 }
+      };
       const modelName = provider === 'openai' ? OPENAI_CHAT_MODEL : OPENROUTER_CHAT_MODEL;
+      const pricing = PRICING[modelName] || { input: 0.0000002, output: 0.0000008 };
+      const estimatedCost = ((usage.prompt_tokens || 0) * pricing.input + (usage.completion_tokens || 0) * pricing.output);
       await db.query(
         `INSERT INTO ai_usage_logs (request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, latency_ms, success)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

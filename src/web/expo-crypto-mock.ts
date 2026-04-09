@@ -76,7 +76,7 @@ export async function digestStringAsync(
       return Array.from(hashArray)
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
-    } catch (error) {
+    } catch {
       // Fall through to fallback
     }
   }

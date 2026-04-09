@@ -3,8 +3,6 @@
  * Tests for app settings and preferences
  */
 
-import React from 'react';
-import { render, fireEvent } from '../utils/testUtils';
 
 describe('SettingsScreen Component', () => {
   describe('rendering', () => {
@@ -124,7 +122,7 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should change font size', () => {
-      const fontSizes = ['small', 'medium', 'large', 'extra-large'];
+      const _fontSizes = ['small', 'medium', 'large', 'extra-large'];
       let currentSize = 'medium';
 
       currentSize = 'large';
@@ -169,7 +167,7 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should set notification sound', () => {
-      const sounds = ['default', 'gentle', 'urgent', 'none'];
+      const _sounds = ['default', 'gentle', 'urgent', 'none'];
       let selectedSound = 'default';
 
       selectedSound = 'gentle';
@@ -188,7 +186,7 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should set auto-lock timeout', () => {
-      const timeouts = [1, 5, 15, 30, 60]; // minutes
+      const _timeouts = [1, 5, 15, 30, 60]; // minutes
       let selectedTimeout = 5;
 
       selectedTimeout = 15;

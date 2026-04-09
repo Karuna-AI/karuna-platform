@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, AccessibilityInfo, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Message } from '../types';
 import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
 
@@ -10,7 +10,7 @@ interface ChatBubbleProps {
 
 export function ChatBubble({
   message,
-  isLatest = false,
+  _isLatest = false,
 }: ChatBubbleProps): JSX.Element {
   const colors = getColors(true);
   const fonts = getFontSizes('large');

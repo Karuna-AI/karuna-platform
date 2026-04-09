@@ -6,7 +6,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as BackgroundFetch from 'expo-background-fetch';
-import * as TaskManager from 'expo-task-manager';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { signalsService } from './signals';
 import { proactiveRulesEngine } from './proactiveRules';
@@ -14,7 +13,6 @@ import { aiMessageCrafterService } from './aiMessageCrafter';
 import { auditLogService } from './auditLog';
 import {
   CheckIn,
-  CheckInResponse,
   ProactivePreferences,
   ProactiveEngineState,
   DEFAULT_PROACTIVE_PREFERENCES,
@@ -32,22 +30,28 @@ const BACKGROUND_FETCH_TASK = 'KARUNA_PROACTIVE_CHECK';
 // Notification handler is configured once in App.tsx (see initializeNotifications)
 // Do NOT set it here at module level - duplicate calls can crash on iOS 26
 
-// IMPORTANT: TaskManager.defineTask MUST be called at module level (Expo requirement).
-// Wrapped in try-catch to prevent native crash during module load on iOS 26.
-if (Platform.OS !== 'web') {
-  try {
-    TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
-      try {
-        await proactiveEngineService.runCheck();
-        return BackgroundFetch.BackgroundFetchResult.NewData;
-      } catch (error) {
-        console.error('[ProactiveEngine] Background task error:', error);
-        return BackgroundFetch.BackgroundFetchResult.Failed;
-      }
-    });
-  } catch (error) {
-    console.error('[ProactiveEngine] Failed to define background task:', error);
-  }
+// Re-enable background task for Android and non-crashing iOS versions.
+// iOS 26+ has a known crash with TaskManager.defineTask at module level.
+const isIOS26OrLater = Platform.OS === 'ios' && typeof Platform.Version === 'string' && parseInt(Platform.Version, 10) >= 26;
+
+if (Platform.OS !== 'web' && !isIOS26OrLater) {
+  setTimeout(() => {
+    try {
+      TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+        try {
+          await proactiveEngineService.runCheck();
+          return BackgroundFetch.BackgroundFetchResult.NewData;
+        } catch (error) {
+          console.error('[ProactiveEngine] Background task error:', error);
+          return BackgroundFetch.BackgroundFetchResult.Failed;
+        }
+      });
+    } catch (error) {
+      console.error('[ProactiveEngine] Failed to define background task:', error);
+    }
+  }, 0);
+} else if (isIOS26OrLater) {
+  console.warn('[ProactiveEngine] Background task disabled on iOS 26+ due to known crash. Foreground check-ins only.');
 }
 
 class ProactiveEngineService {
@@ -399,7 +403,7 @@ class ProactiveEngineService {
   /**
    * Notify caregiver about a concerning check-in
    */
-  private async notifyCaregiver(checkIn: CheckIn, action: any): Promise<void> {
+  private async notifyCaregiver(checkIn: CheckIn, _action: any): Promise<void> {
     // This would integrate with the care circle service
     // For now, just log it
     await auditLogService.log({

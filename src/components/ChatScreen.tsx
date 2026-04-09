@@ -95,7 +95,7 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
     }
     try {
       await startRecording();
-    } catch (err) {
+    } catch {
       // Error is handled in context
     }
   }, [isSpeaking, stopSpeaking, startRecording]);

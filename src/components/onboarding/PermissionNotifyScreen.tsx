@@ -26,7 +26,7 @@ export function PermissionNotifyScreen({
   }, [readAloudEnabled]);
 
   const handleAllow = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     setRequesting(true);
     try {
       const result = await permissionsService.requestNotificationPermission();

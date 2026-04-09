@@ -17,7 +17,6 @@ import {
   useSettings,
   FontSize,
   SpeechRate,
-  Language,
   EmergencyContact,
 } from '../context/SettingsContext';
 import { useTranslation } from '../i18n/useTranslation';
@@ -80,7 +79,7 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
     setFontSize,
     setSpeechRate,
     setLanguage,
-    setTtsEnabled,
+    setTtsEnabled: _setTtsEnabled,
     setAutoPlayResponses,
     setHapticFeedback,
     setHighContrast,

@@ -21,8 +21,8 @@ export async function getStatusAsync(): Promise<number> {
 }
 
 export async function registerTaskAsync(
-  taskName: string,
-  options?: {
+  _taskName: string,
+  _options?: {
     minimumInterval?: number;
     stopOnTerminate?: boolean;
     startOnBoot?: boolean;
@@ -31,7 +31,7 @@ export async function registerTaskAsync(
   console.warn('[BackgroundFetch] Background fetch is not supported on web');
 }
 
-export async function unregisterTaskAsync(taskName: string): Promise<void> {
+export async function unregisterTaskAsync(_taskName: string): Promise<void> {
   // No-op
 }
 

@@ -3,7 +3,7 @@
  * Manages language settings, voice pipeline configuration, and transliteration
  */
 
-import { Platform, NativeModules } from 'react-native';
+import { Platform } from 'react-native';
 import * as Localization from 'expo-localization';
 import {
   LanguageCode,

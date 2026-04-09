@@ -96,7 +96,7 @@ interface SettingsProviderProps {
   children: ReactNode;
 }
 
-const SETTINGS_STORAGE_KEY = '@karuna/app_settings';
+const _SETTINGS_STORAGE_KEY = '@karuna/app_settings';
 
 export function SettingsProvider({ children }: SettingsProviderProps): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);

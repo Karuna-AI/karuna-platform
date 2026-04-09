@@ -30,6 +30,10 @@ export default function UserDetail() {
 
   const handleSuspend = async () => {
     setActionError('');
+    if (!suspendReason.trim()) {
+      setActionError('Suspension reason is required');
+      return;
+    }
     const result = await api.suspendUser(id!, suspendReason);
     if (result.success) {
       setShowSuspendModal(false);

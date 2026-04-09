@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 /**
@@ -110,7 +109,7 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
       );
 
       return new Uint8Array(derivedBits);
-    } catch (error) {
+    } catch {
       console.log('[Encryption] Web Crypto PBKDF2 not available, using iterative SHA-256');
     }
   }
@@ -329,8 +328,13 @@ class EncryptionService {
    */
   lock(): void {
     this.isInitialized = false;
+    // Zero out key material before releasing to minimize exposure in memory
+    if (this.keyBytes) {
+      this.keyBytes.fill(0);
+    }
     this.cryptoKey = null;
     this.keyBytes = null;
+    this.salt = null;
   }
 }
 

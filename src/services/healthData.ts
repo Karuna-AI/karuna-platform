@@ -9,7 +9,6 @@ import {
   VitalSummary,
   StepsData,
   HeartRateData,
-  SleepData,
   HealthSyncStatus,
   VITAL_TYPE_INFO,
 } from '../types/health';

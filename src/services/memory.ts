@@ -1,5 +1,5 @@
 import { Message } from '../types';
-import { storageService, UserMemory, KeyPerson, StoredMessage } from './storage';
+import { storageService, UserMemory, KeyPerson } from './storage';
 import { openAIService } from './openai';
 
 // How many turns before generating a summary

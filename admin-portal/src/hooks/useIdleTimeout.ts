@@ -18,20 +18,34 @@ export function useIdleTimeout(onTimeout: () => void) {
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const lastActivityRef = useRef(Date.now());
   const warningShownRef = useRef(false);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const resetTimer = useCallback(() => {
     lastActivityRef.current = Date.now();
     warningShownRef.current = false;
     setShowWarning(false);
+    setRemainingSeconds(0);
+    // Clear any active countdown
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
   }, []);
 
-  // Track user activity
+  // Track user activity — always update, even during warning
   useEffect(() => {
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'];
 
     const handleActivity = () => {
-      if (!warningShownRef.current) {
-        lastActivityRef.current = Date.now();
+      lastActivityRef.current = Date.now();
+      // If warning is shown and user interacts, dismiss it
+      if (warningShownRef.current) {
+        warningShownRef.current = false;
+        setShowWarning(false);
+        if (countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+        }
       }
     };
 
@@ -60,12 +74,10 @@ export function useIdleTimeout(onTimeout: () => void) {
         return;
       }
 
-      if (timeUntilTimeout <= WARNING_BEFORE) {
+      if (timeUntilTimeout <= WARNING_BEFORE && !warningShownRef.current) {
         warningShownRef.current = true;
         setShowWarning(true);
         setRemainingSeconds(Math.ceil(timeUntilTimeout / 1000));
-      } else {
-        setShowWarning(false);
       }
     }, CHECK_INTERVAL);
 
@@ -74,19 +86,32 @@ export function useIdleTimeout(onTimeout: () => void) {
 
   // Countdown when warning is shown
   useEffect(() => {
-    if (!showWarning) return;
+    if (!showWarning) {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+      return;
+    }
 
-    const countdown = setInterval(() => {
-      setRemainingSeconds(prev => {
-        if (prev <= 1) {
-          onTimeout();
-          return 0;
-        }
-        return prev - 1;
-      });
+    countdownRef.current = setInterval(() => {
+      const idleTime = Date.now() - lastActivityRef.current;
+      const timeUntilTimeout = IDLE_TIMEOUT - idleTime;
+
+      if (timeUntilTimeout <= 0) {
+        onTimeout();
+        return;
+      }
+
+      setRemainingSeconds(Math.ceil(timeUntilTimeout / 1000));
     }, 1000);
 
-    return () => clearInterval(countdown);
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+    };
   }, [showWarning, onTimeout]);
 
   return { showWarning, remainingSeconds, resetTimer };

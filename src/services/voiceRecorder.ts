@@ -1,5 +1,4 @@
 import { Audio } from 'expo-av';
-import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
 
 export type RecordingError =
@@ -28,8 +27,12 @@ class VoiceRecorder {
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    // Configure audio mode for recording
-    this.configureAudio().catch(() => {});
+    // Audio configuration deferred to initialize() to avoid racing with
+    // iOS 26's UITraitCollection setup during window presentation.
+  }
+
+  async initialize(): Promise<void> {
+    await this.configureAudio();
   }
 
   private async configureAudio(): Promise<void> {

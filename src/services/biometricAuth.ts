@@ -212,7 +212,7 @@ class BiometricAuthService {
       });
 
       return { success: true };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to remove PIN' };
     }
   }
@@ -265,7 +265,7 @@ class BiometricAuthService {
       }
 
       return { success, method: 'pin', error: success ? undefined : 'Incorrect PIN' };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'PIN verification failed' };
     }
   }

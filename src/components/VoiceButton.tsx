@@ -16,7 +16,6 @@ import {
   getFontSizes,
   TOUCH_TARGETS,
   SPACING,
-  createAccessibilityLabel,
   getAccessibilityHint,
   formatDurationForAccessibility,
   announceForAccessibility,

@@ -8,7 +8,7 @@
  * - Listeners are no-ops (no native notification events)
  */
 
-let hasShownWebWarning = false;
+const hasShownWebWarning = false;
 const showWebLimitationWarning = (feature: string) => {
   if (!hasShownWebWarning && process.env.NODE_ENV === 'development') {
     console.debug(`[Notifications] ${feature} - limited on web platform`);
@@ -23,10 +23,10 @@ type NotificationHandler = {
   }>;
 };
 
-let notificationHandler: NotificationHandler | null = null;
+let _notificationHandler: NotificationHandler | null = null;
 
 export function setNotificationHandler(handler: NotificationHandler | null) {
-  notificationHandler = handler;
+  _notificationHandler = handler;
 }
 
 export async function getPermissionsAsync() {
@@ -65,7 +65,7 @@ export async function scheduleNotificationAsync(request: {
   return `web-notification-${Date.now()}`;
 }
 
-export async function cancelScheduledNotificationAsync(identifier: string) {
+export async function cancelScheduledNotificationAsync(_identifier: string) {
   showWebLimitationWarning('cancelScheduledNotification');
   // Browser doesn't support scheduled notification cancellation
 }
@@ -86,13 +86,13 @@ export async function getExpoPushTokenAsync() {
   return { data: 'web-push-token-not-supported' };
 }
 
-export function addNotificationReceivedListener(listener: (notification: any) => void) {
+export function addNotificationReceivedListener(_listener: (notification: any) => void) {
   showWebLimitationWarning('addNotificationReceivedListener');
   // Native notification events not available on web
   return { remove: () => {} };
 }
 
-export function addNotificationResponseReceivedListener(listener: (response: any) => void) {
+export function addNotificationResponseReceivedListener(_listener: (response: any) => void) {
   showWebLimitationWarning('addNotificationResponseReceivedListener');
   // Native notification events not available on web
   return { remove: () => {} };

@@ -95,15 +95,23 @@ async function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-async function verifyPassword(password, hash) {
-  // Support both bcrypt and legacy SHA-256 hashes for migration
+async function verifyPassword(password, hash, adminId = null) {
   if (hash.startsWith('$2b$') || hash.startsWith('$2a$')) {
-    // bcrypt hash
     return bcrypt.compare(password, hash);
   } else {
-    // Legacy SHA-256 hash - for backward compatibility during migration
+    // Legacy SHA-256 hash - verify and auto-upgrade to bcrypt
     const legacyHash = crypto.createHash('sha256').update(password + ADMIN_JWT_SECRET).digest('hex');
-    return hash === legacyHash;
+    const matches = hash === legacyHash;
+    if (matches && adminId) {
+      console.warn(`[Security] Upgrading legacy SHA-256 hash to bcrypt for admin ${adminId}`);
+      try {
+        const newHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, adminId]);
+      } catch (err) {
+        console.error('[Security] Failed to upgrade admin password hash:', err.message);
+      }
+    }
+    return matches;
   }
 }
 
@@ -139,8 +147,8 @@ async function logAdminAction(adminId, adminEmail, action, resourceType, resourc
       `INSERT INTO admin_audit_logs (admin_id, admin_email, action, resource_type, resource_id, old_value, new_value, ip_address, user_agent)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [adminId, adminEmail, action, resourceType, resourceId,
-       oldValue ? JSON.stringify(oldValue) : null,
-       newValue ? JSON.stringify(newValue) : null,
+       oldValue != null ? JSON.stringify(typeof oldValue === 'string' ? { value: oldValue } : oldValue) : null,
+       newValue != null ? JSON.stringify(typeof newValue === 'string' ? { value: newValue } : newValue) : null,
        req.ip, req.headers['user-agent']]
     );
   } catch (error) {
@@ -199,20 +207,16 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      await logAdminAction(null, email.toLowerCase(), 'login_failed', 'admin', null, null, { reason: 'unknown_email' }, req);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const admin = result.rows[0];
 
-    const passwordValid = await verifyPassword(password, admin.password_hash);
+    const passwordValid = await verifyPassword(password, admin.password_hash, admin.id);
     if (!passwordValid) {
+      await logAdminAction(admin.id, admin.email, 'login_failed', 'admin', admin.id, null, { reason: 'invalid_password' }, req);
       return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    // Upgrade legacy hash to bcrypt on successful login
-    if (!admin.password_hash.startsWith('$2b$') && !admin.password_hash.startsWith('$2a$')) {
-      const newHash = await hashPassword(password);
-      await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, admin.id]);
     }
 
     // Update login stats
@@ -420,6 +424,10 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
     const { userId } = req.params;
     const { reason } = req.body;
 
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'Suspension reason is required' });
+    }
+
     const oldResult = await db.query('SELECT is_active, suspended_at FROM users WHERE id = $1', [userId]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
@@ -470,8 +478,11 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
     const { userId } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!newPassword || newPassword.length < 12) {
+      return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Password must contain uppercase, lowercase, and a number' });
     }
 
     // Use bcrypt for password hashing (same as careCircle.js)
@@ -706,6 +717,27 @@ router.get('/metrics/detailed', adminAuthMiddleware, requirePermission('canViewM
 // Audit Logs Routes
 // ============================================================================
 
+// Audit log retention: delete entries older than 1 year on startup and daily
+const AUDIT_RETENTION_DAYS = 365;
+
+async function cleanupOldAuditLogs() {
+  try {
+    const cutoff = new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const r1 = await db.query('DELETE FROM audit_logs WHERE created_at < $1', [cutoff]);
+    const r2 = await db.query('DELETE FROM admin_audit_logs WHERE created_at < $1', [cutoff]);
+    const total = (r1.rowCount || 0) + (r2.rowCount || 0);
+    if (total > 0) {
+      console.log(`[AuditRetention] Cleaned up ${total} audit logs older than ${AUDIT_RETENTION_DAYS} days`);
+    }
+  } catch (err) {
+    console.error('[AuditRetention] Cleanup failed:', err.message);
+  }
+}
+
+// Run cleanup on startup and every 24 hours
+cleanupOldAuditLogs();
+setInterval(cleanupOldAuditLogs, 24 * 60 * 60 * 1000);
+
 // Get audit logs
 router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
@@ -888,9 +920,28 @@ router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSe
     const { key } = req.params;
     const { value } = req.body;
 
+    if (value === undefined || value === null) {
+      return res.status(400).json({ error: 'Value is required' });
+    }
+
     const oldResult = await db.query('SELECT * FROM system_settings WHERE key = $1', [key]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ error: 'Setting not found' });
+    }
+
+    // Validate value type matches existing setting type
+    const existingValue = oldResult.rows[0].value;
+    if (existingValue !== null) {
+      try {
+        const parsed = JSON.parse(existingValue);
+        const existingType = typeof parsed;
+        const newType = typeof value;
+        if (existingType !== 'object' && existingType !== newType) {
+          return res.status(400).json({ error: `Setting expects type '${existingType}', got '${newType}'` });
+        }
+      } catch {
+        // Existing value not valid JSON, accept any type
+      }
     }
 
     const result = await db.query(

@@ -23,7 +23,7 @@ try {
 const WIDTH = 1284;
 const HEIGHT = 2778;
 const BRAND = '#4F46E5';
-const BRAND_DARK = '#3730A3';
+const _BRAND_DARK = '#3730A3';
 const BRAND_LIGHT = '#818CF8';
 const WHITE = '#FFFFFF';
 const LIGHT_BG = '#F3F4F6';

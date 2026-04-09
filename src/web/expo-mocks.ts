@@ -38,7 +38,7 @@ export const expoDocumentPicker = {
 
 // expo-notifications mock
 export const expoNotifications = {
-  setNotificationHandler: (handler: any) => {},
+  setNotificationHandler: (_handler: any) => {},
   getPermissionsAsync: async () => ({ status: 'undetermined', canAskAgain: true }),
   requestPermissionsAsync: async () => {
     if ('Notification' in window) {
@@ -55,12 +55,12 @@ export const expoNotifications = {
     }
     return 'web-notification-id';
   },
-  cancelScheduledNotificationAsync: async (id: string) => {},
+  cancelScheduledNotificationAsync: async (_id: string) => {},
   cancelAllScheduledNotificationsAsync: async () => {},
   getAllScheduledNotificationsAsync: async () => [],
   getExpoPushTokenAsync: async () => ({ data: 'web-push-token' }),
-  addNotificationReceivedListener: (listener: any) => ({ remove: () => {} }),
-  addNotificationResponseReceivedListener: (listener: any) => ({ remove: () => {} }),
+  addNotificationReceivedListener: (_listener: any) => ({ remove: () => {} }),
+  addNotificationResponseReceivedListener: (_listener: any) => ({ remove: () => {} }),
 };
 
 // expo-clipboard mock
@@ -110,7 +110,7 @@ export const expoBackgroundFetch = {
     Available: 3,
   },
   getStatusAsync: async () => 3, // Available
-  registerTaskAsync: async (taskName: string, options?: any) => {
+  registerTaskAsync: async (taskName: string, _options?: any) => {
     if (process.env.NODE_ENV === 'development') {
       console.debug(`[BackgroundFetch] registerTask(${taskName}) - not supported on web`);
     }
@@ -125,13 +125,13 @@ export const expoBackgroundFetch = {
 // expo-task-manager mock
 // Background tasks require service workers on web - not implemented
 export const expoTaskManager = {
-  defineTask: (taskName: string, taskExecutor: any) => {
+  defineTask: (taskName: string, _taskExecutor: any) => {
     if (process.env.NODE_ENV === 'development') {
       console.debug(`[TaskManager] defineTask(${taskName}) - not supported on web`);
     }
   },
-  isTaskRegisteredAsync: async (taskName: string) => false,
-  getTaskOptionsAsync: async (taskName: string) => null,
+  isTaskRegisteredAsync: async (_taskName: string) => false,
+  getTaskOptionsAsync: async (_taskName: string) => null,
   unregisterAllTasksAsync: async () => {
     if (process.env.NODE_ENV === 'development') {
       console.debug('[TaskManager] unregisterAllTasks - not supported on web');
@@ -169,7 +169,7 @@ export const expoLocation = {
     }
     return { status: 'denied' };
   },
-  getCurrentPositionAsync: async (options?: any) => {
+  getCurrentPositionAsync: async (_options?: any) => {
     return new Promise((resolve, reject) => {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(

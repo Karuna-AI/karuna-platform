@@ -167,7 +167,7 @@ class LoggerService {
         },
         body: JSON.stringify(payload),
       });
-    } catch (error) {
+    } catch {
       // Silently fail - don't log errors about logging
     }
   }

@@ -1,4 +1,4 @@
-import { AccessibilityInfo, Platform } from 'react-native';
+import { AccessibilityInfo } from 'react-native';
 import { AccessibilityConfig, ACCESSIBILITY_DEFAULTS } from '../types';
 
 export const FONT_SIZES = {

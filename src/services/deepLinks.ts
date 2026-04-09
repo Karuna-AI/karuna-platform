@@ -4,11 +4,9 @@
  */
 
 import { Platform, Linking } from 'react-native';
-import * as IntentLauncher from 'expo-intent-launcher';
 import {
   DeepLinkDefinition,
   ActionType,
-  ActionLocation,
   ActionCategory,
 } from '../types/actions';
 

@@ -2,7 +2,7 @@ import { Linking, Platform, Alert } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { SchedulableTriggerInputTypes } from 'expo-notifications';
 import { Contact, contactsService } from './contacts';
-import { ParsedIntent, IntentType } from '../types';
+import { ParsedIntent } from '../types';
 import { telemetryService } from './telemetry';
 import { appLauncherService } from './appLauncher';
 import { otpAssistantService } from './otpAssistant';
@@ -758,7 +758,7 @@ class IntentActionsService {
   /**
    * Process emergency intent - HIGH PRIORITY
    */
-  private async processEmergencyIntent(intent: ParsedIntent): Promise<IntentActionResult> {
+  private async processEmergencyIntent(_intent: ParsedIntent): Promise<IntentActionResult> {
     const confirmation: ActionConfirmation = {
       type: 'emergency_call',
       title: 'Call Emergency Services?',
@@ -824,7 +824,7 @@ class IntentActionsService {
       };
     }
 
-    const request: ActionRequest = {
+    const _request: ActionRequest = {
       type: 'whatsapp',
       params: {
         phone: phoneNumber,

@@ -265,8 +265,14 @@ class MedicationService {
       throw new Error('Medication or schedule not found');
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    const scheduledTime = `${today}T${schedule.time}:00`;
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    // Include timezone offset so server can correctly interpret scheduled time
+    const tzOffset = -now.getTimezoneOffset();
+    const tzSign = tzOffset >= 0 ? '+' : '-';
+    const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+    const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+    const scheduledTime = `${today}T${schedule.time}:00${tzSign}${tzHours}:${tzMins}`;
 
     const dose: MedicationDose = {
       id: `dose_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

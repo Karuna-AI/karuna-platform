@@ -5,7 +5,7 @@
 
 import { healthDataService } from './healthData';
 import { medicationService } from './medication';
-import { weatherService, WeatherData } from './weather';
+import { weatherService } from './weather';
 import { calendarService } from './calendar';
 import {
   Signal,

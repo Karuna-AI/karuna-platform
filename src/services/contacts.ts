@@ -1,4 +1,4 @@
-import { Platform, PermissionsAndroid, Linking, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import * as ExpoContacts from 'expo-contacts';
 
 export interface Contact {

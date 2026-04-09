@@ -69,7 +69,7 @@ describe('Care Circle Service', () => {
   });
 
   describe('permissions', () => {
-    const allPermissions = [
+    const _allPermissions = [
       'view_health',
       'edit_health',
       'view_medications',

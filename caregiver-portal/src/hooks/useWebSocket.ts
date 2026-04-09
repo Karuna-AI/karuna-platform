@@ -12,7 +12,7 @@ export function useWebSocket(circleId: string | undefined) {
   useEffect(() => {
     if (!circleId) return;
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     if (!token) return;
 
     wsService.connect(circleId, token);

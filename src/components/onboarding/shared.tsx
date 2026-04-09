@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ViewStyle,
 } from 'react-native';
 import { getColors, getFontSizes, SPACING, TOUCH_TARGETS } from '../../utils/accessibility';

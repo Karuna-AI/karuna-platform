@@ -34,7 +34,7 @@ export async function getEnrolledLevelAsync(): Promise<number> {
   return SecurityLevel.NONE;
 }
 
-export async function authenticateAsync(options?: {
+export async function authenticateAsync(_options?: {
   promptMessage?: string;
   cancelLabel?: string;
   disableDeviceFallback?: boolean;

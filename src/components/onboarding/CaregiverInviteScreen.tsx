@@ -47,7 +47,7 @@ export function CaregiverInviteScreen({
   }, [readAloudEnabled]);
 
   const handleShare = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     try {
       const inviteUrl = `https://karunaapp.in/invite?code=${inviteCode}`;
       const result = await Share.share({

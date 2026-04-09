@@ -59,7 +59,7 @@ export function QuickSetupScreen({
   }, []);
 
   const handleSaveAndContinue = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
 
     const data: QuickSetupData = {};
     if (reminderTime) data.reminderTime = reminderTime;

@@ -5,7 +5,7 @@
 
 describe('Encryption Service', () => {
   const mockPlaintext = 'Sensitive data to encrypt';
-  const mockKey = 'test-encryption-key-32chars!!!';
+  const _mockKey = 'test-encryption-key-32chars!!!';
 
   describe('encrypt', () => {
     it('should encrypt plaintext data', async () => {

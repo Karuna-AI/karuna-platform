@@ -166,15 +166,24 @@ async function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-async function verifyPassword(password, hash) {
-  // Support both bcrypt and legacy SHA-256 hashes for migration
+async function verifyPassword(password, hash, userId = null) {
   if (hash.startsWith('$2b$') || hash.startsWith('$2a$')) {
-    // bcrypt hash
     return bcrypt.compare(password, hash);
   } else {
-    // Legacy SHA-256 hash - for backward compatibility during migration
+    // Legacy SHA-256 hash - verify and auto-upgrade to bcrypt
     const legacyHash = crypto.createHash('sha256').update(password + JWT_SECRET).digest('hex');
-    return hash === legacyHash;
+    const matches = hash === legacyHash;
+    if (matches && userId) {
+      // Auto-upgrade to bcrypt on successful login
+      console.warn(`[Security] Upgrading legacy SHA-256 hash to bcrypt for user ${userId}`);
+      try {
+        const newHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+      } catch (err) {
+        console.error('[Security] Failed to upgrade password hash:', err.message);
+      }
+    }
+    return matches;
   }
 }
 
@@ -275,6 +284,10 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
 
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
     // Check if user exists
     const existingUser = await db.query(
       'SELECT id FROM users WHERE email = $1',
@@ -328,7 +341,7 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
 
     const user = result.rows[0];
 
-    const passwordValid = await verifyPassword(password, user.password_hash);
+    const passwordValid = await verifyPassword(password, user.password_hash, user.id);
     if (!passwordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -957,6 +970,16 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
       document: 'canEditDocuments'
     };
 
+    // Allowed columns per entity type (whitelist to prevent SQL injection)
+    const allowedColumns = {
+      medication: ['name', 'dosage', 'frequency', 'timing', 'instructions', 'prescribing_doctor', 'pharmacy', 'refill_date', 'is_active'],
+      doctor: ['name', 'specialty', 'hospital', 'phone', 'email', 'address', 'notes', 'is_primary'],
+      appointment: ['doctor_id', 'doctor_name', 'date', 'time', 'location', 'purpose', 'preparation_notes', 'status', 'reminder_sent'],
+      contact: ['name', 'relationship', 'phone', 'phone_alt', 'email', 'address', 'is_emergency', 'priority', 'notes'],
+      account: ['name', 'type', 'institution', 'account_number_encrypted', 'ifsc_code', 'branch', 'nominee', 'notes'],
+      document: ['title', 'type', 'description', 'file_name', 'file_type', 'file_size', 'file_data_encrypted', 'expiry_date', 'is_sensitive']
+    };
+
     for (const change of changes) {
       const { entityType, entityId, action, data } = change;
 
@@ -975,6 +998,16 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
       }
 
       try {
+        // Validate column names against whitelist (prevent SQL injection)
+        if ((action === 'create' || action === 'update') && data) {
+          const validColumns = allowedColumns[entityType];
+          const invalidColumns = Object.keys(data).filter(col => !validColumns.includes(col));
+          if (invalidColumns.length > 0) {
+            conflicts.push({ ...change, reason: 'invalid_fields', fields: invalidColumns });
+            continue;
+          }
+        }
+
         if (action === 'create') {
           const columns = Object.keys(data);
           const values = Object.values(data);
@@ -1764,8 +1797,36 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Not a member' });
     }
 
+    // Physiological bounds for health data validation
+    const HEALTH_RANGES = {
+      heart_rate: { min: 20, max: 300 },
+      blood_pressure_systolic: { min: 50, max: 300 },
+      blood_pressure_diastolic: { min: 20, max: 200 },
+      blood_glucose: { min: 20, max: 600 },
+      weight: { min: 10, max: 500 },
+      temperature: { min: 30, max: 45 },
+      oxygen_saturation: { min: 50, max: 100 },
+      steps: { min: 0, max: 200000 }
+    };
+
+    const validDataTypes = ['heart_rate', 'blood_pressure', 'blood_glucose', 'weight', 'temperature', 'oxygen_saturation', 'steps'];
+
     let inserted = 0;
+    const skipped = [];
     for (const reading of readings) {
+      if (!reading.dataType || !validDataTypes.includes(reading.dataType)) {
+        skipped.push({ reading, reason: 'invalid_data_type' });
+        continue;
+      }
+
+      // Validate numeric values against physiological bounds
+      const numValue = typeof reading.value === 'object' ? reading.value.systolic || reading.value.value : reading.value;
+      const range = HEALTH_RANGES[reading.dataType];
+      if (range && typeof numValue === 'number' && (numValue < range.min || numValue > range.max)) {
+        skipped.push({ reading, reason: 'out_of_range' });
+        continue;
+      }
+
       await db.query(
         `INSERT INTO health_data (circle_id, data_type, value, unit, measured_at, source, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -1777,7 +1838,7 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
     // Broadcast to caregivers
     broadcastToCircle(circleId, { type: 'health_update', count: inserted });
 
-    res.json({ success: true, inserted });
+    res.json({ success: true, inserted, skipped: skipped.length > 0 ? skipped : undefined });
   } catch (error) {
     console.error('Sync health data error:', error);
     res.status(500).json({ error: 'Failed to sync health data' });

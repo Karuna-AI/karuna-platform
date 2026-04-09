@@ -4,7 +4,7 @@
  */
 
 describe('TTS Service', () => {
-  let ttsService: any;
+  let _ttsService: any;
 
   beforeEach(() => {
     jest.resetModules();

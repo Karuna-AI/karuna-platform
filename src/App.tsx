@@ -22,17 +22,15 @@ import { formatIntentForDisplay, getIntentSuggestion, isActionableIntent } from 
 import {
   intentActionsService,
   ConfirmationData,
-  IntentActionResult,
 } from './services/intentActions';
 import { contactsService, Contact, ContactSearchResult } from './services/contacts';
 import { ActionConfirmation } from './types/actions';
-import { appLauncherService } from './services/appLauncher';
-import { otpAssistantService } from './services/otpAssistant';
 import * as Speech from 'expo-speech';
 import { telemetryService } from './services/telemetry';
 import { checkGatewayHealth } from './services/api';
 import { careCircleSyncService } from './services/careCircleSync';
 import { biometricAuthService } from './services/biometricAuth';
+import { vaultService } from './services/vault';
 import { consentService } from './services/consent';
 import { auditLogService } from './services/auditLog';
 import { encryptedDatabaseService } from './services/encryptedDatabase';
@@ -51,24 +49,11 @@ import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 import { MemoryViewer } from './components/MemoryViewer';
 import { parseKarunaUrl } from './services/incomingLinks';
 import * as Linking from 'expo-linking';
-import * as Notifications from 'expo-notifications';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Configure notification handler once at app level (native only).
-// This MUST be at module scope but wrapped in try-catch for iOS 26 safety.
-if (Platform.OS !== 'web') {
-  try {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
-  } catch (error) {
-    console.error('[App] Failed to set notification handler:', error);
-  }
-}
+// Notification handler is configured inside App via useEffect to avoid
+// racing with iOS 26's UITraitCollection setup during window presentation.
+// Module-level native calls can trigger ObjC exceptions before the UI is ready.
 
 // Gateway URL - configure for your environment
 const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
@@ -141,6 +126,24 @@ function App(): JSX.Element {
 
   // Initialize services on app start
   useEffect(() => {
+    // Re-enable notification handler for Android and non-crashing iOS versions.
+    // iOS 26+ has a known crash with setNotificationHandler during window presentation.
+    const isIOS26OrLater = Platform.OS === 'ios' && typeof Platform.Version === 'string' && parseInt(Platform.Version, 10) >= 26;
+
+    if (Platform.OS !== 'web' && !isIOS26OrLater) {
+      try {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+          }),
+        });
+      } catch (error) {
+        console.error('[App] Failed to set notification handler:', error);
+      }
+    }
+
     const initializeApp = async () => {
       // Initialize security services first
       try {
@@ -238,8 +241,10 @@ function App(): JSX.Element {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         // Lock vault when app goes to background
         setIsVaultLocked(true);
+        vaultService.lock();
 
-        // Check if app should be locked
+        // Reset auth timeout and lock app if required
+        biometricAuthService.lock();
         if (biometricAuthService.requiresAuthentication('app')) {
           setIsAppLocked(true);
         }

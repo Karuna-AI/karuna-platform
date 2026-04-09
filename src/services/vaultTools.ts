@@ -1,5 +1,4 @@
 import { vaultService } from './vault';
-import { VaultLookupResult } from '../types/vault';
 
 /**
  * Vault Tools for AI Integration
@@ -279,7 +278,7 @@ async function lookupDocument(keywords: string[]): Promise<VaultToolResult> {
 /**
  * List medications
  */
-async function listMedications(keywords: string[]): Promise<VaultToolResult> {
+async function listMedications(_keywords: string[]): Promise<VaultToolResult> {
   const result = await vaultService.listMedications();
 
   if (!result.found) {
@@ -376,7 +375,7 @@ async function getAppointments(): Promise<VaultToolResult> {
     response += '\n';
   }
 
-  if (appointments[0].preparationNotes) {
+  if (appointments.length > 0 && appointments[0].preparationNotes) {
     response += `\nNote: ${appointments[0].preparationNotes}`;
   }
 

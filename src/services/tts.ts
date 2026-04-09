@@ -254,6 +254,8 @@ class TextToSpeechService {
 
   async stop(): Promise<void> {
     try {
+      // Clear the queue to prevent pending items from speaking
+      this.speechQueue = [];
       if (Platform.OS === 'web') {
         if (typeof window !== 'undefined' && window.speechSynthesis) {
           window.speechSynthesis.cancel();

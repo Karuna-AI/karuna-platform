@@ -8,14 +8,12 @@ import {
   ProactiveRule,
   RuleCondition,
   CheckIn,
-  CheckInAction,
   Signal,
   StepsSignal,
   WeatherSignal,
   CalendarSignal,
   MedicationSignal,
   InactivitySignal,
-  SignalType,
 } from '../types/proactive';
 
 const STORAGE_KEYS = {
@@ -391,12 +389,13 @@ class ProactiveRulesEngine {
           message = message.replace('{{temperature}}', String((signal as WeatherSignal).value.temperature));
           message = message.replace('{{condition}}', (signal as WeatherSignal).value.condition);
           break;
-        case 'calendar':
+        case 'calendar': {
           const nextEvent = (signal as CalendarSignal).value.nextEvent;
           if (nextEvent) {
             message = message.replace('{{nextEvent}}', nextEvent.title);
           }
           break;
+        }
         case 'medication':
           message = message.replace('{{missedDoses}}', String((signal as MedicationSignal).value.missedDoses));
           break;

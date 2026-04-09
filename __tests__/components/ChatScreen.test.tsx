@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { render, fireEvent, waitFor } from '../utils/testUtils';
+import { render } from '../utils/testUtils';
 
 // Mock component
 const MockChatScreen = () => <div data-testid="chat-screen">Chat Screen</div>;

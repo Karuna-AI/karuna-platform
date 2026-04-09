@@ -17,7 +17,7 @@ import {
   TOUCH_TARGETS,
   announceForAccessibility,
 } from '../utils/accessibility';
-import { Contact, ContactSearchResult, contactsService } from '../services/contacts';
+import { Contact, ContactSearchResult } from '../services/contacts';
 import { ConfirmationData, intentActionsService } from '../services/intentActions';
 import { ActionConfirmation } from '../types/actions';
 
@@ -41,7 +41,7 @@ export function IntentActionModal({
   onSelectContact,
   onConfirm,
   onCancel,
-  onModify,
+  _onModify,
   isLoading = false,
 }: IntentActionModalProps): JSX.Element | null {
   const colors = getColors(true);

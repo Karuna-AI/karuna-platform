@@ -431,12 +431,12 @@ class CareCircleSyncService {
 
         if (!localItem) {
           // New item from remote - add it
-          const { id, ...rest } = remoteItem as any;
+          const { id: _id, ...rest } = remoteItem as any;
           await addItem(rest);
         } else if (remoteItem.updatedAt && localItem.updatedAt &&
                    new Date(remoteItem.updatedAt) > new Date(localItem.updatedAt)) {
           // Remote is newer - update local
-          const { id, createdAt, createdBy, ...updates } = remoteItem as any;
+          const { id: _id2, createdAt: _createdAt, createdBy: _createdBy, ...updates } = remoteItem as any;
           await updateItem(remoteItem.id, updates);
         }
         // Otherwise local is newer or same - keep local
