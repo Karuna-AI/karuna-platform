@@ -42,7 +42,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '6',
+      buildNumber: '17',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -56,6 +56,10 @@ module.exports = {
           'Karuna reads your health data to monitor your wellness and share updates with your care circle.',
         NSHealthUpdateUsageDescription:
           'Karuna records health metrics to help track your wellness journey.',
+        NSCalendarsUsageDescription:
+          'Karuna accesses your calendar to help manage appointments and send you timely reminders.',
+        NSContactsUsageDescription:
+          'Karuna accesses your contacts so you can quickly call or message family and caregivers.',
         UIBackgroundModes: ['audio', 'fetch', 'remote-notification'],
       },
       config: {
@@ -68,7 +72,7 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 6,
+      versionCode: 7,
       targetSdkVersion: 35,
       compileSdkVersion: 35,
       permissions: [
@@ -134,6 +138,8 @@ module.exports = {
             'Karuna needs microphone access for voice conversations.',
         },
       ],
+      'expo-localization',
+      'expo-secure-store',
     ],
     extra: {
       apiUrl: getApiUrl(),
@@ -144,7 +150,9 @@ module.exports = {
     owner: process.env.EXPO_OWNER || 'snehal2026',
     runtimeVersion: '1.0.0',
     updates: {
+      enabled: false,
       url: 'https://u.expo.dev/b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
+      checkAutomatically: 'NEVER',
     },
   },
 };
