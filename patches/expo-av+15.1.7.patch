@@ -1,0 +1,34 @@
+diff --git a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m b/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
+index 3e768d1..e6742ff 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
++++ b/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
+@@ -36,15 +36,20 @@ EX_REGISTER_SINGLETON_MODULE(AudioSessionManager);
+     _moduleCategory = [NSMapTable weakToStrongObjectsMapTable];
+     _moduleCategoryOptions = [NSMapTable weakToStrongObjectsMapTable];
+ 
+-    AVAudioSession *session = [AVAudioSession sharedInstance];
+-    [[NSNotificationCenter defaultCenter] addObserver:self
+-                                             selector:@selector(handleAudioSessionInterruption:)
+-                                                 name:AVAudioSessionInterruptionNotification
+-                                               object:session];
+-    [[NSNotificationCenter defaultCenter] addObserver:self
+-                                             selector:@selector(handleMediaServicesReset:)
+-                                                 name:AVAudioSessionMediaServicesWereResetNotification
+-                                               object:session];
++    // Defer AVAudioSession access to avoid iOS 26 crash.
++    // AVInputDeviceDiscoverySession.initialize crashes during app launch on iOS 26+
++    // when called before the main window is presented.
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++      AVAudioSession *session = [AVAudioSession sharedInstance];
++      [[NSNotificationCenter defaultCenter] addObserver:self
++                                               selector:@selector(handleAudioSessionInterruption:)
++                                                   name:AVAudioSessionInterruptionNotification
++                                                 object:session];
++      [[NSNotificationCenter defaultCenter] addObserver:self
++                                               selector:@selector(handleMediaServicesReset:)
++                                                   name:AVAudioSessionMediaServicesWereResetNotification
++                                                 object:session];
++    });
+   }
+   return self;
+ }
