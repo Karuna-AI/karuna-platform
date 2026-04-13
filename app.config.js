@@ -42,7 +42,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '23',
+      buildNumber: '24',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -104,6 +104,11 @@ module.exports = {
       [
         'expo-build-properties',
         {
+          ios: {
+            // Disable New Architecture on iOS to avoid iOS 26 TurboModule crash
+            // (facebook/react-native#54859 — unresolved as of RN 0.81.5)
+            newArchEnabled: false,
+          },
           android: {
             compileSdkVersion: 35,
             targetSdkVersion: 35,
