@@ -1,3 +1,38 @@
+diff --git a/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m b/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
+index 7d8375a..d6f0a9d 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
++++ b/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
+@@ -30,7 +30,12 @@ static SEL recordRecordPermissionSelector;
+     EXFatal(EXErrorWithMessage(@"This app is missing NSMicrophoneUsageDescription, so audio services will fail. Add one of these keys to your bundle's Info.plist."));
+     systemStatus = AVAudioSessionRecordPermissionDenied;
+   } else {
+-    systemStatus = [[AVAudioSession sharedInstance] recordPermission];
++    @try {
++      systemStatus = [[AVAudioSession sharedInstance] recordPermission];
++    } @catch (NSException *exception) {
++      NSLog(@"[EXAudioRecordingPermissionRequester] AVAudioSession access failed (iOS 26): %@", exception);
++      systemStatus = AVAudioSessionRecordPermissionUndetermined;
++    }
+   }
+   switch (systemStatus) {
+     case AVAudioSessionRecordPermissionGranted:
+@@ -52,7 +57,15 @@ static SEL recordRecordPermissionSelector;
+ - (void)requestPermissionsWithResolver:(EXPromiseResolveBlock)resolve rejecter:(EXPromiseRejectBlock)reject
+ {
+   EX_WEAKIFY(self)
+-  ((void (*)(id, SEL, void(^)(BOOL)))objc_msgSend)(AVAudioSession.sharedInstance, recordRecordPermissionSelector, ^(BOOL granted) {
++  AVAudioSession *session = nil;
++  @try {
++    session = [AVAudioSession sharedInstance];
++  } @catch (NSException *exception) {
++    NSLog(@"[EXAudioRecordingPermissionRequester] AVAudioSession access failed (iOS 26): %@", exception);
++    resolve([self getPermissions]);
++    return;
++  }
++  ((void (*)(id, SEL, void(^)(BOOL)))objc_msgSend)(session, recordRecordPermissionSelector, ^(BOOL granted) {
+     EX_STRONGIFY(self)
+     resolve([self getPermissions]);
+   });
 diff --git a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m b/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
 index 3e768d1..6d07928 100644
 --- a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
