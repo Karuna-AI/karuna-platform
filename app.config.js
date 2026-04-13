@@ -42,7 +42,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '22',
+      buildNumber: '23',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -133,13 +133,7 @@ module.exports = {
           cameraPermission: 'Karuna needs camera access to take photos.',
         },
       ],
-      [
-        'expo-av',
-        {
-          microphonePermission:
-            'Karuna needs microphone access for voice conversations.',
-        },
-      ],
+      'expo-audio',
       'expo-localization',
       'expo-secure-store',
     ],
