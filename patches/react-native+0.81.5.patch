@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
-index 441a16f..93e348a 100644
+index 2a67797..fa3b089 100644
 --- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
 +++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
-@@ -438,7 +438,10 @@ void ObjCTurboModule::performVoidMethodInvocation(
+@@ -435,7 +435,10 @@ void ObjCTurboModule::performVoidMethodInvocation(
      @try {
        [inv invokeWithTarget:strongModule];
      } @catch (NSException *exception) {
