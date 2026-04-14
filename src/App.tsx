@@ -126,6 +126,12 @@ function App(): JSX.Element {
 
   // Initialize services on app start
   useEffect(() => {
+    // Safety timeout: if initialization hangs for 10s, force the app to render anyway
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[App] Initialization timed out after 10s, forcing render');
+      setIsSecurityInitialized(true);
+    }, 10000);
+
     // Re-enable notification handler for Android and non-crashing iOS versions.
     // iOS 26+ has a known crash with setNotificationHandler during window presentation.
     const isIOS26OrLater = Platform.OS === 'ios' && typeof Platform.Version === 'string' && parseInt(Platform.Version, 10) >= 26;
@@ -145,12 +151,12 @@ function App(): JSX.Element {
     }
 
     const initializeApp = async () => {
-      // Initialize security services first
+      // Initialize security services first — each wrapped individually to prevent hanging
       try {
-        await biometricAuthService.initialize();
-        await auditLogService.initialize();
-        await consentService.initialize();
-        await encryptedDatabaseService.open();
+        await Promise.race([biometricAuthService.initialize(), new Promise(r => setTimeout(r, 5000))]);
+        await Promise.race([auditLogService.initialize(), new Promise(r => setTimeout(r, 3000))]);
+        await Promise.race([consentService.initialize(), new Promise(r => setTimeout(r, 3000))]);
+        await Promise.race([encryptedDatabaseService.open(), new Promise(r => setTimeout(r, 3000))]);
         console.log('Security services initialized');
 
         // Initialize onboarding store
@@ -256,6 +262,7 @@ function App(): JSX.Element {
     // Cleanup on unmount
     return () => {
       cancelled = true;
+      clearTimeout(safetyTimeout);
       subscription.remove();
       telemetryService.destroy();
       // Fire-and-forget: catch to avoid unhandled rejection
