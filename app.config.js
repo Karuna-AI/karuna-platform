@@ -39,10 +39,14 @@ module.exports = {
       backgroundColor: '#4F46E5',
     },
     assetBundlePatterns: ['**/*'],
+    // Use JSC on iOS to avoid Hermes PAC crash on iOS 26 physical devices
+    // (expo/expo#44356, facebook/hermes#1966)
+    jsEngine: 'hermes',
     ios: {
+      jsEngine: 'jsc',
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '26',
+      buildNumber: '27',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
