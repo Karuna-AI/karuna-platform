@@ -283,8 +283,20 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Metrics endpoint (protected in production)
+// Metrics endpoint — localhost-only in dev, requires X-Metrics-Key header in production
 app.get('/metrics', (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress || '';
+  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+
+  if (process.env.NODE_ENV === 'production') {
+    const metricsKey = process.env.METRICS_SECRET;
+    if (!metricsKey || req.headers['x-metrics-key'] !== metricsKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  } else if (!isLocal) {
+    return res.status(403).json({ error: 'Metrics only accessible from localhost' });
+  }
+
   res.json({
     requests: metrics.requests,
     errors: metrics.errors,

@@ -57,6 +57,15 @@ google-service-account.json
 GoogleService-Info.plist
 google-services.json
 
+# EAS credentials (never commit these)
+credentials.json
+upload_certificate.pem
+upload_key_encrypted.zip
+
+# Tarballs
+*.tgz
+*.tar.gz
+
 # Metro
 .metro-health-check*
 
