@@ -8,7 +8,6 @@ on:
     branches: [master]
     paths:
       - 'src/**'
-      - 'app.json'
       - 'app.config.js'
       - 'package.json'
       - 'eas.json'
@@ -37,15 +36,14 @@ jobs:
   build:
     name: Build ${{ github.event.inputs.platform || 'all' }} (${{ github.event.inputs.profile || 'preview' }})
     runs-on: ubuntu-latest
-    # Skip if EXPO_TOKEN is not configured
     if: ${{ secrets.EXPO_TOKEN != '' }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -64,14 +62,16 @@ jobs:
         run: eas build --platform android --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
-          API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
+          API_URL: ${{ secrets.API_URL }}
+          EXPO_OWNER: ${{ secrets.EXPO_OWNER }}
 
       - name: Build iOS
         if: github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' || github.event.inputs.platform == ''
         run: eas build --platform ios --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
-          API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
+          API_URL: ${{ secrets.API_URL }}
+          EXPO_OWNER: ${{ secrets.EXPO_OWNER }}
 
   submit-android:
     name: Submit to Google Play
@@ -81,7 +81,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8

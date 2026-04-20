@@ -10,12 +10,14 @@ const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
 const getApiUrl = () => {
   if (IS_DEV) {
-    return 'http://localhost:3000';
+    return process.env.GATEWAY_URL || 'http://localhost:3021';
   }
   if (IS_PREVIEW) {
-    return process.env.PREVIEW_API_URL || 'https://karuna-api-production.up.railway.app';
+    if (!process.env.PREVIEW_API_URL) throw new Error('PREVIEW_API_URL is required for preview builds');
+    return process.env.PREVIEW_API_URL;
   }
-  return process.env.API_URL || 'https://karuna-api-production.up.railway.app';
+  if (!process.env.API_URL) throw new Error('API_URL is required for production builds');
+  return process.env.API_URL;
 };
 
 const getAppName = () => {
@@ -151,7 +153,7 @@ module.exports = {
         projectId: 'b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
       },
     },
-    owner: process.env.EXPO_OWNER || 'snehal2026',
+    owner: process.env.EXPO_OWNER || 'karuna-ai',
     runtimeVersion: '1.0.0',
     updates: {
       enabled: false,
