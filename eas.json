@@ -39,7 +39,7 @@
       },
       "android": {
         "buildType": "app-bundle",
-        "credentialsSource": "local"
+        "credentialsSource": "remote"
       },
       "env": {
         "APP_ENV": "production"
