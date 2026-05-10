@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { wsService } from '../services/websocket';
-import { useAuth } from '../context/AuthContext';
 
 export function useWebSocket(circleId: string | undefined) {
   const [isConnected, setIsConnected] = useState(false);
-  const { token } = useAuth();
 
   useEffect(() => {
-    if (!circleId || !token) return;
+    if (!circleId) return;
 
-    wsService.connect(circleId, token);
+    wsService.connect(circleId);
 
     const handleConnection = (connected: boolean) => {
       setIsConnected(connected);
@@ -22,7 +20,7 @@ export function useWebSocket(circleId: string | undefined) {
       wsService.offConnectionChange(handleConnection);
       wsService.disconnect();
     };
-  }, [circleId, token]);
+  }, [circleId]);
 
   const subscribe = useCallback((type: string, handler: (data: any) => void) => {
     wsService.onMessage(type, handler);

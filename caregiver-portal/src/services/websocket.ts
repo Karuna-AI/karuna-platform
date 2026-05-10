@@ -10,25 +10,24 @@ class WebSocketService {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private circleId: string | null = null;
-  private token: string | null = null;
   private _isConnected = false;
   private intentionalClose = false;
 
-  connect(circleId: string, token: string): void {
+  connect(circleId: string): void {
     this.circleId = circleId;
-    this.token = token;
     this.intentionalClose = false;
     this.doConnect();
   }
 
   private doConnect(): void {
-    if (!this.circleId || !this.token) return;
+    if (!this.circleId) return;
 
     try {
-      // Determine WS URL from current location
+      // Determine WS URL from current location.
+      // Auth is handled via httpOnly cookie sent automatically on the upgrade request.
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws?token=${encodeURIComponent(this.token)}&circleId=${encodeURIComponent(this.circleId)}`;
+      const wsUrl = `${protocol}//${host}/ws?circleId=${encodeURIComponent(this.circleId)}`;
 
       this.ws = new WebSocket(wsUrl);
 
@@ -90,7 +89,6 @@ class WebSocketService {
 
     this._isConnected = false;
     this.circleId = null;
-    this.token = null;
     this.reconnectAttempts = 0;
     this.notifyConnectionHandlers(false);
   }
