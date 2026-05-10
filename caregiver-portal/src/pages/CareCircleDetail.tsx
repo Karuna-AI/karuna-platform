@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
@@ -8,6 +8,14 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 type TabType = 'dashboard' | 'overview' | 'members' | 'vault' | 'notes';
+
+function useDebounced<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return useCallback((...args: Parameters<T>) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => fn(...args), delay);
+  }, [fn, delay]) as T;
+}
 
 export default function CareCircleDetail() {
   const { id } = useParams<{ id: string }>();
@@ -56,6 +64,9 @@ export default function CareCircleDetail() {
     setIsDashboardLoading(false);
   }, [id]);
 
+  // Debounced version for WebSocket events — coalesces bursts into one fetch
+  const debouncedLoadDashboard = useDebounced(loadDashboardData, 300);
+
   useEffect(() => {
     if (id) {
       loadCircleData();
@@ -80,14 +91,14 @@ export default function CareCircleDetail() {
     if (!isConnected) return;
 
     const unsubs = [
-      subscribe('health_update', () => loadDashboardData()),
-      subscribe('alert', () => loadDashboardData()),
-      subscribe('activity_update', () => loadDashboardData()),
-      subscribe('alert_acknowledged', () => loadDashboardData()),
+      subscribe('health_update', () => debouncedLoadDashboard()),
+      subscribe('alert', () => debouncedLoadDashboard()),
+      subscribe('activity_update', () => debouncedLoadDashboard()),
+      subscribe('alert_acknowledged', () => debouncedLoadDashboard()),
     ];
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [isConnected, subscribe, loadDashboardData]);
+  }, [isConnected, subscribe, debouncedLoadDashboard]);
 
   const loadCircleData = async () => {
     setIsLoading(true);
