@@ -2909,11 +2909,20 @@ function broadcastToCircle(circleId, event) {
 // WebSocket connection handler
 async function handleWebSocket(ws, req) {
   const url = new URL(req.url, 'http://localhost');
-  const token = url.searchParams.get('token');
   const circleId = url.searchParams.get('circleId');
 
+  // Auth via httpOnly cookie (browser sends it automatically on upgrade).
+  // Fall back to Authorization header for non-browser clients / mobile.
+  let token = getCookie(req, AUTH_COOKIE_NAME);
+  if (!token) {
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
+
   if (!token || !circleId) {
-    ws.close(4001, 'Missing token or circleId');
+    ws.close(4001, 'Missing authentication or circleId');
     return;
   }
 
