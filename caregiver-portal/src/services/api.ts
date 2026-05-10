@@ -38,6 +38,19 @@ class ApiService {
       if (this.token) {
         config.headers.Authorization = `Bearer ${this.token}`;
       }
+
+      // CSRF double-submit: send the csrf-token cookie value as a header on mutating requests
+      const method = (config.method || '').toLowerCase();
+      if (['post', 'put', 'patch', 'delete'].includes(method)) {
+        const csrfToken = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('csrf-token='))
+          ?.split('=')[1];
+        if (csrfToken) {
+          config.headers['X-CSRF-Token'] = decodeURIComponent(csrfToken);
+        }
+      }
+
       return config;
     });
 
