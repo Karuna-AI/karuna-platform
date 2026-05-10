@@ -1,20 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { wsService } from '../services/websocket';
 import { useAuth } from '../context/AuthContext';
 
 export function useWebSocket(circleId: string | undefined) {
   const [isConnected, setIsConnected] = useState(false);
-  const circleIdRef = useRef(circleId);
   const { token } = useAuth();
 
   useEffect(() => {
-    circleIdRef.current = circleId;
-  }, [circleId]);
-
-  useEffect(() => {
-    if (!circleId) return;
-
-    if (!token) return;
+    if (!circleId || !token) return;
 
     wsService.connect(circleId, token);
 
