@@ -8,8 +8,13 @@ import {
   Vibration,
   Animated,
   Platform,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { biometricAuthService, BiometricCapabilities } from '../services/biometricAuth';
+
+// MOB-3: Key for persisting lockout state across app restarts
+const LOCKOUT_KEY = '@karuna/lockout_state';
 
 interface LockScreenProps {
   onUnlock: () => void;
@@ -34,17 +39,44 @@ export default function LockScreen({
 
   const shakeAnim = useState(new Animated.Value(0))[0];
 
+  // MOB-3: Restore persisted lockout state on mount
   useEffect(() => {
+    const restoreLockoutState = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(LOCKOUT_KEY);
+        if (stored) {
+          const { lockedUntil, attempts: storedAttempts } = JSON.parse(stored) as {
+            lockedUntil: number;
+            attempts: number;
+          };
+          const remaining = Math.ceil((lockedUntil - Date.now()) / 1000);
+          if (remaining > 0) {
+            setIsLocked(true);
+            setLockTimer(remaining);
+            setAttempts(storedAttempts);
+          } else {
+            // Lockout expired while app was closed — clean up
+            await AsyncStorage.removeItem(LOCKOUT_KEY);
+          }
+        }
+      } catch (err) {
+        console.error('[LockScreen] Failed to restore lockout state:', err);
+      }
+    };
+
+    restoreLockoutState();
     checkBiometricCapabilities();
   }, []);
 
+  // MOB-3: Countdown timer; remove persisted state when lockout expires
   useEffect(() => {
-    // Countdown timer when locked
     if (isLocked && lockTimer > 0) {
       const timer = setInterval(() => {
         setLockTimer((prev) => {
           if (prev <= 1) {
             setIsLocked(false);
+            // Remove persisted lockout now that it has expired
+            AsyncStorage.removeItem(LOCKOUT_KEY).catch(() => {});
             return 0;
           }
           return prev - 1;
@@ -76,6 +108,7 @@ export default function LockScreen({
     ]).start();
   };
 
+  // MOB-1: No more auto-submit at 4 digits — just append the digit
   const handlePinInput = (digit: string) => {
     if (isLocked) return;
     if (pin.length >= 8) return;
@@ -83,12 +116,6 @@ export default function LockScreen({
     const newPin = pin + digit;
     setPin(newPin);
     setError('');
-
-    // Auto-submit when PIN is 4-8 digits and user presses confirm or after timeout
-    // Or we could auto-verify at 4 digits - let's do 4 for simplicity
-    if (newPin.length === 4) {
-      verifyPin(newPin);
-    }
   };
 
   const handleDelete = () => {
@@ -103,24 +130,40 @@ export default function LockScreen({
     setError('');
   };
 
+  // MOB-1: Explicit confirm handler
+  const handleConfirm = () => {
+    if (pin.length >= 4 && !isLocked) {
+      verifyPin(pin);
+    }
+  };
+
   const verifyPin = async (pinToVerify: string) => {
     const result = await biometricAuthService.verifyPIN(pinToVerify);
 
     if (result.success) {
+      // MOB-3: Clear persisted lockout on successful auth
+      await AsyncStorage.removeItem(LOCKOUT_KEY).catch(() => {});
       onUnlock();
     } else {
-      setAttempts((prev) => prev + 1);
+      const newAttempts = attempts + 1;
+      setAttempts(newAttempts);
       setPin('');
       shake();
 
       // Lock out after 5 failed attempts
-      if (attempts + 1 >= 5) {
+      if (newAttempts >= 5) {
         setIsLocked(true);
         setLockTimer(30); // 30 second lockout
         setAttempts(0);
         setError('Too many attempts. Please wait.');
+
+        // MOB-3: Persist lockout state so it survives app restarts
+        AsyncStorage.setItem(
+          LOCKOUT_KEY,
+          JSON.stringify({ lockedUntil: Date.now() + 30_000, attempts: newAttempts })
+        ).catch(() => {});
       } else {
-        setError(`Incorrect PIN. ${5 - attempts - 1} attempts remaining.`);
+        setError(`Incorrect PIN. ${5 - newAttempts} attempts remaining.`);
       }
     }
   };
@@ -137,6 +180,26 @@ export default function LockScreen({
     }
   };
 
+  // MOB-2: Forgot PIN recovery — wipes all security data then unlocks
+  const handleForgotPin = () => {
+    Alert.alert(
+      'Forgot PIN?',
+      'This will reset all security settings and unlock the app. You will need to set up a new PIN afterwards.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset & Continue',
+          style: 'destructive',
+          onPress: async () => {
+            await biometricAuthService.resetAllSecurity();
+            await AsyncStorage.removeItem(LOCKOUT_KEY).catch(() => {});
+            onUnlock();
+          },
+        },
+      ]
+    );
+  };
+
   const getBiometricButtonText = () => {
     if (!biometricCapabilities) return 'Use Biometric';
     if (biometricCapabilities.biometricTypes.includes('facial')) return 'Use Face ID';
@@ -144,16 +207,18 @@ export default function LockScreen({
     return 'Use Biometric';
   };
 
+  // MOB-1: Dynamic dots — show at least 4 dots, expand as user types beyond 4
   const renderPinDots = () => {
+    const dotCount = Math.max(4, pin.length);
     const dots = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < dotCount; i++) {
       dots.push(
         <View
           key={i}
           style={[
             styles.pinDot,
             i < pin.length && styles.pinDotFilled,
-            error && styles.pinDotError,
+            error ? styles.pinDotError : null,
           ]}
         />
       );
@@ -193,12 +258,12 @@ export default function LockScreen({
         </Animated.View>
 
         {/* Error/Status Message */}
-        {error && <Text style={styles.errorText}>{error}</Text>}
-        {isLocked && (
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {isLocked ? (
           <Text style={styles.lockTimerText}>
             Locked for {lockTimer} seconds
           </Text>
-        )}
+        ) : null}
 
         {/* Keypad */}
         <View style={styles.keypad}>
@@ -240,8 +305,27 @@ export default function LockScreen({
           </View>
         </View>
 
+        {/* MOB-1: Confirm Button */}
+        <TouchableOpacity
+          style={[
+            styles.confirmButton,
+            (pin.length < 4 || isLocked) && styles.confirmButtonDisabled,
+          ]}
+          onPress={handleConfirm}
+          disabled={pin.length < 4 || isLocked}
+        >
+          <Text
+            style={[
+              styles.confirmButtonText,
+              (pin.length < 4 || isLocked) && styles.confirmButtonTextDisabled,
+            ]}
+          >
+            Confirm
+          </Text>
+        </TouchableOpacity>
+
         {/* Biometric Button */}
-        {showBiometric && (
+        {showBiometric ? (
           <TouchableOpacity
             style={styles.biometricButton}
             onPress={handleBiometricAuth}
@@ -252,7 +336,12 @@ export default function LockScreen({
             </Text>
             <Text style={styles.biometricText}>{getBiometricButtonText()}</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
+
+        {/* MOB-2: Forgot PIN? */}
+        <TouchableOpacity style={styles.forgotPinButton} onPress={handleForgotPin}>
+          <Text style={styles.forgotPinText}>Forgot PIN?</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -365,6 +454,26 @@ const styles = StyleSheet.create({
   textDisabled: {
     color: '#CCC',
   },
+  confirmButton: {
+    width: '100%',
+    maxWidth: 300,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#4A90A4',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  confirmButtonDisabled: {
+    backgroundColor: '#C5DDE5',
+  },
+  confirmButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  confirmButtonTextDisabled: {
+    color: '#8BB8C5',
+  },
   biometricButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -374,6 +483,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: '#90CAF9',
+    marginBottom: 16,
   },
   biometricIcon: {
     fontSize: 24,
@@ -383,5 +493,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1976D2',
     fontWeight: '600',
+  },
+  forgotPinButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  forgotPinText: {
+    fontSize: 14,
+    color: '#4A90A4',
+    textDecorationLine: 'underline',
   },
 });
