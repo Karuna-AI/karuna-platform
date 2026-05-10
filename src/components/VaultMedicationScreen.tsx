@@ -3,6 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
+  FlatList,
   ScrollView,
   TouchableOpacity,
   Alert,
@@ -40,12 +41,16 @@ const FORM_OPTIONS = [
   { label: '🧴 Cream', value: 'cream' },
 ];
 
+const PAGE_SIZE = 20;
+
 export function VaultMedicationScreen({
   onClose,
 }: VaultMedicationScreenProps): JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [medications, setMedications] = useState<VaultMedication[]>([]);
+  const [allMedications, setAllMedications] = useState<VaultMedication[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingMed, setEditingMed] = useState<VaultMedication | null>(null);
 
@@ -71,11 +76,19 @@ export function VaultMedicationScreen({
     setIsLoading(true);
     try {
       const data = await vaultService.getMedications();
-      setMedications(data);
+      setAllMedications(data);
+      setMedications(data.slice(0, PAGE_SIZE));
+      setHasMore(data.length > PAGE_SIZE);
     } catch (error) {
       console.error('Failed to load medications:', error);
     }
     setIsLoading(false);
+  };
+
+  const loadMore = () => {
+    const next = medications.length + PAGE_SIZE;
+    setMedications(allMedications.slice(0, next));
+    setHasMore(allMedications.length > next);
   };
 
   const populateForm = (med: VaultMedication) => {
@@ -203,57 +216,57 @@ export function VaultMedicationScreen({
       />
 
       {!showForm ? (
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-          <VaultBigButton
-            title="Add New Medication"
-            icon="➕"
-            onPress={() => setShowForm(true)}
-          />
-
-          {medications.length === 0 ? (
-            <View style={styles.emptyContainer}>
+        <FlatList
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          data={medications}
+          keyExtractor={(item) => item.id}
+          ListHeaderComponent={
+            <VaultBigButton
+              title="Add New Medication"
+              icon="➕"
+              onPress={() => setShowForm(true)}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>💊</Text>
               <Text style={styles.emptyText}>No medications yet</Text>
               <Text style={styles.emptySubtext}>
                 Add your medications to keep track of schedules and dosages
               </Text>
             </View>
-          ) : (
-            <>
-              {/* Active medications */}
-              {medications.filter(m => m.isActive).length > 0 && (
-                <>
+          }
+          renderItem={({ item: med }) => {
+            const activeMeds = medications.filter(m => m.isActive);
+            const inactiveMeds = medications.filter(m => !m.isActive);
+            const isFirstActive = med.isActive && activeMeds[0]?.id === med.id;
+            const isFirstInactive = !med.isActive && inactiveMeds[0]?.id === med.id;
+            return (
+              <>
+                {isFirstActive && (
                   <Text style={styles.sectionTitle}>Active Medications</Text>
-                  {medications.filter(m => m.isActive).map(med => (
-                    <MedicationCard
-                      key={med.id}
-                      medication={med}
-                      onEdit={() => handleEdit(med)}
-                      onDelete={() => handleDelete(med)}
-                      onToggleActive={() => handleToggleActive(med)}
-                    />
-                  ))}
-                </>
-              )}
-
-              {/* Inactive medications */}
-              {medications.filter(m => !m.isActive).length > 0 && (
-                <>
+                )}
+                {isFirstInactive && (
                   <Text style={styles.sectionTitle}>Past Medications</Text>
-                  {medications.filter(m => !m.isActive).map(med => (
-                    <MedicationCard
-                      key={med.id}
-                      medication={med}
-                      onEdit={() => handleEdit(med)}
-                      onDelete={() => handleDelete(med)}
-                      onToggleActive={() => handleToggleActive(med)}
-                    />
-                  ))}
-                </>
-              )}
-            </>
-          )}
-        </ScrollView>
+                )}
+                <MedicationCard
+                  medication={med}
+                  onEdit={() => handleEdit(med)}
+                  onDelete={() => handleDelete(med)}
+                  onToggleActive={() => handleToggleActive(med)}
+                />
+              </>
+            );
+          }}
+          ListFooterComponent={
+            hasMore ? (
+              <TouchableOpacity style={styles.loadMoreButton} onPress={loadMore}>
+                <Text style={styles.loadMoreText}>Load More</Text>
+              </TouchableOpacity>
+            ) : null
+          }
+        />
       ) : (
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
           <VaultFormInput
@@ -654,6 +667,23 @@ const styles = StyleSheet.create({
 
   buttonContainer: {
     marginTop: 20,
+  },
+  loadMoreButton: {
+    marginTop: 8,
+    marginBottom: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+  },
+  loadMoreText: {
+    fontSize: 16,
+    color: '#1565C0',
+    fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60,
   },
 });
 
