@@ -6,6 +6,7 @@ interface ActivityMonitorProps {
   inactivityMinutes: number | null;
   inactivityStatus: string;
   checkinResponseRate?: number;
+  thresholds?: { concerningMinutes: number; alertMinutes: number };
 }
 
 const statusConfig: Record<string, { color: string; bg: string; icon: string; label: string }> = {
@@ -60,11 +61,14 @@ const activityTypeLabels: Record<string, string> = {
   settings_change: 'Changed settings',
 };
 
+const DEFAULT_THRESHOLDS = { concerningMinutes: 240, alertMinutes: 480 };
+
 export const ActivityMonitor: React.FC<ActivityMonitorProps> = ({
   lastActivity,
   inactivityMinutes,
   inactivityStatus,
   checkinResponseRate,
+  thresholds = DEFAULT_THRESHOLDS,
 }) => {
   const status = statusConfig[inactivityStatus] || statusConfig.unknown;
 
@@ -152,8 +156,8 @@ export const ActivityMonitor: React.FC<ActivityMonitorProps> = ({
             <span>{inactivityStatus === 'alert' ? '🚨' : '⚠️'}</span>
             <span className={`text-sm ${inactivityStatus === 'alert' ? 'text-red-700' : 'text-yellow-700'}`}>
               {inactivityStatus === 'alert'
-                ? 'No activity for over 8 hours. Consider checking in.'
-                : 'Extended period of inactivity detected.'}
+                ? `No activity for over ${thresholds.alertMinutes >= 60 ? `${Math.floor(thresholds.alertMinutes / 60)} hour${Math.floor(thresholds.alertMinutes / 60) !== 1 ? 's' : ''}` : `${thresholds.alertMinutes} minutes`}. Consider checking in.`
+                : `No activity for over ${thresholds.concerningMinutes >= 60 ? `${Math.floor(thresholds.concerningMinutes / 60)} hour${Math.floor(thresholds.concerningMinutes / 60) !== 1 ? 's' : ''}` : `${thresholds.concerningMinutes} minutes`}. Extended period of inactivity detected.`}
             </span>
           </div>
         </div>

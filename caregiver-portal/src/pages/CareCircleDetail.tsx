@@ -442,6 +442,7 @@ export default function CareCircleDetail() {
                   inactivityMinutes={dashboardData.activity.inactivityMinutes}
                   inactivityStatus={dashboardData.activity.inactivityStatus}
                   checkinResponseRate={dashboardData.checkins.responseRate}
+                  thresholds={dashboardData.inactivityThresholds}
                 />
               </ErrorBoundary>
 
