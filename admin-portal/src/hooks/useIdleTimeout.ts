@@ -4,15 +4,6 @@ const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 const WARNING_BEFORE = 2 * 60 * 1000; // 2 minutes before timeout
 const CHECK_INTERVAL = 30 * 1000; // Check every 30 seconds
 
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
-
 export function useIdleTimeout(onTimeout: () => void) {
   const [showWarning, setShowWarning] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
@@ -55,17 +46,9 @@ export function useIdleTimeout(onTimeout: () => void) {
     };
   }, []);
 
-  // Check idle state and JWT expiry
+  // Check idle state (JWT expiry is handled server-side via 401 responses)
   useEffect(() => {
     const interval = setInterval(() => {
-      const token = localStorage.getItem('admin_token');
-
-      // Check JWT expiry
-      if (token && isTokenExpired(token)) {
-        onTimeout();
-        return;
-      }
-
       const idleTime = Date.now() - lastActivityRef.current;
       const timeUntilTimeout = IDLE_TIMEOUT - idleTime;
 
@@ -116,5 +99,3 @@ export function useIdleTimeout(onTimeout: () => void) {
 
   return { showWarning, remainingSeconds, resetTimer };
 }
-
-export { isTokenExpired };

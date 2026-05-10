@@ -92,6 +92,19 @@ module.exports = {
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
+        // Health Connect (Android 13+)
+        'android.permission.health.READ_HEART_RATE',
+        'android.permission.health.READ_STEPS',
+        'android.permission.health.READ_BLOOD_PRESSURE',
+        'android.permission.health.READ_BLOOD_GLUCOSE',
+        'android.permission.health.READ_BODY_WEIGHT',
+        'android.permission.health.READ_OXYGEN_SATURATION',
+        'android.permission.health.WRITE_HEART_RATE',
+        'android.permission.health.WRITE_STEPS',
+        'android.permission.health.WRITE_BLOOD_PRESSURE',
+        'android.permission.health.WRITE_BLOOD_GLUCOSE',
+        'android.permission.health.WRITE_BODY_WEIGHT',
+        'android.permission.health.WRITE_OXYGEN_SATURATION',
       ],
       intentFilters: [
         {

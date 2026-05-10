@@ -17,8 +17,10 @@ class AdminApiService {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest',
       },
+      withCredentials: true,
     });
 
+    // In-memory Bearer token for API clients; cookie is the primary browser auth mechanism
     this.client.interceptors.request.use((config) => {
       if (this.token) {
         config.headers.Authorization = `Bearer ${this.token}`;
@@ -39,11 +41,20 @@ class AdminApiService {
   }
 
   setToken(token: string) {
+    // In-memory only — httpOnly cookie is the primary auth for browser sessions
     this.token = token;
   }
 
   clearToken() {
     this.token = null;
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.client.post('/auth/logout');
+    } finally {
+      this.clearToken();
+    }
   }
 
   // Auth
@@ -235,25 +246,19 @@ class AdminApiService {
 
 export const api = new AdminApiService();
 
-// Direct axios client access for new dashboard pages
+// Direct axios client for dashboard pages — uses httpOnly cookie automatically
 export const adminAPI = {
   get: async (url: string) => {
-    const token = localStorage.getItem('admin_token');
     const response = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, {
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      withCredentials: true,
     });
     return response;
   },
   post: async (url: string, data?: any) => {
-    const token = localStorage.getItem('admin_token');
     const response = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, data, {
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      withCredentials: true,
     });
     return response;
   },

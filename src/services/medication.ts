@@ -16,6 +16,21 @@ const STORAGE_KEYS = {
   NOTIFICATION_IDS: '@karuna_medication_notification_ids',
 };
 
+// Returns today's date in YYYY-MM-DD using local time (not UTC)
+function localDateString(date: Date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// Builds an ISO-8601 datetime string with local timezone offset, e.g. "2026-05-05T09:00:00+05:30"
+function localScheduledTime(dateStr: string, timeStr: string): string {
+  const now = new Date();
+  const tzOffset = -now.getTimezoneOffset();
+  const tzSign = tzOffset >= 0 ? '+' : '-';
+  const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+  const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+  return `${dateStr}T${timeStr}:00${tzSign}${tzHours}:${tzMins}`;
+}
+
 // Notification handler is configured once in App.tsx (see initializeNotifications)
 // Do NOT set it here at module level - duplicate calls can crash on iOS 26
 
@@ -131,10 +146,11 @@ class MedicationService {
     this.medications[index] = updated;
     await this.saveMedications();
 
-    // Reschedule notifications
-    await this.cancelNotifications(id);
+    // Reschedule notifications (scheduleNotifications cancels existing ones internally)
     if (updated.isActive) {
       await this.scheduleNotifications(updated);
+    } else {
+      await this.cancelNotifications(id);
     }
 
     await auditLogService.logVaultAccess({
@@ -210,7 +226,7 @@ class MedicationService {
   }[] {
     const today = new Date();
     const dayOfWeek = today.getDay();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = localDateString(today); // Use local date, not UTC
 
     const schedule: {
       medication: Medication;
@@ -266,13 +282,9 @@ class MedicationService {
     }
 
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    // Include timezone offset so server can correctly interpret scheduled time
-    const tzOffset = -now.getTimezoneOffset();
-    const tzSign = tzOffset >= 0 ? '+' : '-';
-    const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
-    const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
-    const scheduledTime = `${today}T${schedule.time}:00${tzSign}${tzHours}:${tzMins}`;
+    const today = localDateString(now);
+    // Use local timezone offset so server can correctly interpret scheduled time
+    const scheduledTime = localScheduledTime(today, schedule.time);
 
     const dose: MedicationDose = {
       id: `dose_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -301,11 +313,15 @@ class MedicationService {
   /**
    * Mark a dose as missed (called by background job or notification)
    */
-  async markDoseMissed(medicationId: string, scheduledTime: string): Promise<MedicationDose> {
+  // scheduleTime should be "HH:MM", dateStr optional (defaults to today local)
+  async markDoseMissed(medicationId: string, scheduleTime: string, dateStr?: string): Promise<MedicationDose> {
     const medication = this.getMedicationById(medicationId);
     if (!medication) {
       throw new Error('Medication not found');
     }
+
+    const localDate = dateStr || localDateString();
+    const scheduledTime = localScheduledTime(localDate, scheduleTime);
 
     const dose: MedicationDose = {
       id: `dose_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -423,10 +439,15 @@ class MedicationService {
   }
 
   /**
-   * Schedule notifications for a medication
+   * Schedule notifications for a medication.
+   * Always cancels any existing notifications for this medication first to prevent duplicates.
    */
   private async scheduleNotifications(medication: Medication): Promise<void> {
     if (Platform.OS === 'web') return;
+
+    // Cancel existing notifications for this medication before scheduling new ones (dedup guard)
+    await this.cancelNotifications(medication.id);
+
     const ids: string[] = [];
 
     for (const schedule of medication.schedule) {

@@ -157,17 +157,45 @@ async function logAdminAction(adminId, adminEmail, action, resourceType, resourc
 }
 
 // ============================================================================
+// Cookie helpers
+// ============================================================================
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+const ADMIN_COOKIE_NAME = 'karuna_admin';
+const ADMIN_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: IS_PRODUCTION,
+  sameSite: IS_PRODUCTION ? 'none' : 'lax',
+  maxAge: 24 * 60 * 60 * 1000,
+  path: '/',
+};
+
+function getCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  const match = header.split(';').map(s => s.trim()).find(s => s.startsWith(`${name}=`));
+  return match ? match.slice(name.length + 1) : null;
+}
+
+// ============================================================================
 // Authentication Middleware
 // ============================================================================
 
 function adminAuthMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
+  // Prefer httpOnly cookie; fall back to Bearer header for API clients
+  let token = getCookie(req, ADMIN_COOKIE_NAME);
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  const token = authHeader.substring(7);
   const decoded = verifyAdminJWT(token);
 
   if (!decoded) {
@@ -229,6 +257,7 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
 
     await logAdminAction(admin.id, admin.email, 'login', 'admin', admin.id, null, null, req);
 
+    res.cookie(ADMIN_COOKIE_NAME, token, ADMIN_COOKIE_OPTIONS);
     res.json({
       success: true,
       token,
@@ -244,6 +273,17 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
     console.error('Admin login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
+});
+
+// Admin logout — clears httpOnly cookie
+router.post('/auth/logout', (req, res) => {
+  res.clearCookie(ADMIN_COOKIE_NAME, {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    path: '/',
+  });
+  res.json({ success: true });
 });
 
 // Get current admin
@@ -823,6 +863,34 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
 // Feature Flags Routes
 // ============================================================================
 
+// Maps a userId to a deterministic bucket 0-99 for rollout_percentage enforcement
+function userRolloutBucket(userId) {
+  let hash = 5381;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash << 5) + hash) + userId.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return Math.abs(hash) % 100;
+}
+
+// Evaluate a single flag for a given userId/circleId
+function evaluateFlag(flag, userId, circleId) {
+  if (!flag.is_enabled) return false;
+  if (flag.enabled_for_all) return true;
+
+  const userIds = Array.isArray(flag.enabled_user_ids) ? flag.enabled_user_ids : [];
+  const circleIds = Array.isArray(flag.enabled_circle_ids) ? flag.enabled_circle_ids : [];
+
+  if (userId && userIds.includes(userId)) return true;
+  if (circleId && circleIds.includes(circleId)) return true;
+
+  if (flag.rollout_percentage > 0 && userId) {
+    return userRolloutBucket(userId) < flag.rollout_percentage;
+  }
+
+  return false;
+}
+
 // List feature flags
 router.get('/feature-flags', adminAuthMiddleware, async (req, res) => {
   try {
@@ -831,6 +899,27 @@ router.get('/feature-flags', adminAuthMiddleware, async (req, res) => {
   } catch (error) {
     console.error('List feature flags error:', error);
     res.status(500).json({ error: 'Failed to list feature flags' });
+  }
+});
+
+// Evaluate feature flags for a user — used by mobile app and portals
+router.post('/feature-flags/evaluate', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { userId, circleId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const result = await db.query('SELECT * FROM feature_flags ORDER BY name');
+    const evaluation = {};
+    for (const flag of result.rows) {
+      evaluation[flag.name] = evaluateFlag(flag, userId, circleId);
+    }
+
+    res.json({ flags: evaluation });
+  } catch (error) {
+    console.error('Evaluate feature flags error:', error);
+    res.status(500).json({ error: 'Failed to evaluate feature flags' });
   }
 });
 

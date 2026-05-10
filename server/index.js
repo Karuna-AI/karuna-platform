@@ -73,9 +73,10 @@ app.use(helmet());
 
 // CORS - configure for your domain in production
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3020', 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:3030'],
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3020', 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:3030', 'http://localhost:3040'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'X-Request-ID', 'X-Client-Version', 'X-Requested-With', 'Authorization'],
+  credentials: true,
 }));
 
 // JSON body parser

@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../services/api';
-import { isTokenExpired } from '../hooks/useIdleTimeout';
 
 interface Admin {
   id: string;
@@ -14,7 +13,7 @@ interface AuthContextType {
   admin: Admin | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,19 +23,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('admin_token');
-    if (token) {
-      if (isTokenExpired(token)) {
-        localStorage.removeItem('admin_token');
-        api.clearToken();
-        setIsLoading(false);
-        return;
-      }
-      api.setToken(token);
-      loadProfile();
-    } else {
-      setIsLoading(false);
-    }
+    // Validate session via httpOnly cookie — no localStorage token needed
+    loadProfile();
   }, []);
 
   const loadProfile = async () => {
@@ -44,8 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (result.success && result.data) {
       setAdmin(result.data.admin);
     } else {
-      localStorage.removeItem('admin_token');
-      api.clearToken();
+      setAdmin(null);
     }
     setIsLoading(false);
   };
@@ -53,17 +40,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const result = await api.login(email, password);
     if (result.success && result.data) {
-      localStorage.setItem('admin_token', result.data.token);
-      api.setToken(result.data.token);
       setAdmin(result.data.admin);
       return { success: true };
     }
     return { success: false, error: result.error };
   };
 
-  const logout = () => {
-    localStorage.removeItem('admin_token');
-    api.clearToken();
+  const logout = async () => {
+    await api.logout();
     setAdmin(null);
   };
 

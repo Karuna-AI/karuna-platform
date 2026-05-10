@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useDebounce } from '../hooks/useDebounce';
 
 export default function Circles() {
   const [circles, setCircles] = useState<any[]>([]);
@@ -9,28 +10,37 @@ export default function Circles() {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadCircles();
-  }, [pagination.page]);
+  const debouncedSearch = useDebounce(search, 300);
 
-  const loadCircles = async () => {
+  const loadCircles = useCallback(async (page = 1, searchTerm = debouncedSearch) => {
     setIsLoading(true);
     const result = await api.getCircles({
-      page: pagination.page,
-      limit: pagination.limit,
-      search: search || undefined,
+      page,
+      limit: 50,
+      search: searchTerm || undefined,
     });
     if (result.success) {
       setCircles(result.data.circles);
       setPagination(result.data.pagination);
     }
     setIsLoading(false);
-  };
+  }, [debouncedSearch]);
+
+  // Reload when debounced search changes (reset to page 1)
+  useEffect(() => {
+    loadCircles(1, debouncedSearch);
+  }, [debouncedSearch]);
+
+  // Reload when page changes
+  useEffect(() => {
+    if (pagination.page > 1) {
+      loadCircles(pagination.page);
+    }
+  }, [pagination.page]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setPagination({ ...pagination, page: 1 });
-    loadCircles();
+    loadCircles(1);
   };
 
   const formatDate = (dateStr: string) => {
