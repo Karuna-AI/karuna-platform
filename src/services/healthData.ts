@@ -99,8 +99,7 @@ class HealthDataService {
         if (adapterResult.granted.includes(type)) {
           granted.push(type);
         } else {
-          // Fall back to manual-entry for denied types
-          granted.push(type);
+          denied.push(type);
         }
       }
     } else {

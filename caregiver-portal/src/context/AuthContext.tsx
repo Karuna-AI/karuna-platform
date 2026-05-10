@@ -45,9 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (credentials: LoginCredentials) => {
     const result = await api.login(credentials);
     if (result.success && result.data) {
+      const token = result.data.token ?? null;
+      if (token) api.setToken(token);
       setState({
         user: result.data.user,
-        token: null,
+        token,
         isAuthenticated: true,
         isLoading: false,
       });

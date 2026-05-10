@@ -36,9 +36,9 @@ export default function Users() {
   // Reload when page changes (keep current filters)
   useEffect(() => {
     if (pagination.page > 1) {
-      loadUsers(pagination.page);
+      loadUsers(pagination.page, debouncedSearch, status);
     }
-  }, [pagination.page]);
+  }, [pagination.page, debouncedSearch, status]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

@@ -26,6 +26,7 @@ import {
 import { contactsService, Contact, ContactSearchResult } from './services/contacts';
 import { ActionConfirmation } from './types/actions';
 import * as Speech from 'expo-speech';
+import * as Notifications from 'expo-notifications';
 import { telemetryService } from './services/telemetry';
 import { checkGatewayHealth } from './services/api';
 import { careCircleSyncService } from './services/careCircleSync';

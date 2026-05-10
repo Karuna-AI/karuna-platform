@@ -34,9 +34,9 @@ export default function Circles() {
   // Reload when page changes
   useEffect(() => {
     if (pagination.page > 1) {
-      loadCircles(pagination.page);
+      loadCircles(pagination.page, debouncedSearch);
     }
-  }, [pagination.page]);
+  }, [pagination.page, debouncedSearch]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
