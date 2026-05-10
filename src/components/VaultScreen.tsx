@@ -138,6 +138,28 @@ export function VaultScreen({ onClose, onNavigate }: VaultScreenProps): JSX.Elem
     );
   }, []);
 
+  const handleForgotVaultPin = () => {
+    Alert.alert(
+      'Delete Vault',
+      'Resetting the vault PIN will permanently delete all vault data. This cannot be undone. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Vault',
+          style: 'destructive',
+          onPress: async () => {
+            await vaultService.deleteVault();
+            setHasVault(false);
+            setIsLocked(true);
+            setShowPinModal(false);
+            setPin('');
+            setSummary(null);
+          },
+        },
+      ]
+    );
+  };
+
   const openPinModal = (creating: boolean) => {
     setIsCreatingVault(creating);
     setPin('');
@@ -352,6 +374,12 @@ export function VaultScreen({ onClose, onNavigate }: VaultScreenProps): JSX.Elem
                 )}
               </TouchableOpacity>
             </View>
+
+            {!isCreatingVault && (
+              <TouchableOpacity style={styles.forgotPinLink} onPress={handleForgotVaultPin}>
+                <Text style={styles.forgotPinLinkText}>Forgot vault PIN?</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -639,6 +667,15 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     fontWeight: 'bold',
+  },
+  forgotPinLink: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  forgotPinLinkText: {
+    fontSize: 14,
+    color: '#999',
+    textDecorationLine: 'underline',
   },
 });
 

@@ -885,6 +885,18 @@ class VaultService {
   }
 
   /**
+   * Delete the vault entirely — removes all data and the encryption key.
+   * Used for PIN recovery when the user forgets their vault PIN.
+   */
+  async deleteVault(): Promise<void> {
+    await encryptionService.resetVault();
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    this.data = null;
+    this.isLoaded = false;
+    this.isLocked = true;
+  }
+
+  /**
    * Get summary stats for vault home screen
    */
   async getVaultSummary(): Promise<{
