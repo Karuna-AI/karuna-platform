@@ -122,6 +122,10 @@ const localStorageMock = {
 }));
 
 // Mock navigator.mediaDevices
+// global.navigator may be undefined in some jsdom versions (CI Node 20+)
+if (!global.navigator) {
+  (global as any).navigator = {};
+}
 Object.defineProperty(global.navigator, 'mediaDevices', {
   value: {
     getUserMedia: jest.fn(() => Promise.resolve({
@@ -131,6 +135,7 @@ Object.defineProperty(global.navigator, 'mediaDevices', {
     })),
   },
   writable: true,
+  configurable: true,
 });
 
 // Mock SpeechSynthesis
