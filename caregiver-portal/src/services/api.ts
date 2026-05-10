@@ -30,6 +30,7 @@ class ApiService {
         'Content-Type': 'application/json',
       },
       withCredentials: true,
+      timeout: 15000,
     });
 
     // Add in-memory Bearer token for mobile/API fallback (not used in browser portal)
@@ -40,10 +41,13 @@ class ApiService {
       return config;
     });
 
-    // Handle auth errors
+    // Handle auth and timeout errors
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
+        if (error.code === 'ECONNABORTED') {
+          return Promise.reject(new Error('Request timed out. Please check your connection.'));
+        }
         if (error.response?.status === 401) {
           this.clearToken();
           window.location.href = '/login';
