@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { Alert, AppState, AppStateStatus, Platform } from 'react-native';
 import { ChatProvider } from './context/ChatContext';
-import { SettingsProvider } from './context/SettingsContext';
+import { SettingsProvider, useSettings } from './context/SettingsContext';
 import { ChatScreen } from './components/ChatScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { IntentActionModal } from './components/IntentActionModal';
@@ -51,6 +51,26 @@ import { MemoryViewer } from './components/MemoryViewer';
 import { parseKarunaUrl } from './services/incomingLinks';
 import * as Linking from 'expo-linking';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+/**
+ * Displays a one-time Alert when settings failed to load (e.g. corrupt JSON).
+ * Must be rendered inside SettingsProvider.
+ */
+function SettingsErrorAlert(): null {
+  const { settingsLoadError } = useSettings();
+
+  useEffect(() => {
+    if (settingsLoadError) {
+      Alert.alert(
+        'Settings Reset',
+        'Your saved settings could not be loaded and have been reset to defaults. You can update them in Settings.',
+        [{ text: 'OK' }]
+      );
+    }
+  }, [settingsLoadError]);
+
+  return null;
+}
 
 // Notification handler is configured inside App via useEffect to avoid
 // racing with iOS 26's UITraitCollection setup during window presentation.
@@ -813,6 +833,7 @@ function App(): JSX.Element {
 
   return (
     <SettingsProvider>
+      <SettingsErrorAlert />
       {renderScreen()}
     </SettingsProvider>
   );
