@@ -3,13 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pedometer } from 'expo-sensors';
 import { consentService } from './consent';
 import { auditLogService } from './auditLog';
+import { healthAdapter } from './healthAdapter';
 import {
   VitalType,
   VitalReading,
   VitalSummary,
   StepsData,
   HeartRateData,
-  SleepData,
   HealthSyncStatus,
   VITAL_TYPE_INFO,
 } from '../types/health';
@@ -86,30 +86,32 @@ class HealthDataService {
       return { granted: [], denied: types };
     }
 
-    // Platform-specific health API permissions
-    // Steps use expo-sensors Pedometer (works cross-platform)
-    // Heart rate, blood pressure, etc. require HealthKit (iOS) or Health Connect (Android)
-    // which are not yet integrated - those are manual-entry only for now
+    // Request permissions from the platform health adapter (HealthKit / Health Connect)
+    // Pedometer via expo-sensors is used for steps as a fallback
     const granted: VitalType[] = [];
     const denied: VitalType[] = [];
 
-    for (const type of types) {
-      if (type === 'steps') {
-        // Pedometer is available via expo-sensors
-        try {
-          const isAvailable = await Pedometer.isAvailableAsync();
-          if (isAvailable && Platform.OS !== 'web') {
-            granted.push(type);
-          } else {
-            // Steps still work via manual entry
-            granted.push(type);
-          }
-        } catch {
-          granted.push(type); // Allow manual entry
+    const adapterAvailable = await healthAdapter.isAvailable();
+
+    if (adapterAvailable) {
+      const adapterResult = await healthAdapter.requestPermissions(types as any);
+      for (const type of types) {
+        if (adapterResult.granted.includes(type)) {
+          granted.push(type);
+        } else {
+          denied.push(type);
         }
-      } else {
-        // Other vital types: no native health API integrated yet
-        // Grant permission for manual entry
+      }
+    } else {
+      // No native health module available — allow all types via manual entry
+      for (const type of types) {
+        if (type === 'steps') {
+          try {
+            await Pedometer.isAvailableAsync();
+          } catch {
+            // Pedometer unavailable — still grant for manual entry
+          }
+        }
         granted.push(type);
       }
     }
@@ -147,33 +149,66 @@ class HealthDataService {
 
     try {
       let syncedCount = 0;
+      const sourceName = Platform.OS === 'ios' ? 'healthkit' : 'health_connect';
+      const now = new Date();
+      const dayStart = new Date(now);
+      dayStart.setHours(0, 0, 0, 0);
 
-      // In a real implementation, these would call platform APIs
-      // For demo, we'll generate sample data
+      const adapterAvailable = await healthAdapter.isAvailable();
 
       if (this.syncStatus.permissionsGranted.includes('steps')) {
         const stepsData = await this.fetchStepsFromPlatform();
         if (stepsData) {
-          await this.addVitalReading({
-            type: 'steps',
-            value: stepsData.count,
-            unit: 'steps',
-            source: Platform.OS === 'ios' ? 'healthkit' : 'health_connect',
-          });
+          await this.addVitalReading({ type: 'steps', value: stepsData.count, unit: 'steps', source: sourceName });
           syncedCount++;
         }
       }
 
-      if (this.syncStatus.permissionsGranted.includes('heart_rate')) {
-        const hrData = await this.fetchHeartRateFromPlatform();
-        if (hrData) {
-          await this.addVitalReading({
-            type: 'heart_rate',
-            value: hrData.bpm,
-            unit: 'bpm',
-            source: Platform.OS === 'ios' ? 'healthkit' : 'health_connect',
-          });
-          syncedCount++;
+      if (adapterAvailable) {
+        if (this.syncStatus.permissionsGranted.includes('heart_rate')) {
+          const hr = await healthAdapter.getHeartRate(dayStart, now);
+          if (hr) {
+            await this.addVitalReading({ type: 'heart_rate', value: hr.value, unit: hr.unit, source: sourceName });
+            syncedCount++;
+          }
+        }
+
+        if (this.syncStatus.permissionsGranted.includes('blood_pressure')) {
+          const bp = await healthAdapter.getBloodPressure(dayStart, now);
+          if (bp) {
+            await this.addVitalReading({
+              type: 'blood_pressure',
+              value: bp.systolic,
+              secondaryValue: bp.diastolic,
+              unit: 'mmHg',
+              source: sourceName,
+            });
+            syncedCount++;
+          }
+        }
+
+        if (this.syncStatus.permissionsGranted.includes('blood_glucose')) {
+          const bg = await healthAdapter.getBloodGlucose(dayStart, now);
+          if (bg) {
+            await this.addVitalReading({ type: 'blood_glucose', value: bg.value, unit: bg.unit, source: sourceName });
+            syncedCount++;
+          }
+        }
+
+        if (this.syncStatus.permissionsGranted.includes('weight')) {
+          const wt = await healthAdapter.getWeight(dayStart, now);
+          if (wt) {
+            await this.addVitalReading({ type: 'weight', value: wt.value, unit: wt.unit, source: sourceName });
+            syncedCount++;
+          }
+        }
+
+        if (this.syncStatus.permissionsGranted.includes('oxygen_saturation')) {
+          const spo2 = await healthAdapter.getOxygenSaturation(dayStart, now);
+          if (spo2) {
+            await this.addVitalReading({ type: 'oxygen_saturation', value: spo2.value, unit: spo2.unit, source: sourceName });
+            syncedCount++;
+          }
         }
       }
 
@@ -238,25 +273,19 @@ class HealthDataService {
   }
 
   /**
-   * Fetch heart rate from health platform
-   * Note: Real heart rate requires HealthKit (iOS) or Health Connect (Android)
-   * which need native module configuration. Falls back to manual entry.
+   * Fetch heart rate via platform health adapter (HealthKit / Health Connect)
    */
   private async fetchHeartRateFromPlatform(): Promise<HeartRateData | null> {
-    // Heart rate monitoring requires native health APIs:
-    // - iOS: HealthKit with NSHealthShareUsageDescription
-    // - Android: Health Connect with appropriate permissions
-    //
-    // For production, integrate:
-    // - expo-apple-healthkit or react-native-healthkit for iOS
-    // - react-native-health-connect for Android
-    //
-    // For now, return null to indicate no automatic reading available
-    // Users can manually log heart rate readings
-
-    // Heart rate requires HealthKit (iOS) or Health Connect (Android)
-    // Return null on all platforms - users should manually log heart rate
-    return null;
+    try {
+      const now = new Date();
+      const dayStart = new Date(now);
+      dayStart.setHours(0, 0, 0, 0);
+      const sample = await healthAdapter.getHeartRate(dayStart, now);
+      if (!sample) return null;
+      return { bpm: sample.value, timestamp: sample.startDate };
+    } catch {
+      return null;
+    }
   }
 
   /**

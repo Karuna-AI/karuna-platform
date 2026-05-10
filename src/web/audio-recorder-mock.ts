@@ -63,7 +63,7 @@ class WebAudioRecorderPlayer {
       }, this.subscriptionDuration * 1000);
 
       return 'web-recording';
-    } catch (error) {
+    } catch {
       throw new Error('Microphone permission denied or not available');
     }
   }

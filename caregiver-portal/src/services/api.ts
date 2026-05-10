@@ -29,9 +29,10 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
+      withCredentials: true,
     });
 
-    // Add auth token to requests
+    // Add in-memory Bearer token for mobile/API fallback (not used in browser portal)
     this.client.interceptors.request.use((config) => {
       if (this.token) {
         config.headers.Authorization = `Bearer ${this.token}`;
@@ -50,26 +51,27 @@ class ApiService {
         return Promise.reject(error);
       }
     );
-
-    // Load token from storage
-    const savedToken = localStorage.getItem('auth_token');
-    if (savedToken) {
-      this.token = savedToken;
-    }
   }
 
   setToken(token: string) {
+    // Keep in memory only — httpOnly cookie is the primary auth mechanism in browser
     this.token = token;
-    localStorage.setItem('auth_token', token);
   }
 
   clearToken() {
     this.token = null;
-    localStorage.removeItem('auth_token');
   }
 
   getToken(): string | null {
     return this.token;
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.client.post('/care/auth/logout');
+    } finally {
+      this.clearToken();
+    }
   }
 
   // Auth endpoints

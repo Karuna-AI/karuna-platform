@@ -58,7 +58,7 @@ export function VaultSelectButton({
   onSelect,
   icon,
 }: VaultSelectButtonProps): JSX.Element {
-  const selectedOption = options.find(o => o.value === value);
+  const _selectedOption = options.find(o => o.value === value);
 
   return (
     <View style={styles.container}>

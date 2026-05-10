@@ -4,7 +4,7 @@
  */
 
 let isSpeaking = false;
-let currentUtterance: SpeechSynthesisUtterance | null = null;
+let _currentUtterance: SpeechSynthesisUtterance | null = null;
 
 export async function speak(
   text: string,
@@ -30,7 +30,7 @@ export async function speak(
   stop();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  currentUtterance = utterance;
+  _currentUtterance = utterance;
 
   if (options?.language) utterance.lang = options.language;
   if (options?.pitch) utterance.pitch = options.pitch;
@@ -51,13 +51,13 @@ export async function speak(
 
   utterance.onend = () => {
     isSpeaking = false;
-    currentUtterance = null;
+    _currentUtterance = null;
     options?.onDone?.();
   };
 
   utterance.onerror = (event) => {
     isSpeaking = false;
-    currentUtterance = null;
+    _currentUtterance = null;
     if (event.error !== 'interrupted') {
       options?.onError?.(event);
     } else {
@@ -72,7 +72,7 @@ export async function stop(): Promise<void> {
   if ('speechSynthesis' in window) {
     speechSynthesis.cancel();
     isSpeaking = false;
-    currentUtterance = null;
+    _currentUtterance = null;
   }
 }
 

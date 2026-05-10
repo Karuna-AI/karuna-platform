@@ -3,8 +3,6 @@
  * Tests for chat state management and AI interactions
  */
 
-import React from 'react';
-
 // Mock context
 const mockUseChatContext = () => {
   return {

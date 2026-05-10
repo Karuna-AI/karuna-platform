@@ -52,7 +52,7 @@ export function LanguageVoiceScreen({
   }, [setLanguage]);
 
   const handleTestVoice = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     setIsTesting(true);
     const sample = getVoiceSample(settings.language);
     ttsService.speak(sample);

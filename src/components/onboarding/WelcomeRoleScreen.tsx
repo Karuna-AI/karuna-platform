@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { OnboardingRole } from '../../services/onboardingStore';
 import { ttsService } from '../../services/tts';
@@ -26,7 +26,7 @@ export function WelcomeRoleScreen({
   }, [readAloudEnabled]);
 
   const handleSelect = async (role: OnboardingRole) => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     onRoleSelected(role);
   };
 

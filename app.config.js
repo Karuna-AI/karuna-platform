@@ -10,12 +10,14 @@ const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
 const getApiUrl = () => {
   if (IS_DEV) {
-    return 'http://localhost:3000';
+    return process.env.GATEWAY_URL || 'http://localhost:3021';
   }
   if (IS_PREVIEW) {
-    return process.env.PREVIEW_API_URL || 'https://karuna-api-production.up.railway.app';
+    if (!process.env.PREVIEW_API_URL) throw new Error('PREVIEW_API_URL is required for preview builds');
+    return process.env.PREVIEW_API_URL;
   }
-  return process.env.API_URL || 'https://karuna-api-production.up.railway.app';
+  if (!process.env.API_URL) throw new Error('API_URL is required for production builds');
+  return process.env.API_URL;
 };
 
 const getAppName = () => {
@@ -39,10 +41,14 @@ module.exports = {
       backgroundColor: '#4F46E5',
     },
     assetBundlePatterns: ['**/*'],
+    // Use JSC on iOS to avoid Hermes PAC crash on iOS 26 physical devices
+    // (expo/expo#44356, facebook/hermes#1966)
+    jsEngine: 'hermes',
     ios: {
+      jsEngine: 'jsc',
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '6',
+      buildNumber: '27',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -56,7 +62,13 @@ module.exports = {
           'Karuna reads your health data to monitor your wellness and share updates with your care circle.',
         NSHealthUpdateUsageDescription:
           'Karuna records health metrics to help track your wellness journey.',
-        UIBackgroundModes: ['audio', 'fetch', 'remote-notification'],
+        NSCalendarsUsageDescription:
+          'Karuna accesses your calendar to help manage appointments and send you timely reminders.',
+        NSContactsUsageDescription:
+          'Karuna accesses your contacts so you can quickly call or message family and caregivers.',
+        // 'audio' removed: triggers AVAudioSession class loading on iOS 26 which crashes
+        // Audio recording works without background mode — only needed for background playback
+        UIBackgroundModes: ['fetch', 'remote-notification'],
       },
       config: {
         usesNonExemptEncryption: false,
@@ -68,7 +80,7 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 6,
+      versionCode: 7,
       targetSdkVersion: 35,
       compileSdkVersion: 35,
       permissions: [
@@ -80,6 +92,19 @@ module.exports = {
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
+        // Health Connect (Android 13+)
+        'android.permission.health.READ_HEART_RATE',
+        'android.permission.health.READ_STEPS',
+        'android.permission.health.READ_BLOOD_PRESSURE',
+        'android.permission.health.READ_BLOOD_GLUCOSE',
+        'android.permission.health.READ_BODY_WEIGHT',
+        'android.permission.health.READ_OXYGEN_SATURATION',
+        'android.permission.health.WRITE_HEART_RATE',
+        'android.permission.health.WRITE_STEPS',
+        'android.permission.health.WRITE_BLOOD_PRESSURE',
+        'android.permission.health.WRITE_BLOOD_GLUCOSE',
+        'android.permission.health.WRITE_BODY_WEIGHT',
+        'android.permission.health.WRITE_OXYGEN_SATURATION',
       ],
       intentFilters: [
         {
@@ -98,6 +123,10 @@ module.exports = {
       [
         'expo-build-properties',
         {
+          ios: {
+            // New Architecture enabled with TurboModule crash patch (react-native+0.81.5.patch)
+            newArchEnabled: true,
+          },
           android: {
             compileSdkVersion: 35,
             targetSdkVersion: 35,
@@ -127,13 +156,9 @@ module.exports = {
           cameraPermission: 'Karuna needs camera access to take photos.',
         },
       ],
-      [
-        'expo-av',
-        {
-          microphonePermission:
-            'Karuna needs microphone access for voice conversations.',
-        },
-      ],
+      'expo-audio',
+      'expo-localization',
+      'expo-secure-store',
     ],
     extra: {
       apiUrl: getApiUrl(),
@@ -141,10 +166,12 @@ module.exports = {
         projectId: 'b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
       },
     },
-    owner: process.env.EXPO_OWNER || 'snehal2026',
+    owner: process.env.EXPO_OWNER || 'karuna-ai',
     runtimeVersion: '1.0.0',
     updates: {
+      enabled: false,
       url: 'https://u.expo.dev/b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
+      checkAutomatically: 'NEVER',
     },
   },
 };

@@ -76,9 +76,15 @@ class VaultService {
   async unlock(pin: string): Promise<boolean> {
     const success = await encryptionService.initialize(pin);
     if (success) {
-      this.isLocked = false;
-      await this.loadData();
-      return true;
+      try {
+        await this.loadData();
+        this.isLocked = false;
+        return true;
+      } catch (error) {
+        console.error('[Vault] Unlock failed during data load:', error);
+        encryptionService.lock();
+        return false;
+      }
     }
     return false;
   }
@@ -134,13 +140,29 @@ class VaultService {
     try {
       const encrypted = await AsyncStorage.getItem(STORAGE_KEY);
       if (encrypted) {
-        this.data = await encryptionService.decryptObject<KnowledgeVaultData>(encrypted);
+        const decrypted = await encryptionService.decryptObject<KnowledgeVaultData>(encrypted);
+        if (decrypted && typeof decrypted === 'object' && 'accounts' in decrypted) {
+          this.data = decrypted;
+        } else {
+          // Decrypted but invalid structure — data corrupted
+          console.error('[Vault] Decrypted data has invalid structure, vault may be corrupted');
+          throw new Error('Vault data integrity check failed');
+        }
       } else {
         this.data = { ...EMPTY_VAULT, lastUpdated: Date.now() };
       }
       this.isLoaded = true;
     } catch (error) {
-      console.error('Failed to load vault data:', error);
+      console.error('[Vault] Failed to load vault data:', error);
+      // Do NOT silently reset to empty — keep locked and report error
+      // Only set empty vault if this is clearly a first-time load (no encrypted data existed)
+      const hasData = await AsyncStorage.getItem(STORAGE_KEY);
+      if (hasData) {
+        // Data exists but can't be decrypted — possible corruption or wrong PIN
+        this.isLoaded = false;
+        this.isLocked = true;
+        throw new Error('Failed to decrypt vault data. The vault may be corrupted or the PIN is incorrect.');
+      }
       this.data = { ...EMPTY_VAULT, lastUpdated: Date.now() };
       this.isLoaded = true;
     }

@@ -73,7 +73,7 @@ export async function getRemindersPermissionsAsync(): Promise<{ status: string }
   return { status: 'granted' };
 }
 
-export async function getCalendarsAsync(entityType?: string): Promise<any[]> {
+export async function getCalendarsAsync(_entityType?: string): Promise<any[]> {
   // Return a mock "Local" calendar
   return [{
     id: 'web-local-calendar',
@@ -92,11 +92,11 @@ export async function getDefaultCalendarAsync(): Promise<any> {
   return calendars[0] || null;
 }
 
-export async function createCalendarAsync(details: any): Promise<string> {
+export async function createCalendarAsync(_details: any): Promise<string> {
   return 'web-local-calendar';
 }
 
-export async function deleteCalendarAsync(id: string): Promise<void> {
+export async function deleteCalendarAsync(_id: string): Promise<void> {
   // No-op - can't delete the mock calendar
 }
 
@@ -115,7 +115,7 @@ export async function getEventsAsync(
 
 export async function getEventAsync(
   eventId: string,
-  options?: { futureEvents?: boolean; instanceStartDate?: Date }
+  _options?: { futureEvents?: boolean; instanceStartDate?: Date }
 ): Promise<any | null> {
   const events = getStoredEvents();
   return events.find(e => e.id === eventId) || null;
@@ -150,7 +150,7 @@ export async function createEventAsync(
 export async function updateEventAsync(
   eventId: string,
   eventDetails: any,
-  options?: { futureEvents?: boolean; instanceStartDate?: Date }
+  _options?: { futureEvents?: boolean; instanceStartDate?: Date }
 ): Promise<void> {
   const events = getStoredEvents();
   const index = events.findIndex(e => e.id === eventId);
@@ -167,7 +167,7 @@ export async function updateEventAsync(
 
 export async function deleteEventAsync(
   eventId: string,
-  options?: { futureEvents?: boolean; instanceStartDate?: Date }
+  _options?: { futureEvents?: boolean; instanceStartDate?: Date }
 ): Promise<void> {
   const events = getStoredEvents();
   const filtered = events.filter(e => e.id !== eventId);

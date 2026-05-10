@@ -7,6 +7,9 @@ export default function Settings() {
   const [isLoading, setIsLoading] = useState(true);
   const [editingSetting, setEditingSetting] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
+  const [jsonError, setJsonError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const { admin } = useAuth();
 
   useEffect(() => {
@@ -21,20 +24,51 @@ export default function Settings() {
     setIsLoading(false);
   };
 
+  const handleEditValueChange = (value: string) => {
+    setEditValue(value);
+    setSaveError('');
+    // Validate JSON if the value looks like JSON (starts with { or [)
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        JSON.parse(trimmed);
+        setJsonError('');
+      } catch (e: any) {
+        setJsonError(`Invalid JSON: ${e.message}`);
+      }
+    } else {
+      setJsonError('');
+    }
+  };
+
   const handleSave = async () => {
     if (!editingSetting) return;
+    if (jsonError) return;
 
-    let parsedValue;
-    try {
-      parsedValue = JSON.parse(editValue);
-    } catch {
+    let parsedValue: unknown;
+    const trimmed = editValue.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        parsedValue = JSON.parse(trimmed);
+      } catch (e: any) {
+        setSaveError(`Cannot save: invalid JSON — ${e.message}`);
+        return;
+      }
+    } else {
       parsedValue = editValue;
     }
 
+    setSaveError('');
     const result = await api.updateSetting(editingSetting.key, parsedValue);
     if (result.success) {
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        setEditingSetting(null);
+      }, 800);
       loadSettings();
-      setEditingSetting(null);
+    } else {
+      setSaveError(result.error || 'Failed to save setting');
     }
   };
 
@@ -106,6 +140,9 @@ export default function Settings() {
                             onClick={() => {
                               setEditingSetting(setting);
                               setEditValue(formatValue(setting.value));
+                              setJsonError('');
+                              setSaveError('');
+                              setSaveSuccess(false);
                             }}
                             className="btn btn-sm btn-secondary"
                           >
@@ -146,15 +183,30 @@ export default function Settings() {
                   className="form-input"
                   rows={3}
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
+                  onChange={(e) => handleEditValueChange(e.target.value)}
+                  style={jsonError ? { borderColor: 'var(--error, #ef4444)' } : {}}
                 />
-                <small style={{ color: 'var(--text-muted)' }}>
-                  Enter JSON for objects/arrays, or plain text for strings/numbers
-                </small>
+                {jsonError ? (
+                  <small style={{ color: 'var(--error, #ef4444)' }}>{jsonError}</small>
+                ) : (
+                  <small style={{ color: 'var(--text-muted)' }}>
+                    Enter JSON for objects/arrays, or plain text for strings/numbers
+                  </small>
+                )}
               </div>
               {editingSetting.description && (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
                   {editingSetting.description}
+                </p>
+              )}
+              {saveError && (
+                <p style={{ color: 'var(--error, #ef4444)', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                  {saveError}
+                </p>
+              )}
+              {saveSuccess && (
+                <p style={{ color: 'var(--success, #22c55e)', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                  Setting saved successfully
                 </p>
               )}
             </div>
@@ -162,7 +214,7 @@ export default function Settings() {
               <button onClick={() => setEditingSetting(null)} className="btn btn-secondary">
                 Cancel
               </button>
-              <button onClick={handleSave} className="btn btn-primary">
+              <button onClick={handleSave} className="btn btn-primary" disabled={!!jsonError}>
                 Save Changes
               </button>
             </div>

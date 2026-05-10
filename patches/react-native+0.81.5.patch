@@ -1,0 +1,16 @@
+diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+index 2a67797..fa3b089 100644
+--- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
++++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+@@ -435,7 +435,10 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     @try {
+       [inv invokeWithTarget:strongModule];
+     } @catch (NSException *exception) {
+-      throw convertNSExceptionToJSError(runtime, exception, std::string{moduleName}, methodNameStr);
++      // iOS 26 fix: Do not rethrow NSExceptions from void methods on background queues.
++      // There is no catch handler, so rethrowing causes std::terminate -> SIGABRT.
++      // Log the error instead of crashing the app.
++      NSLog(@"[RCTTurboModule] Exception in void method %s.%s: %@", moduleName, methodNameStr.c_str(), exception);
+     } @finally {
+       [retainedObjectsForInvocation removeAllObjects];
+     }

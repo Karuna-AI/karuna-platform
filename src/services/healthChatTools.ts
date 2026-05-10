@@ -7,7 +7,6 @@ import { consentService } from './consent';
 import { healthQueryToolsService, HealthQueryResult } from './healthQueryTools';
 import { healthDataService } from './healthData';
 import { medicationService } from './medication';
-import { medicalRecordsService } from './medicalRecords';
 
 export interface HealthQuery {
   type: 'medication' | 'vitals' | 'steps' | 'adherence' | 'records' | 'health_summary';
@@ -318,7 +317,7 @@ export async function getHealthContextForAI(): Promise<string> {
 /**
  * Format health data for natural conversation
  */
-export function formatHealthResponse(data: unknown, type: HealthQuery['type']): string {
+export function formatHealthResponse(_data: unknown, _type: HealthQuery['type']): string {
   // This could be expanded to format different data types nicely
   // For now, the summary from the tools is usually sufficient
   return '';

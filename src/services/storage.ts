@@ -304,7 +304,7 @@ class StorageService {
     try {
       const data = await AsyncStorage.getItem(STORAGE_KEYS.LAST_SUMMARY_INDEX);
       return data ? parseInt(data, 10) : 0;
-    } catch (error) {
+    } catch {
       return 0;
     }
   }

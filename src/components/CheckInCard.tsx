@@ -25,7 +25,7 @@ export const CheckInCard: React.FC<CheckInCardProps> = ({
   onDismiss,
   onRespond,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [_isExpanded, _setIsExpanded] = useState(true);
   const [isResponding, setIsResponding] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState<string | null>(null);
   const slideAnim = useState(new Animated.Value(0))[0];

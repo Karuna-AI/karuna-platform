@@ -10,7 +10,6 @@
  * 5. Never transmit OTPs over network
  */
 
-import { Platform, PermissionsAndroid } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { ACTION_SAFETY } from '../types/actions';
 
@@ -253,7 +252,7 @@ class OTPAssistantService {
    * Validate that we're not being asked for sensitive info
    */
   validateRequest(request: string): { safe: boolean; warning?: string } {
-    const lowerRequest = request.toLowerCase();
+    const _lowerRequest = request.toLowerCase();
 
     // Never ask for passwords
     if (/password/i.test(request)) {

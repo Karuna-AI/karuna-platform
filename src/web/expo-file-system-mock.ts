@@ -42,7 +42,7 @@ async function getDB(): Promise<IDBDatabase> {
 
 export async function getInfoAsync(
   fileUri: string,
-  options?: { md5?: boolean; size?: boolean }
+  _options?: { md5?: boolean; size?: boolean }
 ): Promise<{
   exists: boolean;
   isDirectory: boolean;
@@ -77,7 +77,7 @@ export async function getInfoAsync(
       };
       request.onerror = () => reject(request.error);
     });
-  } catch (error) {
+  } catch {
     return {
       exists: false,
       isDirectory: false,
@@ -88,7 +88,7 @@ export async function getInfoAsync(
 
 export async function readAsStringAsync(
   fileUri: string,
-  options?: { encoding?: string; position?: number; length?: number }
+  _options?: { encoding?: string; position?: number; length?: number }
 ): Promise<string> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -110,7 +110,7 @@ export async function readAsStringAsync(
 export async function writeAsStringAsync(
   fileUri: string,
   contents: string,
-  options?: { encoding?: string }
+  _options?: { encoding?: string }
 ): Promise<void> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -168,7 +168,7 @@ export async function copyAsync(options: {
 
 export async function makeDirectoryAsync(
   fileUri: string,
-  options?: { intermediates?: boolean }
+  _options?: { intermediates?: boolean }
 ): Promise<void> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -206,7 +206,7 @@ export async function readDirectoryAsync(fileUri: string): Promise<string[]> {
 export async function downloadAsync(
   uri: string,
   fileUri: string,
-  options?: any
+  _options?: any
 ): Promise<{ uri: string; status: number; headers: any; md5?: string }> {
   try {
     const response = await fetch(uri);
@@ -244,8 +244,8 @@ export function createDownloadResumable(
   uri: string,
   fileUri: string,
   options?: any,
-  callback?: (downloadProgress: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void,
-  resumeData?: string
+  _callback?: (downloadProgress: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void,
+  _resumeData?: string
 ) {
   return {
     downloadAsync: async () => downloadAsync(uri, fileUri, options),

@@ -1,5 +1,14 @@
 # Deploy Workflow
-# Deploys backend and portals on push to master
+# Deploys backend (Railway) and portals (Cloudflare Pages) on push to master
+#
+# Required GitHub Secrets:
+#   RAILWAY_TOKEN          - Railway API token (railway.app → Account Settings → Tokens)
+#   RAILWAY_SERVICE_ID     - Railway service ID for the backend
+#   API_URL                - Production backend URL (e.g. https://karuna-api-production.up.railway.app)
+#   CLOUDFLARE_API_TOKEN   - Cloudflare API token with Pages:Edit permission
+#   CLOUDFLARE_ACCOUNT_ID  - Cloudflare account ID
+#   EXPO_TOKEN             - Expo access token (for mobile builds)
+#   EXPO_OWNER             - Expo account username
 
 name: Deploy
 
@@ -19,59 +28,55 @@ on:
           - caregiver-portal
           - admin-portal
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
-  build-backend:
-    name: Build Backend Image
+  deploy-backend:
+    name: Deploy Backend to Railway
     runs-on: ubuntu-latest
-    if: github.event.inputs.component == 'backend' || github.event.inputs.component == 'all' || github.event.inputs.component == ''
-    permissions:
-      contents: read
-      packages: write
+    if: |
+      github.event.inputs.component == 'backend' ||
+      github.event.inputs.component == 'all' ||
+      github.event.inputs.component == ''
+    environment: production
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check Railway secrets
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ] || [ -z "${{ secrets.RAILWAY_SERVICE_ID }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Backend deployment skipped: RAILWAY_TOKEN or RAILWAY_SERVICE_ID not configured"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Install Railway CLI
+        if: steps.check-secrets.outputs.skip != 'true'
+        run: npm install -g @railway/cli
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./server
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Deploy to Railway
+        if: steps.check-secrets.outputs.skip != 'true'
+        working-directory: ./server
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service ${{ secrets.RAILWAY_SERVICE_ID }} --detach
 
   build-caregiver-portal:
     name: Build Caregiver Portal
     runs-on: ubuntu-latest
-    if: github.event.inputs.component == 'caregiver-portal' || github.event.inputs.component == 'all' || github.event.inputs.component == ''
+    if: |
+      github.event.inputs.component == 'caregiver-portal' ||
+      github.event.inputs.component == 'all' ||
+      github.event.inputs.component == ''
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -83,10 +88,10 @@ jobs:
       - name: Build
         run: cd caregiver-portal && npm run build
         env:
-          VITE_API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
+          VITE_API_URL: ${{ secrets.API_URL }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: caregiver-portal-dist
           path: caregiver-portal/dist
@@ -94,14 +99,17 @@ jobs:
   build-admin-portal:
     name: Build Admin Portal
     runs-on: ubuntu-latest
-    if: github.event.inputs.component == 'admin-portal' || github.event.inputs.component == 'all' || github.event.inputs.component == ''
+    if: |
+      github.event.inputs.component == 'admin-portal' ||
+      github.event.inputs.component == 'all' ||
+      github.event.inputs.component == ''
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -113,58 +121,27 @@ jobs:
       - name: Build
         run: cd admin-portal && npm run build
         env:
-          VITE_API_URL: ${{ secrets.API_URL || 'https://karuna-api-production.up.railway.app' }}
+          VITE_API_URL: ${{ secrets.API_URL }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: admin-portal-dist
           path: admin-portal/dist
 
-  deploy-backend:
-    name: Deploy Backend
-    runs-on: ubuntu-latest
-    needs: build-backend
-    if: |
-      (github.event.inputs.component == 'backend' || github.event.inputs.component == 'all' || github.event.inputs.component == '') &&
-      github.event_name != 'pull_request'
-    environment: production
-
-    steps:
-      - name: Check deployment secrets
-        id: check-secrets
-        run: |
-          if [ -z "${{ secrets.DEPLOY_HOST }}" ] || [ -z "${{ secrets.DEPLOY_USER }}" ] || [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Backend deployment skipped: DEPLOY_HOST, DEPLOY_USER, or DEPLOY_SSH_KEY not configured"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Deploy to server
-        if: steps.check-secrets.outputs.skip != 'true'
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            cd /opt/karuna
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
-            docker-compose -f docker-compose.production.yml up -d api
-            docker system prune -f
-
   deploy-caregiver-portal:
-    name: Deploy Caregiver Portal
+    name: Deploy Caregiver Portal to Cloudflare
     runs-on: ubuntu-latest
     needs: build-caregiver-portal
     if: |
-      (github.event.inputs.component == 'caregiver-portal' || github.event.inputs.component == 'all' || github.event.inputs.component == '') &&
+      (github.event.inputs.component == 'caregiver-portal' ||
+       github.event.inputs.component == 'all' ||
+       github.event.inputs.component == '') &&
       github.event_name != 'pull_request'
     environment: production
 
     steps:
-      - name: Check deployment secrets
+      - name: Check Cloudflare secrets
         id: check-secrets
         run: |
           if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] || [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
@@ -176,7 +153,7 @@ jobs:
 
       - name: Download artifact
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
         with:
           name: caregiver-portal-dist
           path: dist
@@ -192,16 +169,18 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-admin-portal:
-    name: Deploy Admin Portal
+    name: Deploy Admin Portal to Cloudflare
     runs-on: ubuntu-latest
     needs: build-admin-portal
     if: |
-      (github.event.inputs.component == 'admin-portal' || github.event.inputs.component == 'all' || github.event.inputs.component == '') &&
+      (github.event.inputs.component == 'admin-portal' ||
+       github.event.inputs.component == 'all' ||
+       github.event.inputs.component == '') &&
       github.event_name != 'pull_request'
     environment: production
 
     steps:
-      - name: Check deployment secrets
+      - name: Check Cloudflare secrets
         id: check-secrets
         run: |
           if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] || [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
@@ -213,7 +192,7 @@ jobs:
 
       - name: Download artifact
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
         with:
           name: admin-portal-dist
           path: dist

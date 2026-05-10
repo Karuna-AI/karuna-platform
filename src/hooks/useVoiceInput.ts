@@ -34,6 +34,7 @@ export function useVoiceInput(
   const recordingPathRef = useRef<string | null>(null);
 
   useEffect(() => {
+    voiceRecorder.initialize().catch(() => {});
     return () => {
       if (isRecording) {
         voiceRecorder.cancelRecording();

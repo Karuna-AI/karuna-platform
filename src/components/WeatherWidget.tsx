@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { weatherService, WeatherData } from '../services/weather';
 import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
 import { WeatherCondition } from '../types/proactive';

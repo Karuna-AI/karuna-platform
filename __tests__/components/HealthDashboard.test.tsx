@@ -3,8 +3,6 @@
  * Tests for health metrics display and tracking
  */
 
-import React from 'react';
-import { render } from '../utils/testUtils';
 
 describe('HealthDashboard Component', () => {
   describe('rendering', () => {

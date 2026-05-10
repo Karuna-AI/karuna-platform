@@ -3,9 +3,6 @@
  * Tests for app settings state management
  */
 
-import React from 'react';
-import { renderHook, act } from '@testing-library/react';
-
 // Mock context
 const mockUseSettings = () => {
   return {

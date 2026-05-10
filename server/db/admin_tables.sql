@@ -126,6 +126,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_by UUID;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP WITH TIME ZONE;
+
+CREATE INDEX IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token);
 
 -- ============================================================================
 -- Care Circle Status Extension

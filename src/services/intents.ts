@@ -216,7 +216,7 @@ export function parseIntent(text: string): ParsedIntent {
 
 function calculateConfidence(text: string, patterns: RegExp[]): number {
   let matchCount = 0;
-  let totalPatterns = patterns.length;
+  const totalPatterns = patterns.length;
 
   for (const pattern of patterns) {
     if (pattern.test(text)) {
@@ -272,10 +272,11 @@ export function formatIntentForDisplay(intent: ParsedIntent): string {
       return intent.entities.contact
         ? `Calling ${intent.entities.contact}`
         : 'Making a call';
-    case 'reminder':
+    case 'reminder': {
       const reminderText = intent.entities.message || 'something';
       const timeText = intent.entities.time ? ` at ${intent.entities.time}` : '';
       return `Setting reminder: ${reminderText}${timeText}`;
+    }
     case 'message':
       return intent.entities.contact
         ? `Sending message to ${intent.entities.contact}`
@@ -285,10 +286,11 @@ export function formatIntentForDisplay(intent: ParsedIntent): string {
     case 'question':
       return 'Answering question';
     // Phase 13: New intent display formats
-    case 'ride_request':
+    case 'ride_request': {
       const provider = intent.entities.rideProvider || 'ride';
       const dest = intent.entities.destination;
       return dest ? `Booking ${provider} to ${dest}` : `Booking a ${provider}`;
+    }
     case 'navigation':
       return intent.entities.destination
         ? `Getting directions to ${intent.entities.destination}`

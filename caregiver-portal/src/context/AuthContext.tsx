@@ -5,7 +5,7 @@ import api from '../services/api';
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string }>;
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,13 +19,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    // Check for existing token and validate
-    const token = api.getToken();
-    if (token) {
-      validateToken();
-    } else {
-      setState((prev) => ({ ...prev, isLoading: false }));
-    }
+    // Validate session via cookie (no localStorage token needed)
+    validateToken();
   }, []);
 
   const validateToken = async () => {
@@ -33,12 +28,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (result.success && result.data) {
       setState({
         user: result.data,
-        token: api.getToken(),
+        token: null,
         isAuthenticated: true,
         isLoading: false,
       });
     } else {
-      api.clearToken();
       setState({
         user: null,
         token: null,
@@ -51,10 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (credentials: LoginCredentials) => {
     const result = await api.login(credentials);
     if (result.success && result.data) {
-      api.setToken(result.data.token);
+      const token = result.data.token ?? null;
+      if (token) api.setToken(token);
       setState({
         user: result.data.user,
-        token: result.data.token,
+        token,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -66,10 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (data: RegisterData) => {
     const result = await api.register(data);
     if (result.success && result.data) {
-      api.setToken(result.data.token);
       setState({
         user: result.data.user,
-        token: result.data.token,
+        token: null,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -78,8 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: result.error };
   };
 
-  const logout = () => {
-    api.clearToken();
+  const logout = async () => {
+    await api.logout();
     setState({
       user: null,
       token: null,

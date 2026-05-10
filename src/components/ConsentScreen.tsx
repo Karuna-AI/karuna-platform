@@ -125,7 +125,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
   const renderCategoryCard = (summary: ConsentSummary) => {
     const info = CONSENT_CATEGORY_INFO[summary.category];
     const isExpanded = expandedCategory === summary.category;
-    const hasActiveConsents = summary.currentAccess.length > 0;
+    const _hasActiveConsents = summary.currentAccess.length > 0;
 
     return (
       <View key={summary.category} style={styles.categoryCard}>

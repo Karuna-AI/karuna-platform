@@ -17,7 +17,7 @@ export async function isTaskRegisteredAsync(taskName: string): Promise<boolean> 
   return registeredTasks.has(taskName);
 }
 
-export async function getTaskOptionsAsync(taskName: string): Promise<any> {
+export async function getTaskOptionsAsync(_taskName: string): Promise<any> {
   return null;
 }
 

@@ -9,7 +9,7 @@ import {
   Alert,
   TextInput,
 } from 'react-native';
-import { storageService, UserMemory, KeyPerson } from '../services/storage';
+import { storageService, UserMemory } from '../services/storage';
 import { getColors, getFontSizes, SPACING, TOUCH_TARGETS } from '../utils/accessibility';
 
 interface MemoryViewerProps {

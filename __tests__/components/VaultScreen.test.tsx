@@ -3,8 +3,6 @@
  * Tests for secure vault UI and interactions
  */
 
-import React from 'react';
-import { render, fireEvent } from '../utils/testUtils';
 
 describe('VaultScreen Component', () => {
   describe('authentication', () => {
@@ -272,13 +270,13 @@ describe('VaultScreen Component', () => {
 
 describe('VaultFormInput Component', () => {
   it('should render text input', () => {
-    const inputType = 'text';
+    const _inputType = 'text';
 
-    expect(inputType).toBe('text');
+    expect(_inputType).toBe('text');
   });
 
   it('should render password input with toggle', () => {
-    const inputType = 'password';
+    const _inputType2 = 'password';
     let showPassword = false;
 
     showPassword = true;

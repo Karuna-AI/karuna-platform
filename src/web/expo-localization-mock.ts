@@ -58,7 +58,7 @@ export function getLocales(): Locale[] {
       if (part.type === 'group') digitGroupingSeparator = part.value;
       if (part.type === 'decimal') decimalSeparator = part.value;
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
 
   return [{
     languageTag: browserLocale,
@@ -80,7 +80,7 @@ export function getCalendars(): Calendar[] {
   try {
     const timeString = new Date(2020, 0, 1, 13, 0).toLocaleTimeString(browserLocale);
     uses24hourClock = !timeString.includes('PM') && !timeString.includes('AM');
-  } catch {}
+  } catch { /* intentionally empty */ }
 
   return [{
     calendar: 'gregorian',

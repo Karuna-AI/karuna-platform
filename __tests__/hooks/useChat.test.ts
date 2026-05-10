@@ -3,8 +3,6 @@
  * Tests for chat functionality, message handling, and AI interactions
  */
 
-import { renderHook, act } from '@testing-library/react';
-
 // Mock the hook
 const mockUseChat = () => {
   const messages: any[] = [];
@@ -239,7 +237,7 @@ describe('Chat Tools Integration', () => {
   });
 
   it('should execute tool and return result', async () => {
-    const toolCall = {
+    const _toolCall = {
       name: 'get_health_data',
       arguments: { type: 'vitals', limit: 1 },
     };

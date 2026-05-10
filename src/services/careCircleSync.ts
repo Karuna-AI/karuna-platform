@@ -36,6 +36,8 @@ class CareCircleSyncService {
   private syncListeners: ((event: string, data?: unknown) => void)[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private isShuttingDown = false;
 
   async initialize(serverUrl: string) {
     this.baseUrl = serverUrl;
@@ -128,9 +130,18 @@ class CareCircleSyncService {
   private connectWebSocket() {
     if (!this.careCircleId || !this.authToken) return;
 
+    this.isShuttingDown = false;
     const wsUrl = this.baseUrl.replace(/^http/, 'ws') + '/ws';
 
     try {
+      // Null out handlers on any existing ws before replacing, so onclose won't re-trigger reconnect
+      if (this.ws) {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      }
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
@@ -176,15 +187,26 @@ class CareCircleSyncService {
   }
 
   private disconnectWebSocket() {
+    this.isShuttingDown = true;
+    // Cancel any pending reconnect to prevent listener accumulation
+    if (this.reconnectTimeoutId !== null) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
+    }
     if (this.ws) {
+      // Null out handlers before close so onclose does not trigger another reconnect
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
       this.ws.close();
       this.ws = null;
     }
   }
 
   private attemptReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.debug('[CareCircleSync] Max reconnect attempts reached');
+    if (this.isShuttingDown || this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.debug('[CareCircleSync] Not reconnecting (shutting down or max attempts reached)');
       return;
     }
 
@@ -193,8 +215,9 @@ class CareCircleSyncService {
 
     console.debug(`[CareCircleSync] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
-    setTimeout(() => {
-      if (this.careCircleId) {
+    this.reconnectTimeoutId = setTimeout(() => {
+      this.reconnectTimeoutId = null;
+      if (this.careCircleId && !this.isShuttingDown) {
         this.connectWebSocket();
       }
     }, delay);
@@ -431,12 +454,12 @@ class CareCircleSyncService {
 
         if (!localItem) {
           // New item from remote - add it
-          const { id, ...rest } = remoteItem as any;
+          const { id: _id, ...rest } = remoteItem as any;
           await addItem(rest);
         } else if (remoteItem.updatedAt && localItem.updatedAt &&
                    new Date(remoteItem.updatedAt) > new Date(localItem.updatedAt)) {
           // Remote is newer - update local
-          const { id, createdAt, createdBy, ...updates } = remoteItem as any;
+          const { id: _id2, createdAt: _createdAt, createdBy: _createdBy, ...updates } = remoteItem as any;
           await updateItem(remoteItem.id, updates);
         }
         // Otherwise local is newer or same - keep local

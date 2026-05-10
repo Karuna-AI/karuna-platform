@@ -150,7 +150,7 @@ export default function MedicationReports() {
             <div className="stat-card">
               <h3>Adherence Rate</h3>
               <div className={`stat-value ${getAdherenceClass(summary.adherence_rate)}`}>
-                {summary.adherence_rate}%
+                {summary.adherence_rate != null ? `${summary.adherence_rate}%` : 'N/A'}
               </div>
               <div className="stat-detail">
                 {summary.taken} taken of {parseInt(summary.taken) + parseInt(summary.missed)} completed

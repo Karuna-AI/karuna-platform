@@ -54,7 +54,7 @@ export function OnboardingCompleteScreen({
   };
 
   const handleStart = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch { /* intentionally empty */ } }
     onComplete();
   }, [onComplete]);
 

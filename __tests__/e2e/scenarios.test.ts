@@ -97,7 +97,7 @@ describe('E2E: Daily Health Check-in', () => {
 
 describe('E2E: Voice Conversation in Hindi', () => {
   it('should understand Hindi voice input', async () => {
-    const voiceInput = 'मेरा ब्लड प्रेशर क्या है?';
+    const _voiceInput = 'मेरा ब्लड प्रेशर क्या है?';
     const understood = true;
 
     expect(understood).toBe(true);
@@ -246,7 +246,7 @@ describe('E2E: Vault Usage', () => {
   });
 
   it('should copy password to clipboard', async () => {
-    const clipboardContent = 'secret-password';
+    const _clipboardContent = 'secret-password';
     const copied = true;
 
     expect(copied).toBe(true);
@@ -308,7 +308,7 @@ describe('E2E: Care Circle Interaction', () => {
 
 describe('E2E: Proactive Health Features', () => {
   it('should suggest activity based on weather', async () => {
-    const weather = { condition: 'sunny', temperature: 72 };
+    const _weather = { condition: 'sunny', temperature: 72 };
     const suggestion = 'It\'s a beautiful day! Consider a short walk.';
 
     expect(suggestion).toContain('walk');

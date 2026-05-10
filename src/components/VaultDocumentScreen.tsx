@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
-  Image,
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';

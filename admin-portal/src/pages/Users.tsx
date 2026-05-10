@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useDebounce } from '../hooks/useDebounce';
 
 export default function Users() {
   const [users, setUsers] = useState<any[]>([]);
@@ -10,29 +11,38 @@ export default function Users() {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadUsers();
-  }, [pagination.page, status]);
+  const debouncedSearch = useDebounce(search, 300);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async (page = 1, searchTerm = debouncedSearch, statusFilter = status) => {
     setIsLoading(true);
     const result = await api.getUsers({
-      page: pagination.page,
-      limit: pagination.limit,
-      search: search || undefined,
-      status: status || undefined,
+      page,
+      limit: 50,
+      search: searchTerm || undefined,
+      status: statusFilter || undefined,
     });
     if (result.success) {
       setUsers(result.data.users);
       setPagination(result.data.pagination);
     }
     setIsLoading(false);
-  };
+  }, [debouncedSearch, status]);
+
+  // Reload when debounced search or status changes (reset to page 1)
+  useEffect(() => {
+    loadUsers(1, debouncedSearch, status);
+  }, [debouncedSearch, status]);
+
+  // Reload when page changes (keep current filters)
+  useEffect(() => {
+    if (pagination.page > 1) {
+      loadUsers(pagination.page, debouncedSearch, status);
+    }
+  }, [pagination.page, debouncedSearch, status]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setPagination({ ...pagination, page: 1 });
-    loadUsers();
+    loadUsers(1);
   };
 
   const formatDate = (dateStr: string) => {

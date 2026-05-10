@@ -3,10 +3,10 @@
  * Handles launching apps and executing deep links
  */
 
-import { Platform, Linking, Alert } from 'react-native';
+import { Platform, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, FlashMode } from 'expo-camera';
+import { Camera } from 'expo-camera';
 import { deepLinksService } from './deepLinks';
 import { auditLogService } from './auditLog';
 import {
@@ -194,7 +194,7 @@ class AppLauncherService {
     switch (request.type) {
       case 'uber_ride':
       case 'ola_ride':
-      case 'lyft_ride':
+      case 'lyft_ride': {
         const dest = request.params.destination as ActionLocation;
         if (dest?.address) {
           details.push({ label: 'To', value: dest.address, icon: '📍' });
@@ -203,8 +203,9 @@ class AppLauncherService {
           details.push({ label: 'Type', value: String(request.params.rideType), icon: '🚗' });
         }
         break;
+      }
 
-      case 'maps_navigate':
+      case 'maps_navigate': {
         const navDest = request.params.destination as ActionLocation;
         if (navDest?.address) {
           details.push({ label: 'Destination', value: navDest.address, icon: '📍' });
@@ -213,6 +214,7 @@ class AppLauncherService {
           details.push({ label: 'Mode', value: String(request.params.mode), icon: '🚶' });
         }
         break;
+      }
     }
 
     return details.length > 0 ? details : undefined;
@@ -287,17 +289,17 @@ class AppLauncherService {
     const destination = request.params.destination as ActionLocation;
 
     // Get current location for pickup
-    let pickupLocation: ActionLocation | undefined;
+    let _pickupLocation: ActionLocation | undefined;
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const location = await Location.getCurrentPositionAsync({});
-        pickupLocation = {
+        _pickupLocation = {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
         };
       }
-    } catch (error) {
+    } catch {
       console.log('[AppLauncher] Could not get current location');
     }
 

@@ -181,15 +181,17 @@ Remember: ${MESSAGE_GUARDRAILS.maxLength} characters max. Be warm but not patron
 
     for (const signal of signals) {
       switch (signal.type) {
-        case 'steps':
+        case 'steps': {
           const steps = signal as StepsSignal;
           lines.push(`- Steps: ${steps.value.current} of ${steps.value.goal} goal (${steps.value.percentage}%)`);
           break;
-        case 'weather':
+        }
+        case 'weather': {
           const weather = signal as WeatherSignal;
           lines.push(`- Weather: ${weather.value.temperature}°F, ${weather.value.condition}`);
           break;
-        case 'medication':
+        }
+        case 'medication': {
           const meds = signal as MedicationSignal;
           if (meds.value.nextDose) {
             lines.push(`- Next medication: ${meds.value.nextDose.name} at ${meds.value.nextDose.time}`);
@@ -198,6 +200,7 @@ Remember: ${MESSAGE_GUARDRAILS.maxLength} characters max. Be warm but not patron
             lines.push(`- Missed doses today: ${meds.value.missedDoses}`);
           }
           break;
+        }
       }
     }
 
@@ -289,7 +292,7 @@ Remember: ${MESSAGE_GUARDRAILS.maxLength} characters max. Be warm but not patron
   async craftFollowUp(
     originalType: CheckInType,
     userResponse: 'positive' | 'negative' | 'neutral',
-    userContext: AIMessageRequest['userContext']
+    _userContext: AIMessageRequest['userContext']
   ): Promise<string> {
     const followUps: Record<string, Record<string, string[]>> = {
       positive: {

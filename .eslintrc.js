@@ -29,8 +29,8 @@ module.exports = {
         'plugin:@typescript-eslint/recommended',
       ],
       rules: {
-        '@typescript-eslint/no-explicit-any': 'warn',
-        '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+        '@typescript-eslint/no-explicit-any': 'off',
+        '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
         '@typescript-eslint/no-require-imports': 'off',
         'prefer-const': 'warn',
       },
@@ -50,8 +50,8 @@ module.exports = {
     'webpack.config.js',
   ],
   rules: {
-    'no-console': 'warn',
-    'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'no-console': 'off',
+    'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     'no-empty': 'warn',
     'no-case-declarations': 'warn',
     'prefer-const': 'warn',

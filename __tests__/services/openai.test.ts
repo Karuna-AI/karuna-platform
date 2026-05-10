@@ -3,7 +3,7 @@
  * Tests for AI chat completion, transcription, and streaming
  */
 
-import { mockApiResponse, mockApiError } from '../utils/testUtils';
+// testUtils imports removed - mockApiResponse and mockApiError are unused
 
 // Mock the service before importing
 jest.mock('../../src/services/openai', () => ({

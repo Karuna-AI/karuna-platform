@@ -16,8 +16,6 @@ import {
 } from 'react-native';
 import {
   LanguageCode,
-  LanguageConfig,
-  LANGUAGES,
   LANGUAGE_GROUPS,
   getLanguageConfig,
 } from '../i18n/languages';

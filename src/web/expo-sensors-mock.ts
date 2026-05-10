@@ -18,12 +18,12 @@ export const Pedometer = {
     return false;
   },
 
-  getStepCountAsync: async (start: Date, end: Date): Promise<{ steps: number }> => {
+  getStepCountAsync: async (_start: Date, _end: Date): Promise<{ steps: number }> => {
     console.debug('[Pedometer] getStepCountAsync - not available on web');
     return { steps: 0 };
   },
 
-  watchStepCount: (callback: (result: { steps: number }) => void): Subscription => {
+  watchStepCount: (_callback: (result: { steps: number }) => void): Subscription => {
     console.debug('[Pedometer] watchStepCount - not available on web');
     return { remove: () => {} };
   },
@@ -38,8 +38,8 @@ export const Pedometer = {
 };
 
 // Accelerometer mock - uses DeviceMotion API when available
-let accelerometerListeners: Array<(data: { x: number; y: number; z: number }) => void> = [];
-let accelerometerInterval: NodeJS.Timeout | null = null;
+const accelerometerListeners: Array<(data: { x: number; y: number; z: number }) => void> = [];
+const _accelerometerInterval: NodeJS.Timeout | null = null;
 
 export const Accelerometer = {
   isAvailableAsync: async (): Promise<boolean> => {
@@ -74,7 +74,7 @@ export const Accelerometer = {
     };
   },
 
-  setUpdateInterval: (intervalMs: number) => {
+  setUpdateInterval: (_intervalMs: number) => {
     // DeviceMotion API doesn't support custom intervals
     console.debug('[Accelerometer] setUpdateInterval - using browser default');
   },
@@ -106,7 +106,7 @@ export const Accelerometer = {
 };
 
 // Gyroscope mock
-let gyroscopeListeners: Array<(data: { x: number; y: number; z: number }) => void> = [];
+const gyroscopeListeners: Array<(data: { x: number; y: number; z: number }) => void> = [];
 
 export const Gyroscope = {
   isAvailableAsync: async (): Promise<boolean> => {
@@ -141,7 +141,7 @@ export const Gyroscope = {
     };
   },
 
-  setUpdateInterval: (intervalMs: number) => {
+  setUpdateInterval: (_intervalMs: number) => {
     console.debug('[Gyroscope] setUpdateInterval - using browser default');
   },
 
@@ -153,12 +153,12 @@ export const Gyroscope = {
 export const Barometer = {
   isAvailableAsync: async (): Promise<boolean> => false,
 
-  addListener: (callback: (data: { pressure: number; relativeAltitude?: number }) => void): Subscription => {
+  addListener: (_callback: (data: { pressure: number; relativeAltitude?: number }) => void): Subscription => {
     console.debug('[Barometer] Not available on web');
     return { remove: () => {} };
   },
 
-  setUpdateInterval: (intervalMs: number) => {},
+  setUpdateInterval: (_intervalMs: number) => {},
   getPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
   requestPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
 };
@@ -167,12 +167,12 @@ export const Barometer = {
 export const Magnetometer = {
   isAvailableAsync: async (): Promise<boolean> => false,
 
-  addListener: (callback: (data: { x: number; y: number; z: number }) => void): Subscription => {
+  addListener: (_callback: (data: { x: number; y: number; z: number }) => void): Subscription => {
     console.debug('[Magnetometer] Not available on web');
     return { remove: () => {} };
   },
 
-  setUpdateInterval: (intervalMs: number) => {},
+  setUpdateInterval: (_intervalMs: number) => {},
   getPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
   requestPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
 };
@@ -201,7 +201,7 @@ export const DeviceMotion = {
     return { remove: () => {} };
   },
 
-  setUpdateInterval: (intervalMs: number) => {},
+  setUpdateInterval: (_intervalMs: number) => {},
   getPermissionsAsync: async () => Accelerometer.getPermissionsAsync(),
   requestPermissionsAsync: async () => Accelerometer.requestPermissionsAsync(),
 };
@@ -209,11 +209,11 @@ export const DeviceMotion = {
 // LightSensor mock - not available on web
 export const LightSensor = {
   isAvailableAsync: async (): Promise<boolean> => false,
-  addListener: (callback: (data: { illuminance: number }) => void): Subscription => {
+  addListener: (_callback: (data: { illuminance: number }) => void): Subscription => {
     console.debug('[LightSensor] Not available on web');
     return { remove: () => {} };
   },
-  setUpdateInterval: (intervalMs: number) => {},
+  setUpdateInterval: (_intervalMs: number) => {},
   getPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
   requestPermissionsAsync: async () => ({ status: 'denied', granted: false, canAskAgain: false }),
 };

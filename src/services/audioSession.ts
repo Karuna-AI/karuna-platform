@@ -1,4 +1,4 @@
-import { Platform, AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
 
 type AudioSessionCallback = () => void;
 

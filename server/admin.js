@@ -95,15 +95,23 @@ async function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-async function verifyPassword(password, hash) {
-  // Support both bcrypt and legacy SHA-256 hashes for migration
+async function verifyPassword(password, hash, adminId = null) {
   if (hash.startsWith('$2b$') || hash.startsWith('$2a$')) {
-    // bcrypt hash
     return bcrypt.compare(password, hash);
   } else {
-    // Legacy SHA-256 hash - for backward compatibility during migration
+    // Legacy SHA-256 hash - verify and auto-upgrade to bcrypt
     const legacyHash = crypto.createHash('sha256').update(password + ADMIN_JWT_SECRET).digest('hex');
-    return hash === legacyHash;
+    const matches = hash === legacyHash;
+    if (matches && adminId) {
+      console.warn(`[Security] Upgrading legacy SHA-256 hash to bcrypt for admin ${adminId}`);
+      try {
+        const newHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, adminId]);
+      } catch (err) {
+        console.error('[Security] Failed to upgrade admin password hash:', err.message);
+      }
+    }
+    return matches;
   }
 }
 
@@ -139,8 +147,8 @@ async function logAdminAction(adminId, adminEmail, action, resourceType, resourc
       `INSERT INTO admin_audit_logs (admin_id, admin_email, action, resource_type, resource_id, old_value, new_value, ip_address, user_agent)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [adminId, adminEmail, action, resourceType, resourceId,
-       oldValue ? JSON.stringify(oldValue) : null,
-       newValue ? JSON.stringify(newValue) : null,
+       oldValue != null ? JSON.stringify(typeof oldValue === 'string' ? { value: oldValue } : oldValue) : null,
+       newValue != null ? JSON.stringify(typeof newValue === 'string' ? { value: newValue } : newValue) : null,
        req.ip, req.headers['user-agent']]
     );
   } catch (error) {
@@ -149,17 +157,45 @@ async function logAdminAction(adminId, adminEmail, action, resourceType, resourc
 }
 
 // ============================================================================
+// Cookie helpers
+// ============================================================================
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+const ADMIN_COOKIE_NAME = 'karuna_admin';
+const ADMIN_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: IS_PRODUCTION,
+  sameSite: IS_PRODUCTION ? 'none' : 'lax',
+  maxAge: 24 * 60 * 60 * 1000,
+  path: '/',
+};
+
+function getCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  const match = header.split(';').map(s => s.trim()).find(s => s.startsWith(`${name}=`));
+  return match ? match.slice(name.length + 1) : null;
+}
+
+// ============================================================================
 // Authentication Middleware
 // ============================================================================
 
 function adminAuthMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
+  // Prefer httpOnly cookie; fall back to Bearer header for API clients
+  let token = getCookie(req, ADMIN_COOKIE_NAME);
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  const token = authHeader.substring(7);
   const decoded = verifyAdminJWT(token);
 
   if (!decoded) {
@@ -199,20 +235,16 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      await logAdminAction(null, email.toLowerCase(), 'login_failed', 'admin', null, null, { reason: 'unknown_email' }, req);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const admin = result.rows[0];
 
-    const passwordValid = await verifyPassword(password, admin.password_hash);
+    const passwordValid = await verifyPassword(password, admin.password_hash, admin.id);
     if (!passwordValid) {
+      await logAdminAction(admin.id, admin.email, 'login_failed', 'admin', admin.id, null, { reason: 'invalid_password' }, req);
       return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    // Upgrade legacy hash to bcrypt on successful login
-    if (!admin.password_hash.startsWith('$2b$') && !admin.password_hash.startsWith('$2a$')) {
-      const newHash = await hashPassword(password);
-      await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, admin.id]);
     }
 
     // Update login stats
@@ -225,6 +257,7 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
 
     await logAdminAction(admin.id, admin.email, 'login', 'admin', admin.id, null, null, req);
 
+    res.cookie(ADMIN_COOKIE_NAME, token, ADMIN_COOKIE_OPTIONS);
     res.json({
       success: true,
       token,
@@ -240,6 +273,17 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
     console.error('Admin login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
+});
+
+// Admin logout — clears httpOnly cookie
+router.post('/auth/logout', (req, res) => {
+  res.clearCookie(ADMIN_COOKIE_NAME, {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    path: '/',
+  });
+  res.json({ success: true });
 });
 
 // Get current admin
@@ -420,6 +464,10 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
     const { userId } = req.params;
     const { reason } = req.body;
 
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'Suspension reason is required' });
+    }
+
     const oldResult = await db.query('SELECT is_active, suspended_at FROM users WHERE id = $1', [userId]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
@@ -470,8 +518,11 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
     const { userId } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!newPassword || newPassword.length < 12) {
+      return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Password must contain uppercase, lowercase, and a number' });
     }
 
     // Use bcrypt for password hashing (same as careCircle.js)
@@ -706,6 +757,27 @@ router.get('/metrics/detailed', adminAuthMiddleware, requirePermission('canViewM
 // Audit Logs Routes
 // ============================================================================
 
+// Audit log retention: delete entries older than 1 year on startup and daily
+const AUDIT_RETENTION_DAYS = 365;
+
+async function cleanupOldAuditLogs() {
+  try {
+    const cutoff = new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const r1 = await db.query('DELETE FROM audit_logs WHERE created_at < $1', [cutoff]);
+    const r2 = await db.query('DELETE FROM admin_audit_logs WHERE created_at < $1', [cutoff]);
+    const total = (r1.rowCount || 0) + (r2.rowCount || 0);
+    if (total > 0) {
+      console.log(`[AuditRetention] Cleaned up ${total} audit logs older than ${AUDIT_RETENTION_DAYS} days`);
+    }
+  } catch (err) {
+    console.error('[AuditRetention] Cleanup failed:', err.message);
+  }
+}
+
+// Run cleanup on startup and every 24 hours
+cleanupOldAuditLogs();
+setInterval(cleanupOldAuditLogs, 24 * 60 * 60 * 1000);
+
 // Get audit logs
 router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
@@ -791,6 +863,34 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
 // Feature Flags Routes
 // ============================================================================
 
+// Maps a userId to a deterministic bucket 0-99 for rollout_percentage enforcement
+function userRolloutBucket(userId) {
+  let hash = 5381;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash << 5) + hash) + userId.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return Math.abs(hash) % 100;
+}
+
+// Evaluate a single flag for a given userId/circleId
+function evaluateFlag(flag, userId, circleId) {
+  if (!flag.is_enabled) return false;
+  if (flag.enabled_for_all) return true;
+
+  const userIds = Array.isArray(flag.enabled_user_ids) ? flag.enabled_user_ids : [];
+  const circleIds = Array.isArray(flag.enabled_circle_ids) ? flag.enabled_circle_ids : [];
+
+  if (userId && userIds.includes(userId)) return true;
+  if (circleId && circleIds.includes(circleId)) return true;
+
+  if (flag.rollout_percentage > 0 && userId) {
+    return userRolloutBucket(userId) < flag.rollout_percentage;
+  }
+
+  return false;
+}
+
 // List feature flags
 router.get('/feature-flags', adminAuthMiddleware, async (req, res) => {
   try {
@@ -799,6 +899,27 @@ router.get('/feature-flags', adminAuthMiddleware, async (req, res) => {
   } catch (error) {
     console.error('List feature flags error:', error);
     res.status(500).json({ error: 'Failed to list feature flags' });
+  }
+});
+
+// Evaluate feature flags for a user — used by mobile app and portals
+router.post('/feature-flags/evaluate', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { userId, circleId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const result = await db.query('SELECT * FROM feature_flags ORDER BY name');
+    const evaluation = {};
+    for (const flag of result.rows) {
+      evaluation[flag.name] = evaluateFlag(flag, userId, circleId);
+    }
+
+    res.json({ flags: evaluation });
+  } catch (error) {
+    console.error('Evaluate feature flags error:', error);
+    res.status(500).json({ error: 'Failed to evaluate feature flags' });
   }
 });
 
@@ -888,9 +1009,28 @@ router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSe
     const { key } = req.params;
     const { value } = req.body;
 
+    if (value === undefined || value === null) {
+      return res.status(400).json({ error: 'Value is required' });
+    }
+
     const oldResult = await db.query('SELECT * FROM system_settings WHERE key = $1', [key]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ error: 'Setting not found' });
+    }
+
+    // Validate value type matches existing setting type
+    const existingValue = oldResult.rows[0].value;
+    if (existingValue !== null) {
+      try {
+        const parsed = JSON.parse(existingValue);
+        const existingType = typeof parsed;
+        const newType = typeof value;
+        if (existingType !== 'object' && existingType !== newType) {
+          return res.status(400).json({ error: `Setting expects type '${existingType}', got '${newType}'` });
+        }
+      } catch {
+        // Existing value not valid JSON, accept any type
+      }
     }
 
     const result = await db.query(

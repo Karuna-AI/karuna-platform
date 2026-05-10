@@ -64,7 +64,7 @@ export function SecuritySetupScreen({
   };
 
   const handleBiometric = useCallback(async () => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     try {
       await biometricAuthService.setBiometricEnabled(true);
       // Still need a PIN as fallback
@@ -76,7 +76,7 @@ export function SecuritySetupScreen({
   }, []);
 
   const handlePinDigit = useCallback(async (digit: string) => {
-    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     setError('');
 
     if (phase === 'enter_pin') {
@@ -118,7 +118,7 @@ export function SecuritySetupScreen({
       await onboardingStore.setSecurityMethod(method);
       telemetryService.track('onboarding_security_setup', { errorType: method });
       setPhase('done');
-      if (Platform.OS !== 'web') { try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
+      if (Platform.OS !== 'web') { try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { /* intentionally empty */ } }
       setTimeout(() => onNext(), 600);
     } catch (error) {
       console.error('PIN setup error:', error);
