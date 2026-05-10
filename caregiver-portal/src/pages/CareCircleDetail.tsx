@@ -29,6 +29,7 @@ export default function CareCircleDetail() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+  const [isVaultLoading, setIsVaultLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Invite modal state
@@ -64,6 +65,16 @@ export default function CareCircleDetail() {
     setIsDashboardLoading(false);
   }, [id]);
 
+  const loadVaultData = useCallback(async () => {
+    if (!id) return;
+    setIsVaultLoading(true);
+    const syncResult = await api.getSyncData(id);
+    if (syncResult.success && syncResult.data) {
+      setVaultData(syncResult.data);
+    }
+    setIsVaultLoading(false);
+  }, [id]);
+
   // Debounced version for WebSocket events — coalesces bursts into one fetch
   const debouncedLoadDashboard = useDebounced(loadDashboardData, 300);
 
@@ -86,6 +97,13 @@ export default function CareCircleDetail() {
     return () => clearInterval(interval);
   }, [activeTab, id, isConnected, loadDashboardData]);
 
+  // Refresh vault data each time the vault tab is opened
+  useEffect(() => {
+    if (activeTab === 'vault' && id) {
+      loadVaultData();
+    }
+  }, [activeTab, id, loadVaultData]);
+
   // Subscribe to WebSocket events for real-time updates
   useEffect(() => {
     if (!isConnected) return;
@@ -106,12 +124,6 @@ export default function CareCircleDetail() {
     if (result.success && result.data) {
       setCircle(result.data);
       setMembers(result.data.members || []);
-
-      // Load vault data if user has permission
-      const syncResult = await api.getSyncData(id!);
-      if (syncResult.success && syncResult.data) {
-        setVaultData(syncResult.data);
-      }
 
       // Load dashboard data
       const dashResult = await api.getDashboard(id!);
@@ -538,7 +550,14 @@ export default function CareCircleDetail() {
       )}
 
       {/* Vault Tab */}
-      {activeTab === 'vault' && canViewVault && vaultData && (
+      {activeTab === 'vault' && canViewVault && (
+        <div>
+          {isVaultLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" />
+              <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>Loading vault data…</p>
+            </div>
+          ) : vaultData ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Medications */}
           <div className="card">
@@ -668,6 +687,14 @@ export default function CareCircleDetail() {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+        </div>
+          ) : (
+            <div className="card">
+              <div className="empty-state">
+                <p className="text-muted">No vault data available</p>
+              </div>
             </div>
           )}
         </div>
