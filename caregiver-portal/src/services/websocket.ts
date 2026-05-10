@@ -85,6 +85,9 @@ class WebSocketService {
       this.ws = null;
     }
 
+    // Clear all message handlers so they don't accumulate across circle switches
+    this.handlers.clear();
+
     this._isConnected = false;
     this.circleId = null;
     this.token = null;
