@@ -62,18 +62,18 @@ export default function CareCircleDetail() {
     }
   }, [id]);
 
-  // Auto-refresh dashboard: use WebSocket when connected, fall back to polling
+  // Auto-refresh dashboard: poll every 30s ONLY when WebSocket is disconnected
   useEffect(() => {
-    if (activeTab === 'dashboard' && id) {
-      loadDashboardData();
+    if (activeTab !== 'dashboard' || !id) return;
 
-      if (!isConnected) {
-        // Fallback: poll every 30 seconds when WebSocket is not connected
-        const interval = setInterval(loadDashboardData, 30000);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [activeTab, id, loadDashboardData, isConnected]);
+    // Always do an immediate load when tab becomes active
+    loadDashboardData();
+
+    if (isConnected) return; // WebSocket handles updates — no polling needed
+
+    const interval = setInterval(loadDashboardData, 30000);
+    return () => clearInterval(interval);
+  }, [activeTab, id, isConnected, loadDashboardData]);
 
   // Subscribe to WebSocket events for real-time updates
   useEffect(() => {
