@@ -105,6 +105,10 @@ export default function Login() {
             {fieldErrors.password && <p className="field-error">{fieldErrors.password}</p>}
           </div>
 
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+            <Link to="/forgot-password" style={{ fontSize: '0.875rem' }}>Forgot password?</Link>
+          </div>
+
           <button
             type="submit"
             className="btn btn-primary btn-block"

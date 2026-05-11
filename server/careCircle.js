@@ -286,6 +286,29 @@ async function sendVerificationEmail(email, name, verificationUrl) {
   // await emailClient.send({ to: email, subject: 'Verify your Karuna account', html: `...${verificationUrl}...` });
 }
 
+async function sendPasswordResetEmail(email, name, resetUrl) {
+  console.log(`[PasswordReset] To: ${email} | Name: ${name} | URL: ${resetUrl}`);
+  // TODO: integrate email provider
+  // await emailClient.send({ to: email, subject: 'Reset your Karuna password', html: `...${resetUrl}...` });
+}
+
+// Ensure password_reset_tokens table exists (idempotent)
+(async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.error('[DB] Failed to create password_reset_tokens table:', err.message);
+  }
+})();
+
 async function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
@@ -683,6 +706,78 @@ router.post('/auth/resend-verification', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Resend verification error:', error);
     res.status(500).json({ error: 'Failed to resend verification email' });
+  }
+});
+
+// Forgot password — generate and store a reset token
+router.post('/auth/forgot-password', passwordResetRateLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const result = await db.query('SELECT id, email, name FROM users WHERE email = $1', [email.toLowerCase()]);
+
+    // Always respond the same way to prevent user enumeration
+    if (result.rows.length === 0) {
+      return res.json({ success: true, message: 'If that email is registered, you will receive a reset link.' });
+    }
+
+    const user = result.rows[0];
+    const resetToken = generateToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, resetToken, expiresAt]
+    );
+
+    const resetUrl = `${APP_BASE_URL}/reset-password?token=${resetToken}`;
+    await sendPasswordResetEmail(user.email, user.name, resetUrl);
+
+    const response = { success: true, message: 'If that email is registered, you will receive a reset link.' };
+    // Expose token in non-production so it can be used without email
+    if (process.env.NODE_ENV !== 'production') {
+      response.resetToken = resetToken;
+      response.resetUrl = resetUrl;
+    }
+    res.json(response);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// Reset password — validate token and update password
+router.post('/auth/reset-password', passwordResetRateLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const result = await db.query(
+      `SELECT prt.user_id, u.email
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token = $1 AND prt.expires_at > CURRENT_TIMESTAMP`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+    }
+
+    const { user_id, email } = result.rows[0];
+    const passwordHash = await hashPassword(password);
+
+    await db.query('UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [passwordHash, user_id]);
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user_id]);
+
+    console.log(`[Security] Password reset completed for: ${email}`);
+    res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 

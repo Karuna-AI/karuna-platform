@@ -141,14 +141,14 @@ export default function Circles() {
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page <= 1}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  onClick={() => loadCircles(pagination.page - 1, debouncedSearch)}
                 >
                   Previous
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page >= pagination.pages}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  onClick={() => loadCircles(pagination.page + 1, debouncedSearch)}
                 >
                   Next
                 </button>

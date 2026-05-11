@@ -9,6 +9,8 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import CareCircleDetail from './pages/CareCircleDetail';
 import AcceptInvitation from './pages/AcceptInvitation';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -74,6 +76,17 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <ForgotPassword />
+          </PublicRoute>
+        }
+      />
+      {/* Reset password is always public — token is single-use */}
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Invitation route (semi-public) */}
       <Route path="/invite/:token" element={<AcceptInvitation />} />

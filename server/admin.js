@@ -1560,8 +1560,10 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - parseInt(days));
 
-    const circleFilter = circleId ? ` AND circle_id = '${circleId}'` : '';
-    const circleJoinFilter = circleId ? ` AND md.circle_id = '${circleId}'` : '';
+    const summaryParams = [sinceDate];
+    const summaryFilter = circleId ? ` AND circle_id = $${summaryParams.push(circleId)}` : '';
+    const joinParams = [sinceDate];
+    const joinFilter = circleId ? ` AND md.circle_id = $${joinParams.push(circleId)}` : '';
 
     const [summary, adherenceByCircle, topMedications, missedDoses] = await Promise.all([
       // Overall adherence summary
@@ -1575,8 +1577,8 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
           COUNT(DISTINCT medication_id) as unique_medications,
           COUNT(DISTINCT circle_id) as circles_with_medications
         FROM medication_doses
-        WHERE scheduled_time >= $1${circleFilter}
-      `, [sinceDate]),
+        WHERE scheduled_time >= $1${summaryFilter}
+      `, summaryParams),
 
       // Adherence by circle
       db.query(`
@@ -1593,11 +1595,11 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
           ) as adherence_rate
         FROM care_circles cc
         JOIN medication_doses md ON cc.id = md.circle_id
-        WHERE md.scheduled_time >= $1${circleJoinFilter}
+        WHERE md.scheduled_time >= $1${joinFilter}
         GROUP BY cc.id
         ORDER BY adherence_rate ASC NULLS LAST
         LIMIT 20
-      `, [sinceDate]),
+      `, joinParams),
 
       // Most prescribed medications
       db.query(`
@@ -1611,11 +1613,11 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
              NULLIF(COUNT(*) FILTER (WHERE md.status != 'pending'), 0) * 100), 1
           ) as adherence_rate
         FROM vault_medications vm
-        LEFT JOIN medication_doses md ON vm.id = md.medication_id AND md.scheduled_time >= $1${circleJoinFilter}
+        LEFT JOIN medication_doses md ON vm.id = md.medication_id AND md.scheduled_time >= $1${joinFilter}
         GROUP BY vm.name, vm.dosage
         ORDER BY circles_using DESC
         LIMIT 15
-      `, [sinceDate]),
+      `, joinParams),
 
       // Recent missed doses with details
       db.query(`
@@ -1628,10 +1630,10 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
         FROM medication_doses md
         JOIN vault_medications vm ON md.medication_id = vm.id
         JOIN care_circles cc ON md.circle_id = cc.id
-        WHERE md.status = 'missed' AND md.scheduled_time >= $1${circleJoinFilter}
+        WHERE md.status = 'missed' AND md.scheduled_time >= $1${joinFilter}
         ORDER BY md.scheduled_time DESC
         LIMIT 50
-      `, [sinceDate]),
+      `, joinParams),
     ]);
 
     const summaryData = summary.rows[0];
@@ -1663,7 +1665,8 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - parseInt(days));
 
-    const circleFilter = circleId ? ` AND circle_id = '${circleId}'` : '';
+    const trendParams = [sinceDate];
+    const trendFilter = circleId ? ` AND circle_id = $${trendParams.push(circleId)}` : '';
 
     const [dailyAdherence, hourlyPattern] = await Promise.all([
       // Daily adherence trend
@@ -1678,10 +1681,10 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
              NULLIF(COUNT(*) FILTER (WHERE status != 'pending'), 0) * 100), 1
           ) as adherence_rate
         FROM medication_doses
-        WHERE scheduled_time >= $1${circleFilter}
+        WHERE scheduled_time >= $1${trendFilter}
         GROUP BY DATE(scheduled_time)
         ORDER BY date
-      `, [sinceDate]),
+      `, trendParams),
 
       // Hourly pattern (which hours have most missed doses)
       db.query(`
@@ -1691,10 +1694,10 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
           COUNT(*) FILTER (WHERE status = 'taken') as taken,
           COUNT(*) FILTER (WHERE status = 'missed') as missed
         FROM medication_doses
-        WHERE scheduled_time >= $1${circleFilter}
+        WHERE scheduled_time >= $1${trendFilter}
         GROUP BY EXTRACT(HOUR FROM scheduled_time)
         ORDER BY hour
-      `, [sinceDate]),
+      `, trendParams),
     ]);
 
     res.json({

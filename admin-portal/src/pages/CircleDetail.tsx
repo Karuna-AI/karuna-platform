@@ -92,7 +92,7 @@ export default function CircleDetail() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString();
   };
@@ -170,7 +170,7 @@ export default function CircleDetail() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Active Alerts</div>
-          <div className="stat-value" style={{ color: stats?.active_alerts > 0 ? 'var(--warning)' : 'var(--success)' }}>
+          <div className="stat-value" style={{ color: (stats?.active_alerts ?? 0) > 0 ? 'var(--warning)' : 'var(--success)' }}>
             {stats?.active_alerts || 0}
           </div>
         </div>

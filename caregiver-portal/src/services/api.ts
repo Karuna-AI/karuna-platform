@@ -120,6 +120,26 @@ class ApiService {
     }
   }
 
+  async forgotPassword(email: string): Promise<ApiResponse<{ message: string; resetToken?: string; resetUrl?: string }>> {
+    try {
+      const response = await this.client.post('/care/auth/forgot-password', { email });
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to send reset email' };
+    }
+  }
+
+  async resetPassword(token: string, password: string): Promise<ApiResponse<{ message: string }>> {
+    try {
+      const response = await this.client.post('/care/auth/reset-password', { token, password });
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to reset password' };
+    }
+  }
+
   async getProfile(): Promise<ApiResponse<User>> {
     try {
       const response = await this.client.get('/care/auth/me');

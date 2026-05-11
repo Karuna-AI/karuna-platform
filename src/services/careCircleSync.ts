@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { vaultService } from './vault';
+import { secureStorageService } from './secureStorage';
 
 const STORAGE_KEYS = {
   CARE_CIRCLE_ID: '@karuna_care_circle_id',
@@ -52,7 +53,8 @@ class CareCircleSyncService {
 
     // Load saved state
     const savedCircleId = await AsyncStorage.getItem(STORAGE_KEYS.CARE_CIRCLE_ID);
-    const savedToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    const savedTokenResult = await secureStorageService.getCaregiverToken();
+    const savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
     const savedChanges = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_CHANGES);
 
     if (savedCircleId) this.careCircleId = savedCircleId;
@@ -123,7 +125,7 @@ class CareCircleSyncService {
   // Set authentication token (from caregiver login)
   async setAuthToken(token: string): Promise<void> {
     this.authToken = token;
-    await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+    await secureStorageService.storeCaregiverToken(token);
   }
 
   // Connect to WebSocket for real-time updates
@@ -294,17 +296,18 @@ class CareCircleSyncService {
       }
 
       const result = await response.json();
+      const syncedCount = result.synced ?? this.pendingChanges.length;
 
       // Clear synced changes
       this.pendingChanges = [];
       await this.savePendingChanges();
       await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
 
-      this.notifyListeners('push_complete', { synced: result.synced });
+      this.notifyListeners('push_complete', { synced: syncedCount });
 
       return {
         success: true,
-        synced: result.synced || this.pendingChanges.length,
+        synced: syncedCount,
         conflicts: result.conflicts || [],
       };
     } catch (error) {
