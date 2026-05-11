@@ -1,12 +1,10 @@
 # Deploy Workflow
-# Deploys backend (Railway) and portals (Cloudflare Pages) on push to master
+# Deploys backend (Railway) and portals (Vercel) on push to master
 #
 # Required GitHub Secrets:
 #   RAILWAY_TOKEN          - Railway API token (railway.app → Account Settings → Tokens)
 #   RAILWAY_SERVICE_ID     - Railway service ID for the backend
-#   API_URL                - Production backend URL (e.g. https://karuna-api-production.up.railway.app)
-#   CLOUDFLARE_API_TOKEN   - Cloudflare API token with Pages:Edit permission
-#   CLOUDFLARE_ACCOUNT_ID  - Cloudflare account ID
+#   VERCEL_TOKEN           - Vercel API token (vercel.com → Settings → Tokens)
 #   EXPO_TOKEN             - Expo access token (for mobile builds)
 #   EXPO_OWNER             - Expo account username
 
@@ -63,76 +61,9 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway up --service ${{ secrets.RAILWAY_SERVICE_ID }} --detach
 
-  build-caregiver-portal:
-    name: Build Caregiver Portal
-    runs-on: ubuntu-latest
-    if: |
-      github.event.inputs.component == 'caregiver-portal' ||
-      github.event.inputs.component == 'all' ||
-      github.event.inputs.component == ''
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: caregiver-portal/package-lock.json
-
-      - name: Install dependencies
-        run: cd caregiver-portal && npm ci
-
-      - name: Build
-        run: cd caregiver-portal && npm run build
-        env:
-          VITE_API_URL: ${{ secrets.API_URL }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: caregiver-portal-dist
-          path: caregiver-portal/dist
-
-  build-admin-portal:
-    name: Build Admin Portal
-    runs-on: ubuntu-latest
-    if: |
-      github.event.inputs.component == 'admin-portal' ||
-      github.event.inputs.component == 'all' ||
-      github.event.inputs.component == ''
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: admin-portal/package-lock.json
-
-      - name: Install dependencies
-        run: cd admin-portal && npm ci
-
-      - name: Build
-        run: cd admin-portal && npm run build
-        env:
-          VITE_API_URL: ${{ secrets.API_URL }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: admin-portal-dist
-          path: admin-portal/dist
-
   deploy-caregiver-portal:
-    name: Deploy Caregiver Portal to Cloudflare
+    name: Deploy Caregiver Portal to Vercel
     runs-on: ubuntu-latest
-    needs: build-caregiver-portal
     if: |
       (github.event.inputs.component == 'caregiver-portal' ||
        github.event.inputs.component == 'all' ||
@@ -141,37 +72,29 @@ jobs:
     environment: production
 
     steps:
-      - name: Check Cloudflare secrets
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Vercel secrets
         id: check-secrets
         run: |
-          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] || [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Caregiver portal deployment skipped: CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not configured"
+            echo "⚠️ Caregiver portal deployment skipped: VERCEL_TOKEN not configured"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download artifact
+      - name: Deploy Caregiver Portal to Vercel
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: caregiver-portal-dist
-          path: dist
-
-      - name: Deploy to Cloudflare Pages
-        if: steps.check-secrets.outputs.skip != 'true'
-        uses: cloudflare/pages-action@v1.5.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: karuna-portal
-          directory: dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ./caregiver-portal
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel --prod --token $VERCEL_TOKEN --yes
 
   deploy-admin-portal:
-    name: Deploy Admin Portal to Cloudflare
+    name: Deploy Admin Portal to Vercel
     runs-on: ubuntu-latest
-    needs: build-admin-portal
     if: |
       (github.event.inputs.component == 'admin-portal' ||
        github.event.inputs.component == 'all' ||
@@ -180,29 +103,22 @@ jobs:
     environment: production
 
     steps:
-      - name: Check Cloudflare secrets
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Vercel secrets
         id: check-secrets
         run: |
-          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] || [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Admin portal deployment skipped: CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not configured"
+            echo "⚠️ Admin portal deployment skipped: VERCEL_TOKEN not configured"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download artifact
+      - name: Deploy Admin Portal to Vercel
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: admin-portal-dist
-          path: dist
-
-      - name: Deploy to Cloudflare Pages
-        if: steps.check-secrets.outputs.skip != 'true'
-        uses: cloudflare/pages-action@v1.5.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: karuna-admin
-          directory: dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ./admin-portal
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel --prod --token $VERCEL_TOKEN --yes
