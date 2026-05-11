@@ -677,6 +677,82 @@ router.get('/circles/:circleId', adminAuthMiddleware, requirePermission('canMana
   }
 });
 
+// Update circle (rename / care recipient name)
+router.put('/circles/:circleId', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const { name, care_recipient_name } = req.body;
+    if (!name && !care_recipient_name) return res.status(400).json({ error: 'Nothing to update' });
+
+    const fields = [];
+    const params = [];
+    if (name) { fields.push(`name = $${params.length + 1}`); params.push(name.trim()); }
+    if (care_recipient_name) { fields.push(`care_recipient_name = $${params.length + 1}`); params.push(care_recipient_name.trim()); }
+    params.push(circleId);
+
+    const result = await db.query(
+      `UPDATE care_circles SET ${fields.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Update circle error:', error);
+    res.status(500).json({ error: 'Failed to update circle' });
+  }
+});
+
+// Deactivate circle
+router.post('/circles/:circleId/deactivate', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const result = await db.query(
+      'UPDATE care_circles SET is_active = false WHERE id = $1 RETURNING *',
+      [circleId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Deactivate circle error:', error);
+    res.status(500).json({ error: 'Failed to deactivate circle' });
+  }
+});
+
+// Activate circle
+router.post('/circles/:circleId/activate', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const result = await db.query(
+      'UPDATE care_circles SET is_active = true WHERE id = $1 RETURNING *',
+      [circleId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Activate circle error:', error);
+    res.status(500).json({ error: 'Failed to activate circle' });
+  }
+});
+
+// Remove circle member (admin)
+router.delete('/circles/:circleId/members/:memberId', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId, memberId } = req.params;
+    const existing = await db.query(
+      'SELECT role FROM circle_members WHERE id = $1 AND circle_id = $2',
+      [memberId, circleId]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Member not found' });
+    if (existing.rows[0].role === 'owner') return res.status(400).json({ error: 'Cannot remove the circle owner' });
+
+    await db.query('DELETE FROM circle_members WHERE id = $1 AND circle_id = $2', [memberId, circleId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove circle member error:', error);
+    res.status(500).json({ error: 'Failed to remove member' });
+  }
+});
+
 // ============================================================================
 // System Metrics Routes
 // ============================================================================

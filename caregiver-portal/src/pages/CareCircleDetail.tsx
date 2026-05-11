@@ -65,6 +65,15 @@ export default function CareCircleDetail() {
   // Alert action state
   const [alertActionError, setAlertActionError] = useState('');
 
+  // Circle settings state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsElderlyName, setSettingsElderlyName] = useState('');
+  const [isRenamingCircle, setIsRenamingCircle] = useState(false);
+  const [renameError, setRenameError] = useState('');
+  const [isDeletingCircle, setIsDeletingCircle] = useState(false);
+  const [deleteCircleError, setDeleteCircleError] = useState('');
+
   const currentMember = members.find((m) => m.userId === user?.id);
   const canInvite = currentMember?.permissions.canInviteMembers;
   const canAddNotes = currentMember?.permissions.canAddNotes;
@@ -293,6 +302,33 @@ export default function CareCircleDetail() {
     }
   };
 
+  const handleRenameCircle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRenameError('');
+    setIsRenamingCircle(true);
+    const result = await api.updateCareCircle(id!, { name: settingsName, elderlyName: settingsElderlyName });
+    setIsRenamingCircle(false);
+    if (result.success && result.data) {
+      setCircle(result.data);
+      setShowSettingsModal(false);
+    } else {
+      setRenameError(result.error || 'Failed to update circle');
+    }
+  };
+
+  const handleDeleteCircle = async () => {
+    if (!confirm(`Delete "${circle?.name}"? This will permanently remove all circle data and cannot be undone.`)) return;
+    setDeleteCircleError('');
+    setIsDeletingCircle(true);
+    const result = await api.deleteCareCircle(id!);
+    setIsDeletingCircle(false);
+    if (result.success) {
+      navigate('/');
+    } else {
+      setDeleteCircleError(result.error || 'Failed to delete circle');
+    }
+  };
+
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-IN', {
       day: 'numeric',
@@ -354,11 +390,27 @@ export default function CareCircleDetail() {
               </span>
             </div>
           </div>
-          {currentMember && (
-            <span className={`badge badge-${currentMember.role}`}>
-              {currentMember.role}
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {currentMember?.role === 'owner' && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => {
+                  setSettingsName(circle.name);
+                  setSettingsElderlyName(circle.elderlyName);
+                  setRenameError('');
+                  setDeleteCircleError('');
+                  setShowSettingsModal(true);
+                }}
+              >
+                Settings
+              </button>
+            )}
+            {currentMember && (
+              <span className={`badge badge-${currentMember.role}`}>
+                {currentMember.role}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1028,6 +1080,73 @@ export default function CareCircleDetail() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Circle Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Circle Settings</h2>
+              <button className="modal-close" onClick={() => setShowSettingsModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleRenameCircle}>
+                <div className="form-group">
+                  <label className="form-label">Circle Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={settingsName}
+                    onChange={(e) => setSettingsName(e.target.value)}
+                    required
+                    disabled={isRenamingCircle}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Care Recipient Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={settingsElderlyName}
+                    onChange={(e) => setSettingsElderlyName(e.target.value)}
+                    required
+                    disabled={isRenamingCircle}
+                  />
+                </div>
+                {renameError && (
+                  <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{renameError}</div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '2rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowSettingsModal(false)} disabled={isRenamingCircle}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={isRenamingCircle}>
+                    {isRenamingCircle ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+                <h3 style={{ color: 'var(--error)', marginBottom: '0.5rem' }}>Danger Zone</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                  Permanently deletes this care circle, all health data, medications, notes, and member associations.
+                </p>
+                {deleteCircleError && (
+                  <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{deleteCircleError}</div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={handleDeleteCircle}
+                  disabled={isDeletingCircle}
+                >
+                  {isDeletingCircle ? 'Deleting...' : 'Delete Circle'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

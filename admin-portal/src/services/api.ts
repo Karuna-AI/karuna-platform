@@ -200,6 +200,46 @@ class AdminApiService {
     }
   }
 
+  async updateCircle(circleId: string, data: { name?: string; care_recipient_name?: string }): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.put(`/circles/${circleId}`, data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to update circle' };
+    }
+  }
+
+  async deactivateCircle(circleId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/circles/${circleId}/deactivate`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to deactivate circle' };
+    }
+  }
+
+  async activateCircle(circleId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/circles/${circleId}/activate`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to activate circle' };
+    }
+  }
+
+  async removeCircleMember(circleId: string, memberId: string): Promise<ApiResponse<void>> {
+    try {
+      await this.client.delete(`/circles/${circleId}/members/${memberId}`);
+      return { success: true };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to remove member' };
+    }
+  }
+
   // Feature Flags
   async getFeatureFlags(): Promise<ApiResponse<any>> {
     try {

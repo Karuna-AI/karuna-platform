@@ -8,6 +8,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -17,9 +18,22 @@ export default function Login() {
   const redirectParam = searchParams.get('redirect');
   const from = redirectParam || (location.state as { from?: string })?.from || '/';
 
+  const handleBlur = (field: string, value: string) => {
+    let err = '';
+    if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) err = 'Enter a valid email address';
+    if (field === 'password' && value.length < 6) err = 'Password must be at least 6 characters';
+    setFieldErrors((prev) => ({ ...prev, [field]: err }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const errors = {
+      email: !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'Enter a valid email address' : '',
+      password: password.length < 6 ? 'Password must be at least 6 characters' : '',
+    };
+    setFieldErrors(errors);
+    if (Object.values(errors).some(Boolean)) return;
     setIsLoading(true);
 
     const result = await login({ email, password });
@@ -53,13 +67,15 @@ export default function Login() {
             <input
               id="email"
               type="email"
-              className="form-input"
+              className={`form-input${fieldErrors.email ? ' input-error' : ''}`}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: '' })); }}
+              onBlur={(e) => handleBlur('email', e.target.value)}
               placeholder="Enter your email"
               required
               disabled={isLoading}
             />
+            {fieldErrors.email && <p className="field-error">{fieldErrors.email}</p>}
           </div>
 
           <div className="form-group">
@@ -68,9 +84,10 @@ export default function Login() {
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
-                className="form-input"
+                className={`form-input${fieldErrors.password ? ' input-error' : ''}`}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: '' })); }}
+                onBlur={(e) => handleBlur('password', e.target.value)}
                 placeholder="Enter your password"
                 required
                 disabled={isLoading}
@@ -85,6 +102,7 @@ export default function Login() {
                 {showPassword ? '🙈' : '👁️'}
               </button>
             </div>
+            {fieldErrors.password && <p className="field-error">{fieldErrors.password}</p>}
           </div>
 
           <button

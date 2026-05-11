@@ -11,23 +11,36 @@ export default function Register() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { register } = useAuth();
   const navigate = useNavigate();
+
+  const validateField = (field: string, value: string, extra?: string): string => {
+    if (field === 'name') return value.trim().length < 2 ? 'Name must be at least 2 characters' : '';
+    if (field === 'email') return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? 'Enter a valid email address' : '';
+    if (field === 'password') return value.length < 6 ? 'Password must be at least 6 characters' : '';
+    if (field === 'confirmPassword') return value !== extra ? 'Passwords do not match' : '';
+    return '';
+  };
+
+  const handleBlur = (field: string, value: string, extra?: string) => {
+    const err = validateField(field, value, extra);
+    setFieldErrors((prev) => ({ ...prev, [field]: err }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
+    const errors = {
+      name: validateField('name', name),
+      email: validateField('email', email),
+      password: validateField('password', password),
+      confirmPassword: validateField('confirmPassword', confirmPassword, password),
+    };
+    setFieldErrors(errors);
+    if (Object.values(errors).some(Boolean)) return;
 
     setIsLoading(true);
 
@@ -69,13 +82,15 @@ export default function Register() {
             <input
               id="name"
               type="text"
-              className="form-input"
+              className={`form-input${fieldErrors.name ? ' input-error' : ''}`}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: '' })); }}
+              onBlur={(e) => handleBlur('name', e.target.value)}
               placeholder="Enter your full name"
               required
               disabled={isLoading}
             />
+            {fieldErrors.name && <p className="field-error">{fieldErrors.name}</p>}
           </div>
 
           <div className="form-group">
@@ -83,13 +98,15 @@ export default function Register() {
             <input
               id="email"
               type="email"
-              className="form-input"
+              className={`form-input${fieldErrors.email ? ' input-error' : ''}`}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: '' })); }}
+              onBlur={(e) => handleBlur('email', e.target.value)}
               placeholder="Enter your email"
               required
               disabled={isLoading}
             />
+            {fieldErrors.email && <p className="field-error">{fieldErrors.email}</p>}
           </div>
 
           <div className="form-group">
@@ -111,10 +128,11 @@ export default function Register() {
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
-                className="form-input"
+                className={`form-input${fieldErrors.password ? ' input-error' : ''}`}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Create a password"
+                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: '' })); }}
+                onBlur={(e) => handleBlur('password', e.target.value)}
+                placeholder="Create a password (min 6 characters)"
                 required
                 disabled={isLoading}
                 style={{ paddingRight: '2.5rem' }}
@@ -128,6 +146,7 @@ export default function Register() {
                 {showPassword ? '🙈' : '👁️'}
               </button>
             </div>
+            {fieldErrors.password && <p className="field-error">{fieldErrors.password}</p>}
           </div>
 
           <div className="form-group">
@@ -136,15 +155,17 @@ export default function Register() {
               <input
                 id="confirmPassword"
                 type={showPassword ? 'text' : 'password'}
-                className="form-input"
+                className={`form-input${fieldErrors.confirmPassword ? ' input-error' : ''}`}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => { setConfirmPassword(e.target.value); if (fieldErrors.confirmPassword) setFieldErrors((p) => ({ ...p, confirmPassword: '' })); }}
+                onBlur={(e) => handleBlur('confirmPassword', e.target.value, password)}
                 placeholder="Confirm your password"
                 required
                 disabled={isLoading}
                 style={{ paddingRight: '2.5rem' }}
               />
             </div>
+            {fieldErrors.confirmPassword && <p className="field-error">{fieldErrors.confirmPassword}</p>}
           </div>
 
           <button
