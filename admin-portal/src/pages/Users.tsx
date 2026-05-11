@@ -22,6 +22,7 @@ export default function Users() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [sort, setSort] = useState<SortConfig>({ sortBy: '', sortDir: 'asc' });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({ name: '', email: '', phone: '' });
@@ -38,6 +39,7 @@ export default function Users() {
     sortConfig = sort,
   ) => {
     setIsLoading(true);
+    setLoadError('');
     const result = await api.getUsers({
       page,
       limit: 50,
@@ -49,6 +51,8 @@ export default function Users() {
     if (result.success) {
       setUsers(result.data.users);
       setPagination(result.data.pagination);
+    } else {
+      setLoadError(result.error || 'Failed to load users');
     }
     setIsLoading(false);
   }, [debouncedSearch, status, sort]);
@@ -178,6 +182,13 @@ export default function Users() {
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadUsers(1, debouncedSearch, status, sort)} style={{ marginTop: '1rem' }}>
+              Retry
+            </button>
+          </div>
         ) : users.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">👥</div>

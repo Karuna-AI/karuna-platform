@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 export default function FeatureFlags() {
   const [flags, setFlags] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFlag, setNewFlag] = useState({ name: '', description: '', is_enabled: false });
   const [createError, setCreateError] = useState<string | null>(null);
@@ -23,9 +24,12 @@ export default function FeatureFlags() {
   }, []);
 
   const loadFlags = async () => {
+    setLoadError('');
     const result = await api.getFeatureFlags();
     if (result.success) {
       setFlags(result.data.flags);
+    } else {
+      setLoadError(result.error || 'Failed to load feature flags');
     }
     setIsLoading(false);
   };
@@ -111,6 +115,15 @@ export default function FeatureFlags() {
 
   if (isLoading) {
     return <div className="loading"><div className="spinner" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={loadFlags} style={{ marginTop: '1rem' }}>Retry</button>
+      </div>
+    );
   }
 
   return (
