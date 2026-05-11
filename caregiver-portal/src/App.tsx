@@ -49,7 +49,8 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (isAuthenticated) {
-    const redirectTo = new URLSearchParams(location.search).get('redirect') || '/';
+    const raw = new URLSearchParams(location.search).get('redirect') || '/';
+    const redirectTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
     return <Navigate to={redirectTo} replace />;
   }
 

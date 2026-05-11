@@ -68,13 +68,13 @@ CREATE TABLE invitations (
     name VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL CHECK (role IN ('caregiver', 'viewer')),
     relationship VARCHAR(100),
-    token VARCHAR(255) UNIQUE NOT NULL,
+    token_hash VARCHAR(64) UNIQUE NOT NULL, -- SHA-256 hex of the raw token; raw token only in email/URL
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired', 'revoked')),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_invitations_token ON invitations(token);
+CREATE INDEX idx_invitations_token ON invitations(token_hash);
 CREATE INDEX idx_invitations_email ON invitations(email);
 
 -- ============================================================================
@@ -296,7 +296,7 @@ CREATE INDEX idx_sync_changes_entity ON sync_changes(entity_type, entity_id);
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash VARCHAR(255) NOT NULL,
+    token_hash VARCHAR(255) NOT NULL UNIQUE,
     device_info JSONB,
     ip_address VARCHAR(45),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,

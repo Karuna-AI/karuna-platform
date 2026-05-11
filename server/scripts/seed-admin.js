@@ -50,6 +50,7 @@ function parseArgs() {
       case '--password':
       case '-p':
         options.password = args[++i];
+        console.warn('Warning: passing passwords as CLI arguments exposes them in process listings. Prefer the ADMIN_PASSWORD env var.');
         break;
       case '--name':
       case '-n':
@@ -143,7 +144,7 @@ async function seedAdmin() {
     database: process.env.DB_NAME || 'karuna',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : (process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false),
   });
 
   try {
@@ -179,17 +180,20 @@ async function seedAdmin() {
       console.log(`Role: ${existingAdmin.rows[0].role}`);
       console.log(`ID: ${existingAdmin.rows[0].id}`);
 
-      // Ask if user wants to update password
-      console.log('\nTo update the password, use the --password flag with a new password.');
-      console.log('Updating password...');
+      if (generatedPassword) {
+        console.log('\nAdmin already exists and no explicit password was provided. Skipping update.');
+        console.log('To update the password, supply one via --password flag or ADMIN_PASSWORD env var.');
+      } else {
+        console.log('\nExplicit password provided — updating admin credentials...');
 
-      const passwordHash = await bcrypt.hash(options.password, BCRYPT_ROUNDS);
-      await pool.query(
-        'UPDATE admin_users SET password_hash = $1, name = $2, role = $3, updated_at = CURRENT_TIMESTAMP WHERE email = $4',
-        [passwordHash, options.name, options.role, options.email.toLowerCase()]
-      );
+        const passwordHash = await bcrypt.hash(options.password, BCRYPT_ROUNDS);
+        await pool.query(
+          'UPDATE admin_users SET password_hash = $1, name = $2, role = $3, updated_at = CURRENT_TIMESTAMP WHERE email = $4',
+          [passwordHash, options.name, options.role, options.email.toLowerCase()]
+        );
 
-      console.log('Password updated successfully!');
+        console.log('Admin credentials updated successfully!');
+      }
     } else {
       // Create new admin user
       console.log(`\nCreating admin user...`);
@@ -218,7 +222,13 @@ async function seedAdmin() {
     console.log('\n----------------------------------------');
     console.log('Login credentials:');
     console.log(`  Email: ${options.email}`);
-    console.log(`  Password: ${options.password}`);
+    if (generatedPassword) {
+      console.log('\n*** SAVE THIS PASSWORD — it will not be shown again ***');
+      console.log(`  Generated password: ${options.password}`);
+      console.log('*******************************************************');
+    } else {
+      console.log('  Password: [supplied via --password/ADMIN_PASSWORD — not echoed]');
+    }
     console.log('----------------------------------------');
     console.log('\nYou can now login at: http://localhost:3040/login');
 

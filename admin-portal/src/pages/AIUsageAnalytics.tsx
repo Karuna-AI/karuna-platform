@@ -81,7 +81,7 @@ export default function AIUsageAnalytics() {
       setDailyUsage(summaryRes.data.dailyUsage);
       setLogs(logsRes.data.logs);
     } catch (error: any) {
-      setLoadError(error?.response?.data?.error || error?.message || 'Failed to load AI usage data');
+      setLoadError(error?.response?.data?.error || 'Failed to load AI usage data');
     } finally {
       setLoading(false);
     }

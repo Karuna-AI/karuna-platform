@@ -38,6 +38,7 @@ export default function FeatureFlags() {
   };
 
   const handleToggle = async (flag: FeatureFlag) => {
+    if (!canManageFlags) return;
     setFlags((prev) =>
       prev.map((f) => (f.id === flag.id ? { ...f, is_enabled: !f.is_enabled } : f))
     );
@@ -50,6 +51,7 @@ export default function FeatureFlags() {
   };
 
   const handleToggleForAll = async (flag: FeatureFlag) => {
+    if (!canManageFlags) return;
     setFlags((prev) =>
       prev.map((f) => (f.id === flag.id ? { ...f, enabled_for_all: !f.enabled_for_all } : f))
     );

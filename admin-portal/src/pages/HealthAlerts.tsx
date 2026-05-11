@@ -95,7 +95,7 @@ export default function HealthAlerts() {
       setRecentAlerts(res.data.recentAlerts);
       setTopCircles(res.data.topCircles);
     } catch (error: any) {
-      setLoadError(error?.response?.data?.error || error?.message || 'Failed to load health alerts');
+      setLoadError(error?.response?.data?.error || 'Failed to load health alerts');
     } finally {
       setLoading(false);
     }

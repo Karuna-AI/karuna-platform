@@ -16,12 +16,13 @@ export default function Login() {
 
   const searchParams = new URLSearchParams(window.location.search);
   const redirectParam = searchParams.get('redirect');
-  const from = redirectParam || (location.state as { from?: string })?.from || '/';
+  const rawFrom = redirectParam || (location.state as { from?: string })?.from || '/';
+  const from = rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : '/';
 
   const handleBlur = (field: string, value: string) => {
     let err = '';
     if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) err = 'Enter a valid email address';
-    if (field === 'password' && value.length < 6) err = 'Password must be at least 6 characters';
+    if (field === 'password' && value.length < 8) err = 'Password must be at least 8 characters';
     setFieldErrors((prev) => ({ ...prev, [field]: err }));
   };
 
@@ -30,7 +31,7 @@ export default function Login() {
     setError('');
     const errors = {
       email: !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'Enter a valid email address' : '',
-      password: password.length < 6 ? 'Password must be at least 6 characters' : '',
+      password: password.length < 8 ? 'Password must be at least 8 characters' : '',
     };
     setFieldErrors(errors);
     if (Object.values(errors).some(Boolean)) return;

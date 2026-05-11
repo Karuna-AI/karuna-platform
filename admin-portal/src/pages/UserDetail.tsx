@@ -63,8 +63,12 @@ export default function UserDetail() {
 
   const handleResetPassword = async () => {
     setActionError('');
-    if (newPassword.length < 6) {
-      setActionError('Password must be at least 6 characters');
+    if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setActionError('Password must be at least 12 characters with an uppercase letter and a number');
+      return;
+    }
+    if (newPassword.length > 72) {
+      setActionError('Password must be 72 characters or fewer');
       return;
     }
     setIsResetting(true);

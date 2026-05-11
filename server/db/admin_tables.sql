@@ -78,7 +78,7 @@ CREATE INDEX idx_system_metrics_type ON system_metrics(metric_type);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    admin_id UUID REFERENCES admin_users(id),
+    admin_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE RESTRICT,
     admin_email VARCHAR(255),
     action VARCHAR(100) NOT NULL,
     resource_type VARCHAR(50), -- user, circle, setting, feature_flag, etc.
@@ -123,13 +123,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_by UUID;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_by UUID REFERENCES admin_users(id) ON DELETE SET NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash VARCHAR(64); -- SHA-256 hex; raw token only in email
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP WITH TIME ZONE;
 
-CREATE INDEX IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token);
+CREATE INDEX IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token_hash);
 
 -- ============================================================================
 -- Care Circle Status Extension

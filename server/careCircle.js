@@ -518,13 +518,13 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // Create user with email_verification_token
+    // Create user with email_verification_token_hash
     const passwordHash = await hashPassword(password);
     const verificationToken = generateToken();
     const verificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     const result = await db.query(
-      `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token, email_verification_expires_at)
+      `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token_hash, email_verification_expires_at)
        VALUES ($1, $2, $3, $4, false, $5, $6)
        RETURNING id, email, name`,
       [email.toLowerCase(), passwordHash, name, phone, hashToken(verificationToken), verificationExpiresAt]
@@ -652,7 +652,7 @@ router.post('/auth/verify-email/:token', async (req, res) => {
     const result = await db.query(
       `SELECT id, email, name, is_verified
        FROM users
-       WHERE email_verification_token = $1
+       WHERE email_verification_token_hash = $1
          AND email_verification_expires_at > CURRENT_TIMESTAMP`,
       [hashToken(token)]
     );
@@ -669,7 +669,7 @@ router.post('/auth/verify-email/:token', async (req, res) => {
 
     await db.query(
       `UPDATE users
-       SET is_verified = true, email_verification_token = NULL, email_verification_expires_at = NULL
+       SET is_verified = true, email_verification_token_hash = NULL, email_verification_expires_at = NULL
        WHERE id = $1`,
       [user.id]
     );
@@ -702,7 +702,7 @@ router.post('/auth/resend-verification', authMiddleware, async (req, res) => {
     const verificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     await db.query(
-      'UPDATE users SET email_verification_token = $1, email_verification_expires_at = $2 WHERE id = $3',
+      'UPDATE users SET email_verification_token_hash = $1, email_verification_expires_at = $2 WHERE id = $3',
       [hashToken(verificationToken), verificationExpiresAt, user.id]
     );
 
@@ -1069,7 +1069,7 @@ router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canI
     const expiresAt = new Date(Date.now() + INVITATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     const result = await db.query(
-      `INSERT INTO invitations (circle_id, invited_by, email, name, role, token, expires_at)
+      `INSERT INTO invitations (circle_id, invited_by, email, name, role, token_hash, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [circleId, req.user.id, email.toLowerCase(), email.split('@')[0], role, hashToken(token), expiresAt]
@@ -1106,7 +1106,7 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
       `SELECT i.*, cc.name as circle_name
        FROM invitations i
        JOIN care_circles cc ON i.circle_id = cc.id
-       WHERE i.token = $1 AND i.status = 'pending'`,
+       WHERE i.token_hash = $1 AND i.status = 'pending'`,
       [hashToken(token)]
     );
 
@@ -1194,7 +1194,7 @@ router.get('/invitations/:token', invitationRateLimiter, async (req, res) => {
        FROM invitations i
        JOIN care_circles cc ON i.circle_id = cc.id
        JOIN users u ON i.invited_by = u.id
-       WHERE i.token = $1 AND i.status = 'pending'`,
+       WHERE i.token_hash = $1 AND i.status = 'pending'`,
       [hashToken(token)]
     );
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 
 interface DashboardMetrics {
@@ -155,10 +156,10 @@ export default function Dashboard() {
               <h3 className="card-title">Quick Actions</h3>
             </div>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <a href="/users" className="btn btn-secondary">Manage Users</a>
-              <a href="/circles" className="btn btn-secondary">View Circles</a>
-              <a href="/feature-flags" className="btn btn-secondary">Feature Flags</a>
-              <a href="/audit-logs" className="btn btn-secondary">Audit Logs</a>
+              <Link to="/users" className="btn btn-secondary">Manage Users</Link>
+              <Link to="/circles" className="btn btn-secondary">View Circles</Link>
+              <Link to="/feature-flags" className="btn btn-secondary">Feature Flags</Link>
+              <Link to="/audit-logs" className="btn btn-secondary">Audit Logs</Link>
             </div>
           </div>
 

@@ -19,7 +19,7 @@ export default function Register() {
   const validateField = (field: string, value: string, extra?: string): string => {
     if (field === 'name') return value.trim().length < 2 ? 'Name must be at least 2 characters' : '';
     if (field === 'email') return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? 'Enter a valid email address' : '';
-    if (field === 'password') return value.length < 6 ? 'Password must be at least 6 characters' : '';
+    if (field === 'password') return value.length < 8 ? 'Password must be at least 8 characters' : '';
     if (field === 'confirmPassword') return value !== extra ? 'Passwords do not match' : '';
     return '';
   };

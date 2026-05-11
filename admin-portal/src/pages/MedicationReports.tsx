@@ -84,10 +84,11 @@ export default function MedicationReports() {
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
     setLoading(true);
-    const circleParam = circleId ? `&circleId=${circleId}` : '';
+    const queryParams = new URLSearchParams({ days: String(days) });
+    if (circleId) queryParams.append('circleId', circleId);
 
     try {
-      const overviewRes = await adminAPI.get(`/medications/overview?days=${days}${circleParam}`);
+      const overviewRes = await adminAPI.get(`/medications/overview?${queryParams}`);
       if (signal.aborted) return;
       setSummary(overviewRes.data.summary);
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
@@ -99,7 +100,7 @@ export default function MedicationReports() {
     }
 
     try {
-      const trendsRes = await adminAPI.get(`/medications/trends?days=${days}${circleParam}`);
+      const trendsRes = await adminAPI.get(`/medications/trends?${queryParams}`);
       if (signal.aborted) return;
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);

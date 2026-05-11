@@ -8,7 +8,6 @@ interface ApiResponse<T> {
 
 class AdminApiService {
   private client: AxiosInstance;
-  private token: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -20,19 +19,10 @@ class AdminApiService {
       withCredentials: true,
     });
 
-    // In-memory Bearer token for API clients; cookie is the primary browser auth mechanism
-    this.client.interceptors.request.use((config) => {
-      if (this.token) {
-        config.headers.Authorization = `Bearer ${this.token}`;
-      }
-      return config;
-    });
-
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
-          this.clearToken();
           window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
         }
         return Promise.reject(error);
@@ -40,21 +30,8 @@ class AdminApiService {
     );
   }
 
-  setToken(token: string) {
-    // In-memory only — httpOnly cookie is the primary auth for browser sessions
-    this.token = token;
-  }
-
-  clearToken() {
-    this.token = null;
-  }
-
   async logout(): Promise<void> {
-    try {
-      await this.client.post('/auth/logout');
-    } finally {
-      this.clearToken();
-    }
+    await this.client.post('/auth/logout');
   }
 
   // Auth
@@ -336,21 +313,25 @@ class AdminApiService {
 export const api = new AdminApiService();
 
 // Direct axios client for dashboard pages — uses httpOnly cookie automatically
+// Shares the same 401→logout behaviour as AdminApiService
+const _adminAxios = axios.create({
+  baseURL: `${import.meta.env.VITE_API_URL || ''}/api/admin`,
+  headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  withCredentials: true,
+});
+_adminAxios.interceptors.response.use(
+  (r) => r,
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const adminAPI = {
-  get: async (url: string) => {
-    const response = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      withCredentials: true,
-    });
-    return response;
-  },
-  post: async (url: string, data?: any) => {
-    const response = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, data, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      withCredentials: true,
-    });
-    return response;
-  },
+  get: (url: string) => _adminAxios.get(url),
+  post: (url: string, data?: any) => _adminAxios.post(url, data),
 };
 
 export default api;

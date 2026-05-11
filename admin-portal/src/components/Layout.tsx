@@ -14,14 +14,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { path: '/', icon: '📊', label: 'Dashboard', visible: true },
-    { path: '/users', icon: '👥', label: 'Users', visible: perms.canViewUsers !== false },
-    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canViewCircles !== false },
-    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewAnalytics !== false },
-    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewAlerts !== false },
-    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMedications !== false },
-    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canViewFeatureFlags !== false },
-    { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs !== false },
-    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canViewSettings !== false },
+    { path: '/users', icon: '👥', label: 'Users', visible: perms.canViewUsers === true },
+    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canViewCircles === true },
+    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewAnalytics === true },
+    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewAlerts === true },
+    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMedications === true },
+    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canViewFeatureFlags === true },
+    { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs === true },
+    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canViewSettings === true },
   ].filter((item) => item.visible);
 
   return (
