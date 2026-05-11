@@ -48,6 +48,15 @@ export default function CareCircleDetail() {
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [noteError, setNoteError] = useState('');
 
+  // Note edit state
+  const [editingNote, setEditingNote] = useState<VaultNote | null>(null);
+  const [editNoteTitle, setEditNoteTitle] = useState('');
+  const [editNoteContent, setEditNoteContent] = useState('');
+  const [editNoteCategory, setEditNoteCategory] = useState<VaultNote['category']>('general');
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [editNoteError, setEditNoteError] = useState('');
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+
   // Member action state
   const [removeError, setRemoveError] = useState('');
   const [isRemovingId, setIsRemovingId] = useState<string | null>(null);
@@ -234,6 +243,43 @@ export default function CareCircleDetail() {
       setNoteError('');
     } else {
       setNoteError(result.error || 'Failed to add note');
+    }
+  };
+
+  const handleEditNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNote) return;
+    setEditNoteError('');
+    setIsEditingNote(true);
+    const result = await api.updateNote(id!, editingNote.id, {
+      title: editNoteTitle,
+      content: editNoteContent,
+      category: editNoteCategory,
+    });
+    setIsEditingNote(false);
+    if (result.success && result.data) {
+      if (vaultData) {
+        setVaultData({
+          ...vaultData,
+          notes: vaultData.notes.map((n) => n.id === editingNote.id ? result.data! : n),
+        });
+      }
+      setEditingNote(null);
+    } else {
+      setEditNoteError(result.error || 'Failed to update note');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    setDeletingNoteId(noteId);
+    const result = await api.deleteNote(id!, noteId);
+    setDeletingNoteId(null);
+    if (result.success && vaultData) {
+      setVaultData({
+        ...vaultData,
+        notes: vaultData.notes.filter((n) => n.id !== noteId),
+      });
     }
   };
 
@@ -786,9 +832,34 @@ export default function CareCircleDetail() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <h4>{note.title}</h4>
-                      <span className="badge" style={{ background: 'var(--bg-tertiary)' }}>
-                        {note.category}
-                      </span>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <span className="badge" style={{ background: 'var(--bg-tertiary)' }}>
+                          {note.category}
+                        </span>
+                        {(canAddNotes && note.authorId === user?.id) && (
+                          <>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => {
+                                setEditingNote(note);
+                                setEditNoteTitle(note.title);
+                                setEditNoteContent(note.content);
+                                setEditNoteCategory(note.category);
+                                setEditNoteError('');
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleDeleteNote(note.id)}
+                              disabled={deletingNoteId === note.id}
+                            >
+                              {deletingNoteId === note.id ? '...' : 'Delete'}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                     <p style={{ marginBottom: '0.5rem' }}>{note.content}</p>
                     <p className="text-muted" style={{ fontSize: '0.875rem' }}>
@@ -929,6 +1000,69 @@ export default function CareCircleDetail() {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isAddingNote}>
                   {isAddingNote ? 'Adding...' : 'Add Note'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Note Modal */}
+      {editingNote && (
+        <div className="modal-overlay" onClick={() => setEditingNote(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Edit Note</h2>
+              <button className="modal-close" onClick={() => setEditingNote(null)}>×</button>
+            </div>
+            <form onSubmit={handleEditNote}>
+              <div className="form-group">
+                <label className="form-label">Title</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editNoteTitle}
+                  onChange={(e) => setEditNoteTitle(e.target.value)}
+                  required
+                  disabled={isEditingNote}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select
+                  className="form-select"
+                  value={editNoteCategory}
+                  onChange={(e) => setEditNoteCategory(e.target.value as VaultNote['category'])}
+                  disabled={isEditingNote}
+                >
+                  <option value="general">General</option>
+                  <option value="medical">Medical</option>
+                  <option value="financial">Financial</option>
+                  <option value="personal">Personal</option>
+                  <option value="reminder">Reminder</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Content</label>
+                <textarea
+                  className="form-input"
+                  value={editNoteContent}
+                  onChange={(e) => setEditNoteContent(e.target.value)}
+                  rows={4}
+                  required
+                  disabled={isEditingNote}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+              {editNoteError && (
+                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{editNoteError}</div>
+              )}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingNote(null)} disabled={isEditingNote}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isEditingNote}>
+                  {isEditingNote ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
