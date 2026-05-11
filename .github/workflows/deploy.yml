@@ -90,6 +90,8 @@ jobs:
         working-directory: ./caregiver-portal
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_7ULiUfLFChnUIoAD6zBQLjfk
+          VERCEL_PROJECT_ID: prj_CfLolYJOf5rSqgK6L9sOBeyKtxnl
         run: npx vercel --prod --token $VERCEL_TOKEN --yes
 
   deploy-admin-portal:
@@ -121,4 +123,6 @@ jobs:
         working-directory: ./admin-portal
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_7ULiUfLFChnUIoAD6zBQLjfk
+          VERCEL_PROJECT_ID: prj_l2qoZ8Fpd6CNXclq4JNlPFszUKJX
         run: npx vercel --prod --token $VERCEL_TOKEN --yes
