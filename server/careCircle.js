@@ -26,6 +26,9 @@ const VAULT_KEY = process.env.VAULT_ENCRYPTION_KEY
   : null;
 
 if (!VAULT_KEY || VAULT_KEY.length !== 32) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[Vault] VAULT_ENCRYPTION_KEY must be set to a 32-byte hex string in production');
+  }
   console.warn('[Vault] VAULT_ENCRYPTION_KEY not set or invalid — account numbers stored unencrypted');
 }
 
@@ -279,6 +282,10 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 // Placeholder — replace with real transactional email (Resend, Postmark, SES, etc.)
 async function sendVerificationEmail(email, name, verificationUrl) {
   console.log(`[EmailVerification] To: ${email} | Name: ${name} | URL: ${verificationUrl}`);
@@ -520,7 +527,7 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
       `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token, email_verification_expires_at)
        VALUES ($1, $2, $3, $4, false, $5, $6)
        RETURNING id, email, name`,
-      [email.toLowerCase(), passwordHash, name, phone, verificationToken, verificationExpiresAt]
+      [email.toLowerCase(), passwordHash, name, phone, hashToken(verificationToken), verificationExpiresAt]
     );
 
     const user = result.rows[0];
@@ -647,7 +654,7 @@ router.post('/auth/verify-email/:token', async (req, res) => {
        FROM users
        WHERE email_verification_token = $1
          AND email_verification_expires_at > CURRENT_TIMESTAMP`,
-      [token]
+      [hashToken(token)]
     );
 
     if (result.rows.length === 0) {
@@ -696,7 +703,7 @@ router.post('/auth/resend-verification', authMiddleware, async (req, res) => {
 
     await db.query(
       'UPDATE users SET email_verification_token = $1, email_verification_expires_at = $2 WHERE id = $3',
-      [verificationToken, verificationExpiresAt, user.id]
+      [hashToken(verificationToken), verificationExpiresAt, user.id]
     );
 
     const verificationUrl = `${APP_BASE_URL}/verify-email/${verificationToken}`;
@@ -729,7 +736,7 @@ router.post('/auth/forgot-password', passwordResetRateLimiter, async (req, res) 
     await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
     await db.query(
       'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, resetToken, expiresAt]
+      [user.id, hashToken(resetToken), expiresAt]
     );
 
     const resetUrl = `${APP_BASE_URL}/reset-password?token=${resetToken}`;
@@ -760,7 +767,7 @@ router.post('/auth/reset-password', passwordResetRateLimiter, async (req, res) =
        FROM password_reset_tokens prt
        JOIN users u ON u.id = prt.user_id
        WHERE prt.token = $1 AND prt.expires_at > CURRENT_TIMESTAMP`,
-      [token]
+      [hashToken(token)]
     );
 
     if (result.rows.length === 0) {
@@ -1065,7 +1072,7 @@ router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canI
       `INSERT INTO invitations (circle_id, invited_by, email, name, role, token, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [circleId, req.user.id, email.toLowerCase(), email.split('@')[0], role, token, expiresAt]
+      [circleId, req.user.id, email.toLowerCase(), email.split('@')[0], role, hashToken(token), expiresAt]
     );
 
     const invitation = result.rows[0];
@@ -1100,7 +1107,7 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
        FROM invitations i
        JOIN care_circles cc ON i.circle_id = cc.id
        WHERE i.token = $1 AND i.status = 'pending'`,
-      [token]
+      [hashToken(token)]
     );
 
     if (inviteResult.rows.length === 0) {
@@ -1177,7 +1184,7 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
 });
 
 // Get invitation info (for accept page)
-router.get('/invitations/:token', async (req, res) => {
+router.get('/invitations/:token', invitationRateLimiter, async (req, res) => {
   try {
     const { token } = req.params;
 
@@ -1188,7 +1195,7 @@ router.get('/invitations/:token', async (req, res) => {
        JOIN care_circles cc ON i.circle_id = cc.id
        JOIN users u ON i.invited_by = u.id
        WHERE i.token = $1 AND i.status = 'pending'`,
-      [token]
+      [hashToken(token)]
     );
 
     if (result.rows.length === 0) {

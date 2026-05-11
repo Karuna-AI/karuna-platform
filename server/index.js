@@ -313,7 +313,7 @@ app.get('/metrics', (req, res) => {
 });
 
 // Public feature flags endpoint (for mobile app) — only expose name and enabled status
-app.get('/api/feature-flags', async (req, res) => {
+app.get('/api/feature-flags', generalLimiter, async (req, res) => {
   try {
     const db = require('./db');
     const result = await db.query('SELECT name, is_enabled, enabled_for_all FROM feature_flags WHERE is_enabled = true');
@@ -638,5 +638,34 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Allowed origins: ${process.env.ALLOWED_ORIGINS || 'http://localhost:3020, http://localhost:3000'}`);
 });
+
+// Periodic session cleanup — removes expired sessions every hour
+setInterval(async () => {
+  try {
+    const db = require('./db');
+    await db.query("DELETE FROM sessions WHERE expires_at < NOW()");
+  } catch (err) {
+    console.error('[Session] Cleanup error:', err.message);
+  }
+}, 60 * 60 * 1000);
+
+// Graceful shutdown
+const shutdown = async (signal) => {
+  console.log(`[Server] ${signal} received — shutting down gracefully`);
+  server.close(async () => {
+    try {
+      const db = require('./db');
+      await db.close();
+      console.log('[Server] Database connections closed');
+    } catch (err) {
+      console.error('[Server] Error closing DB:', err.message);
+    }
+    process.exit(0);
+  });
+  setTimeout(() => { console.error('[Server] Forced shutdown after timeout'); process.exit(1); }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = { app, server, wss };

@@ -43,6 +43,16 @@ const adminLoginRateLimiter = rateLimit({
   },
 });
 
+// Destructive admin actions: 10 per minute per admin ID
+const adminActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.admin?.id || req.ip,
+  message: { error: 'Too many admin actions. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -398,7 +408,8 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
 router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search, status } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT u.id, u.email, u.name, u.phone, u.is_active, u.is_verified,
@@ -429,7 +440,7 @@ router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), a
 
     query += ' GROUP BY u.id ORDER BY u.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -445,9 +456,9 @@ router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), a
       users: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -502,7 +513,7 @@ router.get('/users/:userId', adminAuthMiddleware, requirePermission('canManageUs
 });
 
 // Suspend user
-router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
     const { reason } = req.body;
@@ -532,7 +543,7 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
 });
 
 // Unsuspend user
-router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -556,7 +567,7 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
 });
 
 // Reset user password
-router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
     const { newPassword } = req.body;
@@ -590,7 +601,8 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
 router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT cc.*,
@@ -608,7 +620,7 @@ router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'
 
     query += ' ORDER BY cc.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -624,9 +636,9 @@ router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'
       circles: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -703,7 +715,7 @@ router.put('/circles/:circleId', adminAuthMiddleware, requirePermission('canMana
 });
 
 // Deactivate circle
-router.post('/circles/:circleId/deactivate', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+router.post('/circles/:circleId/deactivate', adminAuthMiddleware, requirePermission('canManageCircles'), adminActionLimiter, async (req, res) => {
   try {
     const { circleId } = req.params;
     const result = await db.query(
@@ -735,7 +747,7 @@ router.post('/circles/:circleId/activate', adminAuthMiddleware, requirePermissio
 });
 
 // Remove circle member (admin)
-router.delete('/circles/:circleId/members/:memberId', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+router.delete('/circles/:circleId/members/:memberId', adminAuthMiddleware, requirePermission('canManageCircles'), adminActionLimiter, async (req, res) => {
   try {
     const { circleId, memberId } = req.params;
     const existing = await db.query(
@@ -901,7 +913,8 @@ setInterval(cleanupOldAuditLogs, 24 * 60 * 60 * 1000);
 router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
     const { page = 1, limit = 100, action, userId, circleId } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = 'SELECT * FROM audit_logs WHERE 1=1';
     const params = [];
@@ -923,7 +936,7 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
 
     query += ' ORDER BY created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -931,7 +944,7 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -944,7 +957,8 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
 router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
     const { page = 1, limit = 100, action, adminId } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = 'SELECT * FROM admin_audit_logs WHERE 1=1';
     const params = [];
@@ -961,7 +975,7 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
 
     query += ' ORDER BY created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -969,7 +983,7 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -1171,7 +1185,7 @@ router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSe
 // ============================================================================
 
 // Send notification to users
-router.post('/notifications/send', adminAuthMiddleware, requirePermission('canSendNotifications'), async (req, res) => {
+router.post('/notifications/send', adminAuthMiddleware, requirePermission('canSendNotifications'), adminActionLimiter, async (req, res) => {
   try {
     const { recipient_type, recipient_id, notification_type, title, message, priority, scheduled_at } = req.body;
 
@@ -1288,7 +1302,8 @@ router.get('/ai-usage/summary', adminAuthMiddleware, requirePermission('canViewM
 router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 100, request_type, model, success } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT aul.*, u.name as user_name, cc.name as circle_name
@@ -1316,7 +1331,7 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
 
     query += ' ORDER BY aul.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1324,7 +1339,7 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -1426,7 +1441,8 @@ router.get('/health-alerts/overview', adminAuthMiddleware, requirePermission('ca
 router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 50, status, severity, alert_type, circle_id } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT ca.*, cc.name as circle_name, cc.care_recipient_name,
@@ -1460,7 +1476,7 @@ router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetr
 
     query += ' ORDER BY ca.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1490,9 +1506,9 @@ router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetr
       alerts: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -1715,7 +1731,8 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
 router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 50, circle_id, search } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT
@@ -1742,7 +1759,7 @@ router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetric
 
     query += ' ORDER BY vm.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1750,7 +1767,7 @@ router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetric
       medications: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
