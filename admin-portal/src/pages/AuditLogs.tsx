@@ -13,9 +13,11 @@ export default function AuditLogs() {
   const [total, setTotal] = useState(0);
   const [actionFilter, setActionFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const loadLogs = useCallback(async (currentPage: number, tab: TabType, action: string) => {
     setIsLoading(true);
+    setLoadError('');
     const params = { page: currentPage, limit: PAGE_LIMIT, action: action || undefined };
     const result = tab === 'user'
       ? await api.getAuditLogs(params)
@@ -28,10 +30,11 @@ export default function AuditLogs() {
         setTotalPages(p.pages ?? Math.ceil(p.total / PAGE_LIMIT));
         setTotal(p.total ?? 0);
       } else {
-        // Fallback: use page-size heuristic when API doesn't return pagination meta
         setTotalPages(result.data.logs.length < PAGE_LIMIT ? currentPage : currentPage + 1);
         setTotal(0);
       }
+    } else {
+      setLoadError(result.error || 'Failed to load audit logs');
     }
     setIsLoading(false);
   }, []);
@@ -131,6 +134,11 @@ export default function AuditLogs() {
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadLogs(page, activeTab, actionFilter)} style={{ marginTop: '1rem' }}>Retry</button>
+          </div>
         ) : logs.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📜</div>

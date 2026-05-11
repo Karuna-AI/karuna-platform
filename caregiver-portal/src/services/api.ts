@@ -65,7 +65,7 @@ class ApiService {
         }
         if (error.response?.status === 401) {
           this.clearToken();
-          window.location.href = '/login';
+          window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
         }
         return Promise.reject(error);
       }

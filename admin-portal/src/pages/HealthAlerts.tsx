@@ -67,6 +67,7 @@ export default function HealthAlerts() {
   const [topCircles, setTopCircles] = useState<TopCircle[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'alerts'>('overview');
   const [filters, setFilters] = useState({
     status: '',
@@ -85,6 +86,7 @@ export default function HealthAlerts() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await adminAPI.get('/health-alerts/overview');
       setSummary(res.data.summary);
@@ -92,8 +94,8 @@ export default function HealthAlerts() {
       setByType(res.data.byType);
       setRecentAlerts(res.data.recentAlerts);
       setTopCircles(res.data.topCircles);
-    } catch (error) {
-      console.error('Failed to load health alerts:', error);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.error || error?.message || 'Failed to load health alerts');
     } finally {
       setLoading(false);
     }
@@ -156,7 +158,16 @@ export default function HealthAlerts() {
   };
 
   if (loading) {
-    return <div className="loading">Loading health alerts...</div>;
+    return <div className="loading"><div className="spinner" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={loadData} style={{ marginTop: '1rem' }}>Retry</button>
+      </div>
+    );
   }
 
   return (

@@ -19,8 +19,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    // Validate session via cookie (no localStorage token needed)
     validateToken();
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+    };
+    window.addEventListener('karuna:auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('karuna:auth:unauthorized', handleUnauthorized);
   }, []);
 
   const validateToken = async () => {

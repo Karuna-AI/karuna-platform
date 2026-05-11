@@ -60,6 +60,7 @@ export default function AIUsageAnalytics() {
   const [logs, setLogs] = useState<UsageLog[]>([]);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'logs'>('overview');
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export default function AIUsageAnalytics() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [summaryRes, logsRes] = await Promise.all([
         adminAPI.get(`/ai-usage/summary?days=${days}`),
@@ -78,8 +80,8 @@ export default function AIUsageAnalytics() {
       setByType(summaryRes.data.byType);
       setDailyUsage(summaryRes.data.dailyUsage);
       setLogs(logsRes.data.logs);
-    } catch (error) {
-      console.error('Failed to load AI usage data:', error);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.error || error?.message || 'Failed to load AI usage data');
     } finally {
       setLoading(false);
     }
@@ -101,7 +103,16 @@ export default function AIUsageAnalytics() {
   };
 
   if (loading) {
-    return <div className="loading">Loading AI usage analytics...</div>;
+    return <div className="loading"><div className="spinner" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={loadData} style={{ marginTop: '1rem' }}>Retry</button>
+      </div>
+    );
   }
 
   return (

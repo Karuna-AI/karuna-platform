@@ -10,6 +10,7 @@ export default function Circles() {
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 1 });
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const navigate = useNavigate();
 
   const debouncedSearch = useDebounce(search, 300);
@@ -22,6 +23,7 @@ export default function Circles() {
 
   const loadCircles = useCallback(async (page = 1, searchTerm = debouncedSearch) => {
     setIsLoading(true);
+    setLoadError('');
     const result = await api.getCircles({
       page,
       limit: 50,
@@ -30,6 +32,8 @@ export default function Circles() {
     if (result.success) {
       setCircles(result.data.circles);
       setPagination(result.data.pagination);
+    } else {
+      setLoadError(result.error || 'Failed to load circles');
     }
     setIsLoading(false);
   }, [debouncedSearch]);
@@ -74,6 +78,11 @@ export default function Circles() {
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadCircles(1)} style={{ marginTop: '1rem' }}>Retry</button>
+          </div>
         ) : circles.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🔵</div>

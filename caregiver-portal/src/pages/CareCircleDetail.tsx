@@ -221,6 +221,8 @@ export default function CareCircleDetail() {
     setChangingRoleId(null);
     if (result.success) {
       setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role: newRole } : m));
+    } else {
+      showToast(result.error || 'Failed to update member role', 'error');
     }
   };
 
@@ -303,6 +305,8 @@ export default function CareCircleDetail() {
         ...vaultData,
         notes: vaultData.notes.filter((n) => n.id !== noteId),
       });
+    } else if (!result.success) {
+      showToast(result.error || 'Failed to delete note', 'error');
     }
   };
 

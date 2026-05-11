@@ -15,6 +15,9 @@ export default function UserDetail() {
   const [newPassword, setNewPassword] = useState('');
   const [actionError, setActionError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isSuspending, setIsSuspending] = useState(false);
+  const [isUnsuspending, setIsUnsuspending] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
     if (id) loadUser();
@@ -35,7 +38,9 @@ export default function UserDetail() {
       setActionError('Suspension reason is required');
       return;
     }
+    setIsSuspending(true);
     const result = await api.suspendUser(id!, suspendReason);
+    setIsSuspending(false);
     if (result.success) {
       setShowSuspendModal(false);
       setSuspendReason('');
@@ -46,7 +51,10 @@ export default function UserDetail() {
   };
 
   const handleUnsuspend = async () => {
+    if (!window.confirm(`Unsuspend ${user?.name}? They will regain full access to the platform.`)) return;
+    setIsUnsuspending(true);
     const result = await api.unsuspendUser(id!);
+    setIsUnsuspending(false);
     if (result.success) {
       loadUser();
     }
@@ -58,12 +66,14 @@ export default function UserDetail() {
       setActionError('Password must be at least 6 characters');
       return;
     }
+    setIsResetting(true);
     const result = await api.resetUserPassword(id!, newPassword);
+    setIsResetting(false);
     if (result.success) {
       setShowResetModal(false);
       setNewPassword('');
       setSuccessMessage('Password reset successfully');
-      setTimeout(() => setSuccessMessage(''), 5000); // Auto-dismiss after 5 seconds
+      setTimeout(() => setSuccessMessage(''), 5000);
     } else {
       setActionError(result.error || 'Failed to reset password');
     }
@@ -123,7 +133,9 @@ export default function UserDetail() {
 
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
           {user.suspended_at ? (
-            <button onClick={handleUnsuspend} className="btn btn-success">Unsuspend</button>
+            <button onClick={handleUnsuspend} className="btn btn-success" disabled={isUnsuspending}>
+              {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+            </button>
           ) : (
             <button onClick={() => setShowSuspendModal(true)} className="btn btn-danger">Suspend User</button>
           )}
@@ -227,8 +239,10 @@ export default function UserDetail() {
               </div>
             </div>
             <div className="modal-footer">
-              <button onClick={() => setShowSuspendModal(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleSuspend} className="btn btn-danger">Suspend</button>
+              <button onClick={() => setShowSuspendModal(false)} className="btn btn-secondary" disabled={isSuspending}>Cancel</button>
+              <button onClick={handleSuspend} className="btn btn-danger" disabled={isSuspending}>
+                {isSuspending ? 'Suspending...' : 'Suspend'}
+              </button>
             </div>
           </div>
         </div>
@@ -256,8 +270,10 @@ export default function UserDetail() {
               </div>
             </div>
             <div className="modal-footer">
-              <button onClick={() => setShowResetModal(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleResetPassword} className="btn btn-primary">Reset Password</button>
+              <button onClick={() => setShowResetModal(false)} className="btn btn-secondary" disabled={isResetting}>Cancel</button>
+              <button onClick={handleResetPassword} className="btn btn-primary" disabled={isResetting}>
+                {isResetting ? 'Resetting...' : 'Reset Password'}
+              </button>
             </div>
           </div>
         </div>
