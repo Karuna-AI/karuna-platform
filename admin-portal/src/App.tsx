@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { useIdleTimeout } from './hooks/useIdleTimeout';
 import { useEffect } from 'react';
 import api from './services/api';
@@ -57,6 +58,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <ToastProvider>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
@@ -92,5 +94,6 @@ export default function App() {
         }
       />
     </Routes>
+    </ToastProvider>
   );
 }

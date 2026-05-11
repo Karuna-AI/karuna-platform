@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
+import { useToast } from '../context/ToastContext';
 
 type SortDir = 'asc' | 'desc';
 
@@ -29,6 +30,7 @@ export default function Users() {
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -116,6 +118,7 @@ export default function Users() {
       setShowCreateModal(false);
       setCreateForm({ name: '', email: '', phone: '' });
       loadUsers(1);
+      showToast('User created successfully', 'success');
     } else {
       setCreateError(result.error || 'Failed to create user.');
     }

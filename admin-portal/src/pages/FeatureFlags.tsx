@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 export default function FeatureFlags() {
   const [flags, setFlags] = useState<any[]>([]);
@@ -16,6 +17,7 @@ export default function FeatureFlags() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingRollout, setPendingRollout] = useState<Record<string, number>>({});
   const { admin } = useAuth();
+  const { showToast } = useToast();
 
   const canManageFlags = admin?.permissions?.canManageFeatureFlags;
 
@@ -85,6 +87,7 @@ export default function FeatureFlags() {
     if (result.success) {
       setFlags((prev) => prev.map((f) => f.id === editingFlag.id ? { ...f, description: editForm.description } : f));
       setEditingFlag(null);
+      showToast('Flag updated', 'success');
     } else {
       setEditError(result.error || 'Failed to update flag');
     }
@@ -97,6 +100,7 @@ export default function FeatureFlags() {
     setDeletingId(null);
     if (result.success) {
       setFlags((prev) => prev.filter((f) => f.id !== flag.id));
+      showToast('Flag deleted', 'success');
     }
   };
 
@@ -108,6 +112,7 @@ export default function FeatureFlags() {
       setFlags([...flags, result.data.flag]);
       setShowCreateModal(false);
       setNewFlag({ name: '', description: '', is_enabled: false });
+      showToast('Feature flag created', 'success');
     } else {
       setCreateError(result.error || 'Failed to create feature flag');
     }

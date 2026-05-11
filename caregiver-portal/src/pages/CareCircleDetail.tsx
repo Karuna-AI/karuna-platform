@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import type { CareCircle, CareCircleMember, SyncData, CareCircleRole, VaultNote, DashboardData } from '../types';
 import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor } from '../components/dashboard';
@@ -74,6 +75,7 @@ export default function CareCircleDetail() {
   const [isDeletingCircle, setIsDeletingCircle] = useState(false);
   const [deleteCircleError, setDeleteCircleError] = useState('');
 
+  const { showToast } = useToast();
   const currentMember = members.find((m) => m.userId === user?.id);
   const canInvite = currentMember?.permissions.canInviteMembers;
   const canAddNotes = currentMember?.permissions.canAddNotes;
@@ -203,6 +205,7 @@ export default function CareCircleDetail() {
 
     if (result.success) {
       setInviteSuccess(`Invitation sent to ${inviteEmail}`);
+      showToast(`Invitation sent to ${inviteEmail}`, 'success');
       setInviteEmail('');
       setInviteRole('viewer');
     } else {
@@ -260,6 +263,7 @@ export default function CareCircleDetail() {
       setNoteContent('');
       setNoteCategory('general');
       setNoteError('');
+      showToast('Note added', 'success');
     } else {
       setNoteError(result.error || 'Failed to add note');
     }
@@ -311,6 +315,7 @@ export default function CareCircleDetail() {
     if (result.success && result.data) {
       setCircle(result.data);
       setShowSettingsModal(false);
+      showToast('Circle settings saved', 'success');
     } else {
       setRenameError(result.error || 'Failed to update circle');
     }
