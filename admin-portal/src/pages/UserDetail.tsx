@@ -18,6 +18,7 @@ export default function UserDetail() {
   const [isSuspending, setIsSuspending] = useState(false);
   const [isUnsuspending, setIsUnsuspending] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   useEffect(() => {
     if (id) loadUser();
@@ -250,23 +251,34 @@ export default function UserDetail() {
 
       {/* Reset Password Modal */}
       {showResetModal && (
-        <div className="modal-overlay" onClick={() => setShowResetModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">Reset Password</h3>
-              <button className="modal-close" onClick={() => setShowResetModal(false)}>×</button>
+              <button className="modal-close" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>×</button>
             </div>
             <div className="modal-body">
               {actionError && <div className="alert alert-error">{actionError}</div>}
               <div className="form-group">
                 <label className="form-label">New Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password..."
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    className="form-input"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password..."
+                    style={{ paddingRight: '2.5rem' }}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
+                  >
+                    {showNewPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="modal-footer">

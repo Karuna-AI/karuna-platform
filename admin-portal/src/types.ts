@@ -5,9 +5,11 @@ export interface AdminUser {
   phone?: string;
   is_active: boolean;
   suspended_at?: string;
+  suspended_reason?: string;
   last_login_at?: string;
   created_at: string;
   circle_count?: number;
+  login_count?: number;
 }
 
 export interface AdminCircle {
@@ -19,6 +21,8 @@ export interface AdminCircle {
   created_at: string;
   member_count?: number;
   owner_name?: string;
+  role?: string;
+  joined_at?: string;
 }
 
 export interface CircleMember {

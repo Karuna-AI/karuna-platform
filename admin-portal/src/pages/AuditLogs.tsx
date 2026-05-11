@@ -3,11 +3,30 @@ import api from '../services/api';
 
 type TabType = 'user' | 'admin';
 
+interface UserLog {
+  id: string;
+  action: string;
+  category?: string;
+  description?: string;
+  created_at: string;
+}
+
+interface AdminLog {
+  id: string;
+  action: string;
+  admin_email?: string;
+  resource_type?: string;
+  ip_address?: string;
+  created_at: string;
+}
+
+type AuditLog = UserLog | AdminLog;
+
 const PAGE_LIMIT = 50;
 
 export default function AuditLogs() {
   const [activeTab, setActiveTab] = useState<TabType>('user');
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -60,9 +79,14 @@ export default function AuditLogs() {
     const headers = activeTab === 'admin'
       ? ['Timestamp', 'Admin', 'Action', 'Resource Type', 'IP Address']
       : ['Timestamp', 'Action', 'Category', 'Description'];
-    const rows = logs.map((log) => activeTab === 'admin'
-      ? [formatDate(log.created_at), log.admin_email, log.action, log.resource_type || '', log.ip_address || '']
-      : [formatDate(log.created_at), log.action, log.category || '', log.description || '']);
+    const rows = logs.map((log) => {
+      if (activeTab === 'admin') {
+        const al = log as AdminLog;
+        return [formatDate(al.created_at), al.admin_email || '', al.action, al.resource_type || '', al.ip_address || ''];
+      }
+      const ul = log as UserLog;
+      return [formatDate(ul.created_at), ul.action, ul.category || '', ul.description || ''];
+    });
     const csv = [headers, ...rows]
       .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
       .join('\n');
@@ -168,31 +192,35 @@ export default function AuditLogs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log) => (
+                  {logs.map((log) => {
+                    const al = log as AdminLog;
+                    const ul = log as UserLog;
+                    return (
                     <tr key={log.id}>
                       <td style={{ whiteSpace: 'nowrap' }}>{formatDate(log.created_at)}</td>
                       {activeTab === 'admin' ? (
                         <>
-                          <td>{log.admin_email}</td>
-                          <td><span className="badge">{log.action}</span></td>
+                          <td>{al.admin_email}</td>
+                          <td><span className="badge">{al.action}</span></td>
                           <td>
-                            {log.resource_type && (
-                              <span style={{ color: 'var(--text-muted)' }}>{log.resource_type}</span>
+                            {al.resource_type && (
+                              <span style={{ color: 'var(--text-muted)' }}>{al.resource_type}</span>
                             )}
                           </td>
-                          <td style={{ color: 'var(--text-muted)' }}>{log.ip_address || '-'}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{al.ip_address || '-'}</td>
                         </>
                       ) : (
                         <>
-                          <td><span className="badge">{log.action}</span></td>
-                          <td>{log.category}</td>
+                          <td><span className="badge">{ul.action}</span></td>
+                          <td>{ul.category}</td>
                           <td style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {log.description || '-'}
+                            {ul.description || '-'}
                           </td>
                         </>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

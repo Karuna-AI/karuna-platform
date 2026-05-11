@@ -78,7 +78,7 @@ export default function CircleDetail() {
     }
   };
 
-  const handleRemoveMember = async (member: any) => {
+  const handleRemoveMember = async (member: CircleMember) => {
     if (member.role === 'owner') return;
     if (!confirm(`Remove ${member.name} from this circle?`)) return;
     setRemoveMemberError('');

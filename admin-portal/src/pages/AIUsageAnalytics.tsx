@@ -102,6 +102,41 @@ export default function AIUsageAnalytics() {
     return `${Math.round(n)}ms`;
   };
 
+  const exportCsv = () => {
+    let headers: string[];
+    let rows: string[][];
+    if (activeTab === 'logs') {
+      headers = ['Time', 'Type', 'Model', 'Tokens', 'Cost', 'Latency', 'Status'];
+      rows = logs.map((l) => [
+        new Date(l.created_at).toLocaleString(),
+        l.request_type,
+        l.model,
+        String(l.total_tokens),
+        formatCost(l.estimated_cost_usd),
+        formatLatency(l.latency_ms),
+        l.success ? 'Success' : 'Failed',
+      ]);
+    } else {
+      headers = ['Date', 'Requests', 'Tokens', 'Cost'];
+      rows = dailyUsage.map((d) => [
+        new Date(d.date).toLocaleDateString(),
+        d.requests,
+        d.tokens || '0',
+        formatCost(d.cost || 0),
+      ]);
+    }
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-usage-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return <div className="loading"><div className="spinner" /></div>;
   }
@@ -119,12 +154,19 @@ export default function AIUsageAnalytics() {
     <>
       <div className="page-header">
         <h1>AI Usage Analytics</h1>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
           </select>
+          <button
+            className="btn btn-secondary"
+            onClick={exportCsv}
+            disabled={activeTab === 'overview' ? dailyUsage.length === 0 : logs.length === 0}
+          >
+            Export CSV
+          </button>
         </div>
       </div>
 
