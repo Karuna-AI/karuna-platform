@@ -1,16 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 
 export default function Circles() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [circles, setCircles] = useState<any[]>([]);
   const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
   const debouncedSearch = useDebounce(search, 300);
+
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (debouncedSearch) params.search = debouncedSearch;
+    setSearchParams(params, { replace: true });
+  }, [debouncedSearch]);
 
   const loadCircles = useCallback(async (page = 1, searchTerm = debouncedSearch) => {
     setIsLoading(true);
@@ -30,13 +37,6 @@ export default function Circles() {
   useEffect(() => {
     loadCircles(1, debouncedSearch);
   }, [debouncedSearch]);
-
-  // Reload when page changes
-  useEffect(() => {
-    if (pagination.page > 1) {
-      loadCircles(pagination.page, debouncedSearch);
-    }
-  }, [pagination.page, debouncedSearch]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

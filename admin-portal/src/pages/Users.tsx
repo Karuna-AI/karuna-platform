@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../context/ToastContext';
@@ -18,13 +18,17 @@ interface SortConfig {
 }
 
 export default function Users() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [users, setUsers] = useState<any[]>([]);
   const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [status, setStatus] = useState(searchParams.get('status') || '');
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [sort, setSort] = useState<SortConfig>({ sortBy: '', sortDir: 'asc' });
+  const [sort, setSort] = useState<SortConfig>({
+    sortBy: searchParams.get('sortBy') || '',
+    sortDir: (searchParams.get('sortDir') as SortDir) || 'asc',
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({ name: '', email: '', phone: '' });
   const [createError, setCreateError] = useState('');
@@ -33,6 +37,15 @@ export default function Users() {
   const { showToast } = useToast();
 
   const debouncedSearch = useDebounce(search, 300);
+
+  // Sync filter state to URL whenever it changes
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (status) params.status = status;
+    if (sort.sortBy) { params.sortBy = sort.sortBy; params.sortDir = sort.sortDir; }
+    setSearchParams(params, { replace: true });
+  }, [debouncedSearch, status, sort]);
 
   const loadUsers = useCallback(async (
     page = 1,
