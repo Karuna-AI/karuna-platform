@@ -36,29 +36,41 @@ jobs:
   build:
     name: Build ${{ github.event.inputs.platform || 'all' }} (${{ github.event.inputs.profile || 'preview' }})
     runs-on: ubuntu-latest
-    if: ${{ secrets.EXPO_TOKEN != '' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check Expo secrets
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Mobile build skipped: EXPO_TOKEN not configured"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Node.js
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Setup Expo
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
+        if: steps.check-secrets.outputs.skip != 'true'
         run: npm ci
 
       - name: Build Android
-        if: github.event.inputs.platform == 'android' || github.event.inputs.platform == 'all' || github.event.inputs.platform == ''
+        if: steps.check-secrets.outputs.skip != 'true' && (github.event.inputs.platform == 'android' || github.event.inputs.platform == 'all' || github.event.inputs.platform == '')
         run: eas build --platform android --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
@@ -66,7 +78,7 @@ jobs:
           EXPO_OWNER: ${{ secrets.EXPO_OWNER }}
 
       - name: Build iOS
-        if: github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' || github.event.inputs.platform == ''
+        if: steps.check-secrets.outputs.skip != 'true' && (github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' || github.event.inputs.platform == '')
         run: eas build --platform ios --profile ${{ github.event.inputs.profile || 'preview' }} --non-interactive
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
