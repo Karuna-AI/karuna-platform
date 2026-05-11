@@ -207,6 +207,15 @@ class AdminApiService {
     }
   }
 
+  async updateFeatureFlagRollout(flagId: string, rolloutPercentage: number): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.patch(`/feature-flags/${flagId}`, { rollout_percentage: rolloutPercentage });
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: 'Failed to update rollout percentage' };
+    }
+  }
+
   async createFeatureFlag(data: { name: string; description?: string; is_enabled?: boolean }): Promise<ApiResponse<any>> {
     try {
       const response = await this.client.post('/feature-flags', data);
