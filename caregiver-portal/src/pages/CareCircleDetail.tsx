@@ -46,6 +46,14 @@ export default function CareCircleDetail() {
   const [noteContent, setNoteContent] = useState('');
   const [noteCategory, setNoteCategory] = useState<VaultNote['category']>('general');
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const [noteError, setNoteError] = useState('');
+
+  // Member action state
+  const [removeError, setRemoveError] = useState('');
+  const [isRemovingId, setIsRemovingId] = useState<string | null>(null);
+
+  // Alert action state
+  const [alertActionError, setAlertActionError] = useState('');
 
   const currentMember = members.find((m) => m.userId === user?.id);
   const canInvite = currentMember?.permissions.canInviteMembers;
@@ -144,16 +152,22 @@ export default function CareCircleDetail() {
   };
 
   const handleAcknowledgeAlert = async (alertId: string) => {
+    setAlertActionError('');
     const result = await api.acknowledgeAlert(id!, alertId);
     if (result.success) {
       loadDashboardData();
+    } else {
+      setAlertActionError(result.error || 'Failed to acknowledge alert');
     }
   };
 
   const handleDismissAlert = async (alertId: string) => {
+    setAlertActionError('');
     const result = await api.dismissAlert(id!, alertId);
     if (result.success) {
       loadDashboardData();
+    } else {
+      setAlertActionError(result.error || 'Failed to dismiss alert');
     }
   };
 
@@ -182,14 +196,20 @@ export default function CareCircleDetail() {
   const handleRemoveMember = async (memberId: string) => {
     if (!confirm('Are you sure you want to remove this member?')) return;
 
+    setRemoveError('');
+    setIsRemovingId(memberId);
     const result = await api.removeMember(id!, memberId);
+    setIsRemovingId(null);
     if (result.success) {
       setMembers(members.filter((m) => m.id !== memberId));
+    } else {
+      setRemoveError(result.error || 'Failed to remove member');
     }
   };
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
+    setNoteError('');
     setIsAddingNote(true);
 
     const result = await api.addNote(id!, {
@@ -197,6 +217,8 @@ export default function CareCircleDetail() {
       content: noteContent,
       category: noteCategory,
     });
+
+    setIsAddingNote(false);
 
     if (result.success && result.data) {
       if (vaultData) {
@@ -209,9 +231,10 @@ export default function CareCircleDetail() {
       setNoteTitle('');
       setNoteContent('');
       setNoteCategory('general');
+      setNoteError('');
+    } else {
+      setNoteError(result.error || 'Failed to add note');
     }
-
-    setIsAddingNote(false);
   };
 
   const formatDate = (dateStr: string) => {
@@ -317,6 +340,9 @@ export default function CareCircleDetail() {
       {/* Dashboard Tab */}
       {activeTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {alertActionError && (
+            <div className="alert alert-error">{alertActionError}</div>
+          )}
           {isDashboardLoading && !dashboardData && (
             <div className="loading">
               <div className="spinner" />
@@ -519,6 +545,9 @@ export default function CareCircleDetail() {
             )}
           </div>
 
+          {removeError && (
+            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{removeError}</div>
+          )}
           <table className="table">
             <thead>
               <tr>
@@ -545,8 +574,9 @@ export default function CareCircleDetail() {
                         <button
                           className="btn btn-danger btn-sm"
                           onClick={() => handleRemoveMember(member.id)}
+                          disabled={isRemovingId === member.id}
                         >
-                          Remove
+                          {isRemovingId === member.id ? 'Removing...' : 'Remove'}
                         </button>
                       )}
                   </td>
@@ -885,11 +915,14 @@ export default function CareCircleDetail() {
                 />
               </div>
 
+              {noteError && (
+                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{noteError}</div>
+              )}
               <div className="modal-footer">
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setShowNoteModal(false)}
+                  onClick={() => { setShowNoteModal(false); setNoteError(''); }}
                   disabled={isAddingNote}
                 >
                   Cancel
