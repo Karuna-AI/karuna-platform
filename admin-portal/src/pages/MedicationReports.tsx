@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { adminAPI } from '../services/api';
+import { adminAPI, api } from '../services/api';
 
 interface MedicationSummary {
   total_doses: string;
@@ -64,21 +64,30 @@ export default function MedicationReports() {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'trends' | 'missed'>('overview');
+  const [circleId, setCircleId] = useState('');
+  const [circles, setCircles] = useState<{ id: string; name: string; care_recipient_name: string }[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    api.getCircles({ limit: 200 }).then((r) => {
+      if (r.success) setCircles(r.data.circles || []);
+    });
+  }, []);
 
   useEffect(() => {
     loadData();
     return () => { abortRef.current?.abort(); };
-  }, [days]);
+  }, [days, circleId]);
 
   const loadData = async () => {
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
     setLoading(true);
+    const circleParam = circleId ? `&circleId=${circleId}` : '';
 
     try {
-      const overviewRes = await adminAPI.get(`/medications/overview?days=${days}`);
+      const overviewRes = await adminAPI.get(`/medications/overview?days=${days}${circleParam}`);
       if (signal.aborted) return;
       setSummary(overviewRes.data.summary);
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
@@ -90,7 +99,7 @@ export default function MedicationReports() {
     }
 
     try {
-      const trendsRes = await adminAPI.get(`/medications/trends?days=${days}`);
+      const trendsRes = await adminAPI.get(`/medications/trends?days=${days}${circleParam}`);
       if (signal.aborted) return;
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);
@@ -152,6 +161,16 @@ export default function MedicationReports() {
       <div className="page-header">
         <h1>Medication Reports</h1>
         <div className="page-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <select
+            value={circleId}
+            onChange={(e) => setCircleId(e.target.value)}
+            style={{ minWidth: '180px' }}
+          >
+            <option value="">All circles</option>
+            {circles.map((c) => (
+              <option key={c.id} value={c.id}>{c.care_recipient_name} ({c.name})</option>
+            ))}
+          </select>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
