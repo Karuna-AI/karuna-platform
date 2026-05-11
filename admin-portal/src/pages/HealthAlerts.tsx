@@ -112,6 +112,24 @@ export default function HealthAlerts() {
     }
   };
 
+  const handleAcknowledge = async (alertId: string) => {
+    const result = await adminAPI.post(`/health-alerts/${alertId}/acknowledge`);
+    if (result.status >= 200 && result.status < 300) {
+      setAlerts((prev) =>
+        prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged' } : a))
+      );
+    }
+  };
+
+  const handleResolve = async (alertId: string) => {
+    const result = await adminAPI.post(`/health-alerts/${alertId}/resolve`);
+    if (result.status >= 200 && result.status < 300) {
+      setAlerts((prev) =>
+        prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved' } : a))
+      );
+    }
+  };
+
   const getSeverityClass = (severity: string) => {
     switch (severity) {
       case 'critical': return 'severity-critical';
@@ -338,12 +356,13 @@ export default function HealthAlerts() {
                 <th>Title</th>
                 <th>Care Recipient</th>
                 <th>Circle</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {alerts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty">No alerts found</td>
+                  <td colSpan={7} className="empty">No alerts found</td>
                 </tr>
               ) : (
                 alerts.map((alert) => (
@@ -362,6 +381,26 @@ export default function HealthAlerts() {
                     <td>{alert.title}</td>
                     <td>{alert.care_recipient_name}</td>
                     <td>{alert.circle_name}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {alert.status === 'active' && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleAcknowledge(alert.id)}
+                          >
+                            Acknowledge
+                          </button>
+                        )}
+                        {alert.status !== 'resolved' && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleResolve(alert.id)}
+                          >
+                            Resolve
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

@@ -96,6 +96,24 @@ class AdminApiService {
     }
   }
 
+  async acknowledgeAlert(alertId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/health-alerts/${alertId}/acknowledge`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: 'Failed to acknowledge alert' };
+    }
+  }
+
+  async resolveAlert(alertId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/health-alerts/${alertId}/resolve`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: 'Failed to resolve alert' };
+    }
+  }
+
   // Users
   async getUsers(params: { page?: number; limit?: number; search?: string; status?: string } = {}): Promise<ApiResponse<any>> {
     try {
