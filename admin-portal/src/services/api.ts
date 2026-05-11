@@ -115,13 +115,15 @@ class AdminApiService {
   }
 
   // Users
-  async getUsers(params: { page?: number; limit?: number; search?: string; status?: string } = {}): Promise<ApiResponse<any>> {
+  async getUsers(params: { page?: number; limit?: number; search?: string; status?: string; sortBy?: string; sortDir?: string } = {}): Promise<ApiResponse<any>> {
     try {
       const queryParams = new URLSearchParams();
       if (params.page) queryParams.append('page', params.page.toString());
       if (params.limit) queryParams.append('limit', params.limit.toString());
       if (params.search) queryParams.append('search', params.search);
       if (params.status) queryParams.append('status', params.status);
+      if (params.sortBy) queryParams.append('sortBy', params.sortBy);
+      if (params.sortDir) queryParams.append('sortDir', params.sortDir);
       const response = await this.client.get(`/users?${queryParams}`);
       return { success: true, data: response.data };
     } catch (error) {
@@ -153,6 +155,16 @@ class AdminApiService {
       return { success: true, data: response.data };
     } catch (error) {
       return { success: false, error: 'Failed to unsuspend user' };
+    }
+  }
+
+  async createUser(data: { name: string; email: string; phone?: string }): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post('/users', data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to create user' };
     }
   }
 
