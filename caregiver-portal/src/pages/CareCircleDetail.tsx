@@ -60,6 +60,7 @@ export default function CareCircleDetail() {
   // Member action state
   const [removeError, setRemoveError] = useState('');
   const [isRemovingId, setIsRemovingId] = useState<string | null>(null);
+  const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
 
   // Alert action state
   const [alertActionError, setAlertActionError] = useState('');
@@ -200,6 +201,15 @@ export default function CareCircleDetail() {
     }
 
     setIsInviting(false);
+  };
+
+  const handleChangeRole = async (memberId: string, newRole: CareCircleRole) => {
+    setChangingRoleId(memberId);
+    const result = await api.updateMemberRole(id!, memberId, newRole);
+    setChangingRoleId(null);
+    if (result.success) {
+      setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role: newRole } : m));
+    }
   };
 
   const handleRemoveMember = async (memberId: string) => {
@@ -610,7 +620,22 @@ export default function CareCircleDetail() {
                   <td>{member.name}</td>
                   <td>{member.email}</td>
                   <td>
-                    <span className={`badge badge-${member.role}`}>{member.role}</span>
+                    {currentMember?.permissions.canRemoveMembers &&
+                      member.userId !== user?.id &&
+                      member.role !== 'owner' ? (
+                        <select
+                          className="form-select"
+                          value={member.role}
+                          onChange={(e) => handleChangeRole(member.id, e.target.value as CareCircleRole)}
+                          disabled={changingRoleId === member.id}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+                        >
+                          <option value="viewer">viewer</option>
+                          <option value="caregiver">caregiver</option>
+                        </select>
+                    ) : (
+                      <span className={`badge badge-${member.role}`}>{member.role}</span>
+                    )}
                   </td>
                   <td>{formatDate(member.joinedAt)}</td>
                   <td style={{ textAlign: 'right' }}>
