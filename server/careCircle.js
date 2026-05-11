@@ -387,6 +387,29 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+// CSRF validation middleware (double-submit cookie pattern)
+// Applies to mutating requests authenticated via cookie.
+// API clients using Bearer-only auth (no cookie) are exempt.
+function csrfMiddleware(req, res, next) {
+  // Only validate when the request was authenticated via cookie
+  // (Bearer-token-only clients don't carry cookies, so they can't be CSRF'd)
+  const hasCookie = !!getCookie(req, AUTH_COOKIE_NAME);
+  if (!hasCookie) return next();
+
+  const cookieToken = getCookie(req, 'csrf-token');
+  const headerToken = req.headers['x-csrf-token'];
+
+  if (!cookieToken || !headerToken) {
+    return res.status(403).json({ error: 'CSRF token missing' });
+  }
+
+  if (cookieToken !== headerToken) {
+    return res.status(403).json({ error: 'CSRF token mismatch' });
+  }
+
+  next();
+}
+
 // Permission check middleware
 function requirePermission(permission) {
   return async (req, res, next) => {
@@ -422,6 +445,21 @@ function requirePermission(permission) {
     }
   };
 }
+
+// ============================================================================
+// Global CSRF enforcement for all mutating routes
+// ============================================================================
+
+// Apply CSRF validation to POST/PUT/PATCH/DELETE across all routes.
+// The csrfMiddleware itself skips requests that do not carry the auth cookie
+// (e.g. login, register, accept-invitation), so this is safe to apply globally.
+router.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    return csrfMiddleware(req, res, next);
+  }
+  next();
+});
 
 // ============================================================================
 // Auth Routes
@@ -469,6 +507,14 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
     const token = createJWT(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, AUTH_COOKIE_OPTIONS);
+    // Set readable CSRF token cookie (non-httpOnly, for the double-submit pattern)
+    res.cookie('csrf-token', crypto.randomUUID(), {
+      httpOnly: false,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
     res.json({
       success: true,
       token,
@@ -530,6 +576,14 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     );
 
     res.cookie(AUTH_COOKIE_NAME, token, AUTH_COOKIE_OPTIONS);
+    // Set readable CSRF token cookie (non-httpOnly, for the double-submit pattern)
+    res.cookie('csrf-token', crypto.randomUUID(), {
+      httpOnly: false,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
     res.json({
       success: true,
       token,
@@ -543,10 +597,16 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
   }
 });
 
-// Logout — clears httpOnly auth cookie
+// Logout — clears httpOnly auth cookie and CSRF token cookie
 router.post('/auth/logout', (req, res) => {
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    path: '/',
+  });
+  res.clearCookie('csrf-token', {
+    httpOnly: false,
     secure: IS_PRODUCTION,
     sameSite: IS_PRODUCTION ? 'none' : 'lax',
     path: '/',
@@ -2909,11 +2969,20 @@ function broadcastToCircle(circleId, event) {
 // WebSocket connection handler
 async function handleWebSocket(ws, req) {
   const url = new URL(req.url, 'http://localhost');
-  const token = url.searchParams.get('token');
   const circleId = url.searchParams.get('circleId');
 
+  // Auth via httpOnly cookie (browser sends it automatically on upgrade).
+  // Fall back to Authorization header for non-browser clients / mobile.
+  let token = getCookie(req, AUTH_COOKIE_NAME);
+  if (!token) {
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
+
   if (!token || !circleId) {
-    ws.close(4001, 'Missing token or circleId');
+    ws.close(4001, 'Missing authentication or circleId');
     return;
   }
 

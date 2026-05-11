@@ -7,7 +7,10 @@ export default function FeatureFlags() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFlag, setNewFlag] = useState({ name: '', description: '', is_enabled: false });
+  const [pendingRollout, setPendingRollout] = useState<Record<string, number>>({});
   const { admin } = useAuth();
+
+  const canManageFlags = admin?.permissions?.canManageFeatureFlags;
 
   useEffect(() => {
     loadFlags();
@@ -22,21 +25,46 @@ export default function FeatureFlags() {
   };
 
   const handleToggle = async (flag: any) => {
-    const result = await api.updateFeatureFlag(flag.id, {
-      is_enabled: !flag.is_enabled,
-    });
-    if (result.success) {
-      setFlags(flags.map(f => f.id === flag.id ? result.data.flag : f));
+    setFlags((prev) =>
+      prev.map((f) => (f.id === flag.id ? { ...f, is_enabled: !f.is_enabled } : f))
+    );
+    const result = await api.updateFeatureFlag(flag.id, { is_enabled: !flag.is_enabled });
+    if (!result.success) {
+      setFlags((prev) =>
+        prev.map((f) => (f.id === flag.id ? { ...f, is_enabled: flag.is_enabled } : f))
+      );
     }
   };
 
   const handleToggleForAll = async (flag: any) => {
-    const result = await api.updateFeatureFlag(flag.id, {
-      enabled_for_all: !flag.enabled_for_all,
-    });
-    if (result.success) {
-      setFlags(flags.map(f => f.id === flag.id ? result.data.flag : f));
+    setFlags((prev) =>
+      prev.map((f) => (f.id === flag.id ? { ...f, enabled_for_all: !f.enabled_for_all } : f))
+    );
+    const result = await api.updateFeatureFlag(flag.id, { enabled_for_all: !flag.enabled_for_all });
+    if (!result.success) {
+      setFlags((prev) =>
+        prev.map((f) => (f.id === flag.id ? { ...f, enabled_for_all: flag.enabled_for_all } : f))
+      );
     }
+  };
+
+  const handleRolloutChange = (flagId: string, value: number) => {
+    setPendingRollout((prev) => ({ ...prev, [flagId]: value }));
+  };
+
+  const handleRolloutCommit = async (flagId: string, value: number) => {
+    if (!canManageFlags) return;
+    const result = await api.updateFeatureFlagRollout(flagId, value);
+    if (result.success) {
+      setFlags((prev) =>
+        prev.map((f) => (f.id === flagId ? { ...f, rollout_percentage: value } : f))
+      );
+    }
+    setPendingRollout((prev) => {
+      const next = { ...prev };
+      delete next[flagId];
+      return next;
+    });
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -48,8 +76,6 @@ export default function FeatureFlags() {
       setNewFlag({ name: '', description: '', is_enabled: false });
     }
   };
-
-  const canManageFlags = admin?.permissions?.canManageFeatureFlags;
 
   if (isLoading) {
     return <div className="loading"><div className="spinner" /></div>;
@@ -113,8 +139,24 @@ export default function FeatureFlags() {
                         <span className="toggle-slider" />
                       </label>
                     </td>
-                    <td>
-                      {flag.rollout_percentage}%
+                    <td style={{ minWidth: '160px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={pendingRollout[flag.id] ?? flag.rollout_percentage}
+                          onChange={(e) => handleRolloutChange(flag.id, Number(e.target.value))}
+                          onMouseUp={(e) => handleRolloutCommit(flag.id, Number((e.target as HTMLInputElement).value))}
+                          onTouchEnd={(e) => handleRolloutCommit(flag.id, Number((e.target as HTMLInputElement).value))}
+                          disabled={!canManageFlags || !flag.is_enabled}
+                          style={{ flex: 1 }}
+                        />
+                        <span style={{ minWidth: '3rem', textAlign: 'right' }}>
+                          {pendingRollout[flag.id] ?? flag.rollout_percentage}%
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ))}

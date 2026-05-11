@@ -468,6 +468,41 @@ class BiometricAuthService {
   }
 
   /**
+   * Reset all security settings — clears PIN hash, salt, and biometric flag.
+   * Used as a last-resort recovery when the user has forgotten their PIN.
+   */
+  async resetAllSecurity(): Promise<void> {
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.PIN_HASH,
+        STORAGE_KEYS.PIN_SALT,
+        STORAGE_KEYS.BIOMETRIC_ENABLED,
+        STORAGE_KEYS.APP_LOCK_ENABLED,
+        STORAGE_KEYS.VAULT_LOCK_ENABLED,
+        STORAGE_KEYS.LAST_AUTH_TIME,
+        STORAGE_KEYS.AUTH_TIMEOUT_MINUTES,
+      ]);
+
+      this.pinHash = null;
+      this.pinSalt = null;
+      this.biometricEnabled = false;
+      this.appLockEnabled = false;
+      this.vaultLockEnabled = true;
+      this.lastAuthTime = 0;
+      this.authTimeoutMinutes = DEFAULT_AUTH_TIMEOUT;
+      this.isAuthenticated = false;
+
+      await auditLogService.log({
+        action: 'security_reset',
+        category: 'security',
+        description: 'All security settings were reset by the user',
+      });
+    } catch (error) {
+      console.error('[BiometricAuth] resetAllSecurity error:', error);
+    }
+  }
+
+  /**
    * Generate a cryptographically secure random salt
    */
   private async generateSalt(): Promise<string> {

@@ -59,6 +59,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 interface SettingsContextValue {
   settings: AppSettings;
   isLoading: boolean;
+  settingsLoadError: boolean;
 
   // Display settings
   setFontSize: (size: FontSize) => void;
@@ -101,6 +102,7 @@ const _SETTINGS_STORAGE_KEY = '@karuna/app_settings';
 export function SettingsProvider({ children }: SettingsProviderProps): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
 
   // Load settings on mount and initialize language services
   useEffect(() => {
@@ -126,6 +128,7 @@ export function SettingsProvider({ children }: SettingsProviderProps): JSX.Eleme
         console.debug(`[Settings] Loaded with language: ${saved?.language || deviceLanguage}`);
       } catch (error) {
         console.error('Error loading settings:', error);
+        setSettingsLoadError(true);
       } finally {
         setIsLoading(false);
       }
@@ -266,6 +269,7 @@ export function SettingsProvider({ children }: SettingsProviderProps): JSX.Eleme
   const value: SettingsContextValue = {
     settings,
     isLoading,
+    settingsLoadError,
     setFontSize,
     setHighContrast,
     setSpeechRate,

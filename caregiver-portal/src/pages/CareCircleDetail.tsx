@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
@@ -8,6 +8,14 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 type TabType = 'dashboard' | 'overview' | 'members' | 'vault' | 'notes';
+
+function useDebounced<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return useCallback((...args: Parameters<T>) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => fn(...args), delay);
+  }, [fn, delay]) as T;
+}
 
 export default function CareCircleDetail() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +29,7 @@ export default function CareCircleDetail() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+  const [isVaultLoading, setIsVaultLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Invite modal state
@@ -56,38 +65,58 @@ export default function CareCircleDetail() {
     setIsDashboardLoading(false);
   }, [id]);
 
+  const loadVaultData = useCallback(async () => {
+    if (!id) return;
+    setIsVaultLoading(true);
+    const syncResult = await api.getSyncData(id);
+    if (syncResult.success && syncResult.data) {
+      setVaultData(syncResult.data);
+    }
+    setIsVaultLoading(false);
+  }, [id]);
+
+  // Debounced version for WebSocket events — coalesces bursts into one fetch
+  const debouncedLoadDashboard = useDebounced(loadDashboardData, 300);
+
   useEffect(() => {
     if (id) {
       loadCircleData();
     }
   }, [id]);
 
-  // Auto-refresh dashboard: use WebSocket when connected, fall back to polling
+  // Auto-refresh dashboard: poll every 30s ONLY when WebSocket is disconnected
   useEffect(() => {
-    if (activeTab === 'dashboard' && id) {
-      loadDashboardData();
+    if (activeTab !== 'dashboard' || !id) return;
 
-      if (!isConnected) {
-        // Fallback: poll every 30 seconds when WebSocket is not connected
-        const interval = setInterval(loadDashboardData, 30000);
-        return () => clearInterval(interval);
-      }
+    // Always do an immediate load when tab becomes active
+    loadDashboardData();
+
+    if (isConnected) return; // WebSocket handles updates — no polling needed
+
+    const interval = setInterval(loadDashboardData, 30000);
+    return () => clearInterval(interval);
+  }, [activeTab, id, isConnected, loadDashboardData]);
+
+  // Refresh vault data each time the vault tab is opened
+  useEffect(() => {
+    if (activeTab === 'vault' && id) {
+      loadVaultData();
     }
-  }, [activeTab, id, loadDashboardData, isConnected]);
+  }, [activeTab, id, loadVaultData]);
 
   // Subscribe to WebSocket events for real-time updates
   useEffect(() => {
     if (!isConnected) return;
 
     const unsubs = [
-      subscribe('health_update', () => loadDashboardData()),
-      subscribe('alert', () => loadDashboardData()),
-      subscribe('activity_update', () => loadDashboardData()),
-      subscribe('alert_acknowledged', () => loadDashboardData()),
+      subscribe('health_update', () => debouncedLoadDashboard()),
+      subscribe('alert', () => debouncedLoadDashboard()),
+      subscribe('activity_update', () => debouncedLoadDashboard()),
+      subscribe('alert_acknowledged', () => debouncedLoadDashboard()),
     ];
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [isConnected, subscribe, loadDashboardData]);
+  }, [isConnected, subscribe, debouncedLoadDashboard]);
 
   const loadCircleData = async () => {
     setIsLoading(true);
@@ -95,12 +124,6 @@ export default function CareCircleDetail() {
     if (result.success && result.data) {
       setCircle(result.data);
       setMembers(result.data.members || []);
-
-      // Load vault data if user has permission
-      const syncResult = await api.getSyncData(id!);
-      if (syncResult.success && syncResult.data) {
-        setVaultData(syncResult.data);
-      }
 
       // Load dashboard data
       const dashResult = await api.getDashboard(id!);
@@ -419,6 +442,7 @@ export default function CareCircleDetail() {
                   inactivityMinutes={dashboardData.activity.inactivityMinutes}
                   inactivityStatus={dashboardData.activity.inactivityStatus}
                   checkinResponseRate={dashboardData.checkins.responseRate}
+                  thresholds={dashboardData.inactivityThresholds}
                 />
               </ErrorBoundary>
 
@@ -527,7 +551,14 @@ export default function CareCircleDetail() {
       )}
 
       {/* Vault Tab */}
-      {activeTab === 'vault' && canViewVault && vaultData && (
+      {activeTab === 'vault' && canViewVault && (
+        <div>
+          {isVaultLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" />
+              <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>Loading vault data…</p>
+            </div>
+          ) : vaultData ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Medications */}
           <div className="card">
@@ -657,6 +688,14 @@ export default function CareCircleDetail() {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+        </div>
+          ) : (
+            <div className="card">
+              <div className="empty-state">
+                <p className="text-muted">No vault data available</p>
+              </div>
             </div>
           )}
         </div>

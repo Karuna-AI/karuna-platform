@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,9 +20,19 @@ export const ProactiveSettingsScreen: React.FC<ProactiveSettingsScreenProps> = (
 }) => {
   const [preferences, setPreferences] = useState<ProactivePreferences | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [savedToast, setSavedToast] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadPreferences();
+  }, []);
+
+  const showSavedToast = useCallback(() => {
+    setSavedToast(true);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => setSavedToast(false), 2000);
   }, []);
 
   const loadPreferences = async () => {
@@ -47,8 +57,9 @@ export const ProactiveSettingsScreen: React.FC<ProactiveSettingsScreenProps> = (
       const updated = { ...preferences, [key]: value };
       setPreferences(updated);
       await proactiveEngineService.updatePreferences({ [key]: value });
+      showSavedToast();
     },
-    [preferences]
+    [preferences, showSavedToast]
   );
 
   const updateCategory = useCallback(
@@ -59,8 +70,9 @@ export const ProactiveSettingsScreen: React.FC<ProactiveSettingsScreenProps> = (
       const updated = { ...preferences, categories: updatedCategories };
       setPreferences(updated);
       await proactiveEngineService.updatePreferences({ categories: updatedCategories });
+      showSavedToast();
     },
-    [preferences]
+    [preferences, showSavedToast]
   );
 
   const updateQuietHours = useCallback(
@@ -71,8 +83,9 @@ export const ProactiveSettingsScreen: React.FC<ProactiveSettingsScreenProps> = (
       const updated = { ...preferences, quietHours: updatedQuietHours };
       setPreferences(updated);
       await proactiveEngineService.updatePreferences({ quietHours: updatedQuietHours });
+      showSavedToast();
     },
-    [preferences]
+    [preferences, showSavedToast]
   );
 
   const formatHour = (hour: number): string => {
@@ -338,6 +351,12 @@ export const ProactiveSettingsScreen: React.FC<ProactiveSettingsScreenProps> = (
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {savedToast && (
+        <View style={styles.savedToast}>
+          <Text style={styles.savedToastText}>Saved</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -530,6 +549,20 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  savedToast: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(31, 41, 55, 0.85)',
+    paddingVertical: 8,
+    paddingHorizontal: 24,
+    borderRadius: 20,
+  },
+  savedToastText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

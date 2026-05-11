@@ -314,6 +314,12 @@ export interface CheckinsResponse {
   period: { days: number; since: string };
 }
 
+// Inactivity Threshold Types
+export interface InactivityThresholds {
+  concerningMinutes: number;  // default 240
+  alertMinutes: number;       // default 480
+}
+
 // Dashboard Summary Types
 export interface DashboardData {
   health: { latest: HealthReading[] };
@@ -333,6 +339,7 @@ export interface DashboardData {
   };
   alerts: { active: CaregiverAlert[]; count: number };
   checkins: { responseRate: number; total: number; responded: number };
+  inactivityThresholds?: InactivityThresholds;
   timestamp: string;
 }
 

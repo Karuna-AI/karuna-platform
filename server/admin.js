@@ -216,6 +216,35 @@ function requirePermission(permission) {
   };
 }
 
+// CSRF validation middleware (double-submit cookie pattern)
+function csrfMiddleware(req, res, next) {
+  // Only validate when the request was authenticated via cookie
+  const hasCookie = !!getCookie(req, ADMIN_COOKIE_NAME);
+  if (!hasCookie) return next();
+
+  const cookieToken = getCookie(req, 'csrf-token');
+  const headerToken = req.headers['x-csrf-token'];
+
+  if (!cookieToken || !headerToken) {
+    return res.status(403).json({ error: 'CSRF token missing' });
+  }
+
+  if (cookieToken !== headerToken) {
+    return res.status(403).json({ error: 'CSRF token mismatch' });
+  }
+
+  next();
+}
+
+// Apply CSRF validation to all mutating routes
+router.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    return csrfMiddleware(req, res, next);
+  }
+  next();
+});
+
 // ============================================================================
 // Auth Routes
 // ============================================================================
@@ -258,6 +287,14 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
     await logAdminAction(admin.id, admin.email, 'login', 'admin', admin.id, null, null, req);
 
     res.cookie(ADMIN_COOKIE_NAME, token, ADMIN_COOKIE_OPTIONS);
+    // Set readable CSRF token cookie (non-httpOnly, for the double-submit pattern)
+    res.cookie('csrf-token', crypto.randomUUID(), {
+      httpOnly: false,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
     res.json({
       success: true,
       token,
@@ -275,10 +312,16 @@ router.post('/auth/login', adminLoginRateLimiter, async (req, res) => {
   }
 });
 
-// Admin logout — clears httpOnly cookie
+// Admin logout — clears httpOnly cookie and CSRF token cookie
 router.post('/auth/logout', (req, res) => {
   res.clearCookie(ADMIN_COOKIE_NAME, {
     httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    path: '/',
+  });
+  res.clearCookie('csrf-token', {
+    httpOnly: false,
     secure: IS_PRODUCTION,
     sameSite: IS_PRODUCTION ? 'none' : 'lax',
     path: '/',

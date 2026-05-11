@@ -6,22 +6,31 @@
 const { Pool } = require('pg');
 
 // Validate required database configuration
-if (!process.env.DB_PASSWORD) {
-  console.error('ERROR: DB_PASSWORD environment variable is required');
+if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
+  console.error('ERROR: DATABASE_URL or DB_PASSWORD environment variable is required');
   process.exit(1);
 }
 
-// Database configuration
+// Support DATABASE_URL (Railway/cloud) or individual DB_* vars (local/Docker)
+const dbConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '5437'),
+      database: process.env.DB_NAME || 'karuna',
+      user: process.env.DB_USER || 'karuna',
+      password: process.env.DB_PASSWORD,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    };
+
 const config = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5437'),
-  database: process.env.DB_NAME || 'karuna',
-  user: process.env.DB_USER || 'karuna',
-  password: process.env.DB_PASSWORD,
-  max: 20, // Maximum number of clients in the pool
+  ...dbConfig,
+  max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 };
 
 const pool = new Pool(config);
