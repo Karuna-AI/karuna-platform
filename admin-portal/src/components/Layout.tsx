@@ -10,17 +10,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     navigate('/login', { replace: true });
   };
 
+  const perms = admin?.permissions ?? {};
+
   const navItems = [
-    { path: '/', icon: '📊', label: 'Dashboard' },
-    { path: '/users', icon: '👥', label: 'Users' },
-    { path: '/circles', icon: '🔵', label: 'Care Circles' },
-    { path: '/ai-usage', icon: '🤖', label: 'AI Usage' },
-    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts' },
-    { path: '/medications', icon: '💊', label: 'Medications' },
-    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags' },
-    { path: '/audit-logs', icon: '📜', label: 'Audit Logs' },
-    { path: '/settings', icon: '⚙️', label: 'Settings' },
-  ];
+    { path: '/', icon: '📊', label: 'Dashboard', visible: true },
+    { path: '/users', icon: '👥', label: 'Users', visible: perms.canViewUsers !== false },
+    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canViewCircles !== false },
+    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewAnalytics !== false },
+    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewAlerts !== false },
+    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMedications !== false },
+    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canViewFeatureFlags !== false },
+    { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs !== false },
+    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canViewSettings !== false },
+  ].filter((item) => item.visible);
 
   return (
     <div className="app-layout">

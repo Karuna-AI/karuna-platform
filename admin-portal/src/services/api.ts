@@ -251,11 +251,12 @@ class AdminApiService {
     }
   }
 
-  async getAdminAuditLogs(params: { page?: number; limit?: number } = {}): Promise<ApiResponse<any>> {
+  async getAdminAuditLogs(params: { page?: number; limit?: number; action?: string } = {}): Promise<ApiResponse<any>> {
     try {
       const queryParams = new URLSearchParams();
       if (params.page) queryParams.append('page', params.page.toString());
       if (params.limit) queryParams.append('limit', params.limit.toString());
+      if (params.action) queryParams.append('action', params.action);
       const response = await this.client.get(`/admin-audit-logs?${queryParams}`);
       return { success: true, data: response.data };
     } catch (error) {

@@ -7,6 +7,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -63,16 +64,27 @@ export default function Login() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              required
-              disabled={isLoading}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                className="form-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                required
+                disabled={isLoading}
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPassword(!showPassword)}
+                style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
+              >
+                {showPassword ? '🙈' : '👁️'}
+              </button>
+            </div>
           </div>
 
           <button
