@@ -47,10 +47,11 @@ const adminLoginRateLimiter = rateLimit({
 const adminActionLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.admin?.id || req.ip,
+  keyGenerator: (req) => req.admin?.id || (req.ip || '').replace(/^::ffff:/, ''),
   message: { error: 'Too many admin actions. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { keyGeneratorIpFallback: false },
 });
 
 // ============================================================================
