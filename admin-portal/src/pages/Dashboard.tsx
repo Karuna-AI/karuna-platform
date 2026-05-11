@@ -10,10 +10,14 @@ export default function Dashboard() {
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const loadMetrics = async () => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
     setError(null);
     const result = await api.getDashboardMetrics();
+    if (abortRef.current?.signal.aborted) return;
     if (result.success) {
       setMetrics(result.data);
     } else {
@@ -42,6 +46,7 @@ export default function Dashboard() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
+      if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 

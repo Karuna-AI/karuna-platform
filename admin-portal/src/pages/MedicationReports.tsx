@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { adminAPI } from '../services/api';
 
 interface MedicationSummary {
@@ -64,33 +64,42 @@ export default function MedicationReports() {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'trends' | 'missed'>('overview');
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadData();
+    return () => { abortRef.current?.abort(); };
   }, [days]);
 
   const loadData = async () => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
     setLoading(true);
 
     try {
       const overviewRes = await adminAPI.get(`/medications/overview?days=${days}`);
+      if (signal.aborted) return;
       setSummary(overviewRes.data.summary);
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
       setTopMedications(overviewRes.data.topMedications);
       setMissedDoses(overviewRes.data.missedDoses);
     } catch (error) {
+      if (signal.aborted) return;
       console.error('Failed to load medication overview:', error);
     }
 
     try {
       const trendsRes = await adminAPI.get(`/medications/trends?days=${days}`);
+      if (signal.aborted) return;
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);
     } catch (error) {
+      if (signal.aborted) return;
       console.error('Failed to load medication trends:', error);
     }
 
-    setLoading(false);
+    if (!signal.aborted) setLoading(false);
   };
 
   const exportCsv = () => {

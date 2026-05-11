@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
@@ -35,8 +35,12 @@ export default function Users() {
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const abortRef = useRef<AbortController | null>(null);
 
   const debouncedSearch = useDebounce(search, 300);
+
+  // Cancel in-flight request on unmount
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   // Sync filter state to URL whenever it changes
   useEffect(() => {
@@ -53,6 +57,8 @@ export default function Users() {
     statusFilter = status,
     sortConfig = sort,
   ) => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
     setIsLoading(true);
     setLoadError('');
     const result = await api.getUsers({
@@ -63,6 +69,7 @@ export default function Users() {
       sortBy: sortConfig.sortBy || undefined,
       sortDir: sortConfig.sortBy ? sortConfig.sortDir : undefined,
     });
+    if (abortRef.current?.signal.aborted) return;
     if (result.success) {
       setUsers(result.data.users);
       setPagination(result.data.pagination);
