@@ -529,7 +529,7 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
     }
 
     await db.query(
-      `UPDATE users SET suspended_at = CURRENT_TIMESTAMP, suspended_reason = $1, suspended_by = $2
+      `UPDATE users SET is_active = false, suspended_at = CURRENT_TIMESTAMP, suspended_reason = $1, suspended_by = $2
        WHERE id = $3`,
       [reason, req.admin.id, userId]
     );
@@ -554,7 +554,7 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
     }
 
     await db.query(
-      'UPDATE users SET suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL WHERE id = $1',
+      'UPDATE users SET is_active = true, suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL WHERE id = $1',
       [userId]
     );
 

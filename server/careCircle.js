@@ -567,7 +567,7 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, name, password_hash, is_verified FROM users WHERE email = $1',
+      'SELECT id, email, name, password_hash, is_verified, is_active FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -576,6 +576,10 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    if (user.is_active === false) {
+      return res.status(401).json({ error: 'Account is suspended. Contact support.' });
+    }
 
     const passwordValid = await verifyPassword(password, user.password_hash, user.id);
     if (!passwordValid) {

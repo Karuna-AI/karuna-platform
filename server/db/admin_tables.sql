@@ -78,7 +78,7 @@ CREATE INDEX idx_system_metrics_type ON system_metrics(metric_type);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    admin_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE RESTRICT,
+    admin_id UUID REFERENCES admin_users(id) ON DELETE SET NULL, -- nullable: pre-auth events (unknown-email login failures) have no admin to reference
     admin_email VARCHAR(255),
     action VARCHAR(100) NOT NULL,
     resource_type VARCHAR(50), -- user, circle, setting, feature_flag, etc.

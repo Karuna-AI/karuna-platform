@@ -57,6 +57,10 @@ let ownerEmail: string;
 let ownerToken: string;   // JWT for authenticated requests
 let circleId: string;
 
+// Shared admin token — created once in global beforeAll, reused across all admin suites
+let sharedSuperAdminJwt: string;
+let sharedSuperAdminEmail: string;
+
 // Helpers
 function sha256(s: string) {
   return crypto.createHash('sha256').update(s).digest('hex');
@@ -115,10 +119,23 @@ beforeAll(async () => {
   await db.query("DELETE FROM circle_members WHERE true");
   await db.query("DELETE FROM care_circles WHERE name LIKE 'RealTest%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@realtest.karuna'");
+
+  // ── Create one shared super-admin (avoids rate-limit accumulation across describes) ──
+  const bcryptForSetup = require('../../server/node_modules/bcryptjs');
+  sharedSuperAdminEmail = `shared-admin-${Date.now()}@realtest.karuna`;
+  const adminHash = bcryptForSetup.hashSync('SharedAdmin999!', 1);
+  await db.query(
+    `INSERT INTO admin_users (email, password_hash, name, role) VALUES ($1, $2, 'Shared Admin', 'super_admin')`,
+    [sharedSuperAdminEmail, adminHash]
+  );
+  const adminLoginRes = await req.post('/api/admin/auth/login')
+    .set('X-Requested-With', 'XMLHttpRequest')
+    .send({ email: sharedSuperAdminEmail, password: 'SharedAdmin999!' });
+  if (adminLoginRes.status !== 200) throw new Error(`Shared admin login failed: ${JSON.stringify(adminLoginRes.body)}`);
+  sharedSuperAdminJwt = adminLoginRes.body.token;
 }, 30_000);
 
 afterAll(async () => {
-  // Clean up test data
   await db.query("DELETE FROM admin_audit_logs WHERE true");
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@realtest.karuna'");
   await db.query("DELETE FROM password_reset_tokens WHERE true");
@@ -494,69 +511,23 @@ describe('Invitation flow (real DB)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 7. LOGIN RATE LIMIT — 5 per minute; 6th returns 429
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('Login rate limiter (real DB, real rate-limit)', () => {
-  it('returns 429 after excessive login attempts within 1 minute', async () => {
-    const statuses: number[] = [];
-
-    // Send 15 requests — prior tests consume some of the 5-request window.
-    // We just verify 429 appears at some point and all remaining are also 429.
-    for (let i = 0; i < 15; i++) {
-      const res = await req.post('/api/care/auth/login').send({
-        email: `ratelimit-${i}-${Date.now()}@realtest.karuna`,
-        password: 'wrongpass',
-      });
-      statuses.push(res.status);
-    }
-
-    // Rate limiter (5/min) must have triggered at least once
-    expect(statuses.some((s) => s === 429)).toBe(true);
-  }, 20_000);
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 8. PAGINATION CAP — limit=999999 must not crash or return unbounded rows
 // ═══════════════════════════════════════════════════════════════════════════════
 describe('Admin pagination cap (real DB)', () => {
-  let adminToken: string;
-
-  beforeAll(async () => {
-    // Create an admin user directly in the DB
-    const bcrypt = require('../../server/node_modules/bcryptjs');
-    const hash = bcrypt.hashSync('AdminPass123!', 1);
-    const adminEmail = `superadmin-${Date.now()}@realtest.karuna`;
-
-    await db.query(
-      `INSERT INTO admin_users (email, password_hash, name, role)
-       VALUES ($1, $2, 'Real Test Admin', 'super_admin')`,
-      [adminEmail, hash]
-    );
-
-    // Admin POST routes require X-Requested-With: XMLHttpRequest
-    const loginRes = await req.post('/api/admin/auth/login')
-      .set('X-Requested-With', 'XMLHttpRequest')
-      .send({ email: adminEmail, password: 'AdminPass123!' });
-    expect(loginRes.status).toBe(200);
-    adminToken = loginRes.body.token;
-  });
-
   it('GET /api/admin/users?limit=999999 returns at most 500 rows', async () => {
     const res = await req.get('/api/admin/users?limit=999999')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
 
     expect(res.status).toBe(200);
-    const users = res.body.users || res.body.data || [];
-    // Actual user count in test DB is small, but the LIMIT applied must be ≤ 500
-    // We verify by checking the SQL query would have been capped
-    expect(users.length).toBeLessThanOrEqual(500);
-    // And verify pagination metadata if present
-    if (res.body.pagination) {
-      expect(res.body.pagination.limit).toBeLessThanOrEqual(500);
-    }
+    expect(res.body.pagination.limit).toBeLessThanOrEqual(500);
+    expect((res.body.users || []).length).toBeLessThanOrEqual(500);
   });
 
   it('GET /api/admin/circles?limit=999999 returns at most 500 rows', async () => {
     const res = await req.get('/api/admin/circles?limit=999999')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
 
     expect(res.status).toBe(200);
     const circles = res.body.circles || res.body.data || [];
@@ -568,51 +539,29 @@ describe('Admin pagination cap (real DB)', () => {
 // 9. ADMIN AUTH — login, logout, permission enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
 describe('Admin auth flows (real DB)', () => {
-  const adminEmail = `admin2-${Date.now()}@realtest.karuna`;
-  let adminJwt: string;
-
-  beforeAll(async () => {
-    const bcrypt = require('../../server/node_modules/bcryptjs');
-    const hash = bcrypt.hashSync('AdminPass456!', 1);
-    await db.query(
-      `INSERT INTO admin_users (email, password_hash, name, role)
-       VALUES ($1, $2, 'Admin Two', 'admin')`,
-      [adminEmail, hash]
-    );
-  });
-
-  it('POST /api/admin/auth/login succeeds with valid credentials', async () => {
-    const res = await req.post('/api/admin/auth/login')
-      .set('X-Requested-With', 'XMLHttpRequest')
-      .send({ email: adminEmail, password: 'AdminPass456!' });
-    expect(res.status).toBe(200);
-    expect(res.body.token).toBeDefined();
-    adminJwt = res.body.token;
-  });
-
-  it('POST /api/admin/auth/login returns 401 for wrong password', async () => {
-    const res = await req.post('/api/admin/auth/login')
-      .set('X-Requested-With', 'XMLHttpRequest')
-      .send({ email: adminEmail, password: 'wrongpassword' });
-    expect(res.status).toBe(401);
-  });
-
   it('GET /api/admin/users requires valid admin JWT', async () => {
     const noAuth = await req.get('/api/admin/users');
     expect(noAuth.status).toBe(401);
 
     const withAuth = await req.get('/api/admin/users')
-      .set('Authorization', `Bearer ${adminJwt}`);
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
     expect(withAuth.status).toBe(200);
   });
 
   it('admin audit log is created on login', async () => {
     const row = await db.query(
       "SELECT action FROM admin_audit_logs WHERE admin_email = $1 AND action = 'login' ORDER BY created_at DESC LIMIT 1",
-      [adminEmail]
+      [sharedSuperAdminEmail]
     );
     expect(row.rows.length).toBeGreaterThanOrEqual(1);
     expect(row.rows[0].action).toBe('login');
+  });
+
+  it('POST /api/admin/auth/login returns 401 for wrong password', async () => {
+    const res = await req.post('/api/admin/auth/login')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({ email: sharedSuperAdminEmail, password: 'wrongpassword' });
+    expect(res.status).toBe(401);
   });
 });
 
@@ -634,4 +583,403 @@ describe('POST /api/care/flags/evaluate (real DB)', () => {
       expect(flags).toHaveProperty('proactive_checkins', true);
     }
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 11. VAULT MEDICATIONS — CRUD with real DB
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Vault medications CRUD (real DB)', () => {
+  let medicationId: string;
+
+  it('POST /circles/:id/vault/medications creates a medication', async () => {
+    const res = await req.post(`/api/care/circles/${circleId}/vault/medications`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        name: 'Aspirin',
+        dosage: '100mg',
+        frequency: 'daily',
+        timing: ['morning'],
+        instructions: 'Take with food',
+        prescribingDoctor: 'Dr. Smith',
+        isActive: true,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.medication.name).toBe('Aspirin');
+    medicationId = res.body.medication.id;
+
+    // Verify it's actually in the DB
+    const row = await db.query('SELECT name, dosage FROM vault_medications WHERE id = $1', [medicationId]);
+    expect(row.rows[0].name).toBe('Aspirin');
+    expect(row.rows[0].dosage).toBe('100mg');
+  });
+
+  it('GET /circles/:id/vault/medications lists with pagination metadata', async () => {
+    const res = await req.get(`/api/care/circles/${circleId}/vault/medications`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.pagination).toBeDefined();
+    expect(res.body.pagination.total).toBeGreaterThanOrEqual(1);
+    expect(res.body.data.some((m: any) => m.id === medicationId)).toBe(true);
+  });
+
+  it('GET /circles/:id/vault/medications respects limit parameter', async () => {
+    const res = await req.get(`/api/care/circles/${circleId}/vault/medications?limit=1&offset=0`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeLessThanOrEqual(1);
+    expect(res.body.pagination.limit).toBe(1);
+  });
+
+  it('PUT /circles/:id/vault/medications/:id updates the medication', async () => {
+    const res = await req.put(`/api/care/circles/${circleId}/vault/medications/${medicationId}`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ dosage: '200mg', instructions: 'Take with water' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.medication.dosage).toBe('200mg');
+    expect(res.body.medication.instructions).toBe('Take with water');
+
+    // Verify in DB
+    const row = await db.query('SELECT dosage FROM vault_medications WHERE id = $1', [medicationId]);
+    expect(row.rows[0].dosage).toBe('200mg');
+  });
+
+  it('DELETE /circles/:id/vault/medications/:id removes the medication', async () => {
+    const res = await req.delete(`/api/care/circles/${circleId}/vault/medications/${medicationId}`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Confirm gone from DB
+    const row = await db.query('SELECT id FROM vault_medications WHERE id = $1', [medicationId]);
+    expect(row.rows).toHaveLength(0);
+  });
+
+  it('DELETE /circles/:id/vault/medications/:id returns 404 for non-existent id', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+    const res = await req.delete(`/api/care/circles/${circleId}/vault/medications/${fakeId}`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('caregiver role can create medications but viewer cannot', async () => {
+    // Create a viewer user and add to circle
+    const viewerEmail = `viewer-${Date.now()}@realtest.karuna`;
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
+    await db.query(
+      `INSERT INTO invitations (circle_id, invited_by, email, name, role, token_hash, expires_at)
+       VALUES ($1, $2, $3, 'Viewer Test', 'viewer', $4, $5)`,
+      [circleId, ownerUserId, viewerEmail, sha256(rawToken), expiresAt]
+    );
+
+    const acceptRes = await req.post(`/api/care/invitations/${rawToken}/accept`)
+      .send({ password: 'ViewerPass123!' });
+    expect(acceptRes.status).toBe(200);
+
+    const viewerToken = acceptRes.body.token;
+
+    const denyRes = await req.post(`/api/care/circles/${circleId}/vault/medications`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ name: 'Blocked Med', dosage: '50mg', frequency: 'daily' });
+
+    expect(denyRes.status).toBe(403);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 12. SYNC ENDPOINT — pull and push bidirectional sync
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Sync endpoint (real DB)', () => {
+  let syncMedId: string;
+
+  beforeAll(async () => {
+    // Seed one medication directly so we can verify pull
+    const res = await db.query(
+      `INSERT INTO vault_medications (circle_id, name, dosage, frequency, timing, is_active, created_by)
+       VALUES ($1, 'Sync Test Med', '50mg', 'twice daily', '{}', true, 'Test')
+       RETURNING id`,
+      [circleId]
+    );
+    syncMedId = res.rows[0].id;
+  });
+
+  it('GET /circles/:id/sync returns all vault data for the circle', async () => {
+    const res = await req.get(`/api/care/circles/${circleId}/sync`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.medications)).toBe(true);
+    expect(res.body.medications.some((m: any) => m.id === syncMedId)).toBe(true);
+    expect(Array.isArray(res.body.doctors)).toBe(true);
+    expect(Array.isArray(res.body.contacts)).toBe(true);
+  });
+
+  it('GET /circles/:id/sync supports ?limit pagination', async () => {
+    const res = await req.get(`/api/care/circles/${circleId}/sync?limit=1&offset=0`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.pagination).toBeDefined();
+    expect(res.body.pagination.limit).toBe(1);
+    expect(res.body.medications.length).toBeLessThanOrEqual(1);
+  });
+
+  it('POST /circles/:id/sync applies create changes via bidirectional sync', async () => {
+    const res = await req.post(`/api/care/circles/${circleId}/sync`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        changes: [
+          {
+            entityType: 'medication',
+            entityId: null,
+            action: 'create',
+            data: { name: 'Synced Med', dosage: '75mg', frequency: 'daily', is_active: true },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toHaveLength(1);
+    expect(res.body.conflicts).toHaveLength(0);
+
+    // Verify in DB
+    const newId = res.body.applied[0].serverId;
+    const row = await db.query('SELECT name FROM vault_medications WHERE id = $1', [newId]);
+    expect(row.rows[0].name).toBe('Synced Med');
+  });
+
+  it('POST /circles/:id/sync applies update and delete changes', async () => {
+    const res = await req.post(`/api/care/circles/${circleId}/sync`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        changes: [
+          {
+            entityType: 'medication',
+            entityId: syncMedId,
+            action: 'update',
+            data: { dosage: '100mg' },
+          },
+          {
+            entityType: 'doctor',
+            entityId: '00000000-0000-0000-0000-000000000000',
+            action: 'delete',
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toHaveLength(1); // update applied
+    expect(res.body.conflicts).toHaveLength(1); // delete of non-existent doctor
+
+    // Verify update took effect
+    const row = await db.query('SELECT dosage FROM vault_medications WHERE id = $1', [syncMedId]);
+    expect(row.rows[0].dosage).toBe('100mg');
+  });
+
+  it('POST /circles/:id/sync rejects unknown entity types', async () => {
+    const res = await req.post(`/api/care/circles/${circleId}/sync`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        changes: [
+          { entityType: 'admin_users', entityId: null, action: 'create', data: { email: 'hack@example.com' } },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toHaveLength(0);
+    expect(res.body.conflicts[0].reason).toBe('invalid_entity_type');
+  });
+
+  it('POST /circles/:id/sync rejects non-whitelisted column names', async () => {
+    const res = await req.post(`/api/care/circles/${circleId}/sync`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        changes: [
+          {
+            entityType: 'medication',
+            entityId: null,
+            action: 'create',
+            data: { name: 'Valid', circle_id: 'injected', DROP_TABLE: '1' },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toHaveLength(0);
+    expect(res.body.conflicts[0].reason).toBe('invalid_fields');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 13. ADMIN USER MANAGEMENT — suspend, unsuspend, audit trail
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Admin user management (real DB)', () => {
+  it('GET /api/admin/users returns paginated list with total count', async () => {
+    const res = await req.get('/api/admin/users')
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.users)).toBe(true);
+    expect(typeof res.body.pagination.total).toBe('number');
+    expect(res.body.pagination.total).toBeGreaterThanOrEqual(1);
+  });
+
+  it('GET /api/admin/users/:id returns user detail', async () => {
+    const res = await req.get(`/api/admin/users/${ownerUserId}`)
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.id).toBe(ownerUserId);
+    expect(res.body.user.email).toBe(ownerEmail);
+  });
+
+  it('POST /api/admin/users/:id/suspend sets is_active=false and creates audit log', async () => {
+    const res = await req.post(`/api/admin/users/${ownerUserId}/suspend`)
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`)
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({ reason: 'Test suspension for integration test' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Verify DB: is_active=false AND suspended_at set
+    const row = await db.query(
+      'SELECT is_active, suspended_at, suspended_reason FROM users WHERE id = $1',
+      [ownerUserId]
+    );
+    expect(row.rows[0].is_active).toBe(false);
+    expect(row.rows[0].suspended_at).not.toBeNull();
+    expect(row.rows[0].suspended_reason).toBe('Test suspension for integration test');
+
+    // Verify audit log created
+    const auditRow = await db.query(
+      "SELECT action FROM admin_audit_logs WHERE resource_id = $1 AND action = 'suspend_user' ORDER BY created_at DESC LIMIT 1",
+      [ownerUserId]
+    );
+    expect(auditRow.rows).toHaveLength(1);
+  });
+
+  it('suspended user login returns 401 (is_active=false blocks login)', async () => {
+    // Use a fresh user so we don't hit the care login rate limiter
+    const suspendedEmail = `suspend-check-${Date.now()}@realtest.karuna`;
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const hash = bcrypt.hashSync('TempPass123!', 1);
+    const userRow = await db.query(
+      `INSERT INTO users (email, password_hash, name, is_verified, is_active)
+       VALUES ($1, $2, 'Suspend Check', true, false) RETURNING id`,
+      [suspendedEmail, hash]
+    );
+    const suspendedUserId = userRow.rows[0].id;
+
+    const res = await req.post('/api/care/auth/login').send({
+      email: suspendedEmail,
+      password: 'TempPass123!',
+    });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/suspended/i);
+
+    // Clean up
+    await db.query('DELETE FROM users WHERE id = $1', [suspendedUserId]);
+  });
+
+  it('POST /api/admin/users/:id/unsuspend re-activates user', async () => {
+    const res = await req.post(`/api/admin/users/${ownerUserId}/unsuspend`)
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`)
+      .set('X-Requested-With', 'XMLHttpRequest');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Verify DB
+    const row = await db.query(
+      'SELECT is_active, suspended_at FROM users WHERE id = $1',
+      [ownerUserId]
+    );
+    expect(row.rows[0].is_active).toBe(true);
+    expect(row.rows[0].suspended_at).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 14. ADMIN AUDIT LOG — unknown-email login failure no longer crashes
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Admin audit log — pre-auth events (real DB)', () => {
+  it('login failure for unknown email returns 401 and inserts null-admin_id audit row', async () => {
+    const before = await db.query(
+      "SELECT COUNT(*) FROM admin_audit_logs WHERE action = 'login_failed' AND admin_email = 'unknown@realtest.karuna'"
+    );
+    const countBefore = parseInt(before.rows[0].count);
+
+    const res = await req.post('/api/admin/auth/login')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({ email: 'unknown@realtest.karuna', password: 'wrongpass' });
+
+    expect(res.status).toBe(401);
+
+    const afterCount = await db.query(
+      "SELECT COUNT(*) FROM admin_audit_logs WHERE action = 'login_failed' AND admin_email = $1",
+      ['unknown@realtest.karuna']
+    );
+    const countAfter = parseInt(afterCount.rows[0].count);
+
+    // Row was inserted (admin_id is now nullable — no longer silently dropped)
+    expect(countAfter).toBeGreaterThan(countBefore);
+
+    const lastRow = await db.query(
+      "SELECT admin_id FROM admin_audit_logs WHERE action = 'login_failed' AND admin_email = $1 ORDER BY created_at DESC LIMIT 1",
+      ['unknown@realtest.karuna']
+    );
+    expect(lastRow.rows[0].admin_id).toBeNull(); // no admin associated
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 15. ADMIN CIRCLES — list and deactivate
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Admin circle management (real DB)', () => {
+  it('GET /api/admin/circles returns all circles with member count', async () => {
+    const res = await req.get('/api/admin/circles')
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
+
+    expect(res.status).toBe(200);
+    const circles = res.body.circles || res.body.data || res.body;
+    expect(Array.isArray(circles)).toBe(true);
+    const ours = circles.find((c: any) => c.id === circleId);
+    expect(ours).toBeDefined();
+  });
+
+  it('GET /api/admin/circles?limit=1 respects pagination cap', async () => {
+    const res = await req.get('/api/admin/circles?limit=1&offset=0')
+      .set('Authorization', `Bearer ${sharedSuperAdminJwt}`);
+
+    expect(res.status).toBe(200);
+    const circles = res.body.circles || res.body.data || [];
+    expect(circles.length).toBeLessThanOrEqual(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 16. LOGIN RATE LIMITER — moved last so it doesn't affect other login tests
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Login rate limiter (real DB, real rate-limit) — LAST', () => {
+  it('returns 429 after excessive login attempts within 1 minute', async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 15; i++) {
+      const res = await req.post('/api/care/auth/login').send({
+        email: `ratelimit-${i}-${Date.now()}@realtest.karuna`,
+        password: 'wrongpass',
+      });
+      statuses.push(res.status);
+    }
+    // Rate limiter (5/min) must have triggered at least once
+    expect(statuses.some((s) => s === 429)).toBe(true);
+  }, 20_000);
 });
