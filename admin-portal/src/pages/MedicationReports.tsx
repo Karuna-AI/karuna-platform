@@ -71,23 +71,26 @@ export default function MedicationReports() {
 
   const loadData = async () => {
     setLoading(true);
-    try {
-      const [overviewRes, trendsRes] = await Promise.all([
-        adminAPI.get(`/medications/overview?days=${days}`),
-        adminAPI.get(`/medications/trends?days=${days}`),
-      ]);
 
+    try {
+      const overviewRes = await adminAPI.get(`/medications/overview?days=${days}`);
       setSummary(overviewRes.data.summary);
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
       setTopMedications(overviewRes.data.topMedications);
       setMissedDoses(overviewRes.data.missedDoses);
+    } catch (error) {
+      console.error('Failed to load medication overview:', error);
+    }
+
+    try {
+      const trendsRes = await adminAPI.get(`/medications/trends?days=${days}`);
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);
     } catch (error) {
-      console.error('Failed to load medication data:', error);
-    } finally {
-      setLoading(false);
+      console.error('Failed to load medication trends:', error);
     }
+
+    setLoading(false);
   };
 
   const getAdherenceClass = (rate: string | null) => {

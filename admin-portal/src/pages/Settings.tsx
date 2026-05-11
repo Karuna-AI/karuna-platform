@@ -11,6 +11,7 @@ export default function Settings() {
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const { admin } = useAuth();
+  const canManageSettings = admin?.permissions?.canManageSettings;
 
   useEffect(() => {
     loadSettings();
@@ -43,6 +44,7 @@ export default function Settings() {
 
   const handleSave = async () => {
     if (!editingSetting) return;
+    if (!canManageSettings) return;
     if (jsonError) return;
 
     let parsedValue: unknown;
@@ -71,8 +73,6 @@ export default function Settings() {
       setSaveError(result.error || 'Failed to save setting');
     }
   };
-
-  const canManageSettings = admin?.permissions?.canManageSettings;
 
   const formatValue = (value: any) => {
     if (typeof value === 'object') {

@@ -1,6 +1,8 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { useIdleTimeout } from './hooks/useIdleTimeout';
+import { useEffect } from 'react';
+import api from './services/api';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -18,7 +20,14 @@ import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { admin, isLoading, logout } = useAuth();
-  const { showWarning, remainingSeconds, resetTimer } = useIdleTimeout(logout);
+  const navigate = useNavigate();
+  const { showWarning, remainingSeconds, resetTimer } = useIdleTimeout(logout, () => { api.getProfile(); });
+
+  useEffect(() => {
+    const handler = () => { logout(); navigate('/login', { replace: true }); };
+    window.addEventListener('karuna:auth:unauthorized', handler);
+    return () => window.removeEventListener('karuna:auth:unauthorized', handler);
+  }, [logout, navigate]);
 
   if (isLoading) {
     return (

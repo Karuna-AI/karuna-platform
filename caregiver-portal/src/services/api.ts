@@ -19,6 +19,8 @@ import type {
   DashboardData,
 } from '../types';
 
+const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || 'csrf-token';
+
 class ApiService {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -44,7 +46,7 @@ class ApiService {
       if (['post', 'put', 'patch', 'delete'].includes(method)) {
         const csrfToken = document.cookie
           .split('; ')
-          .find(row => row.startsWith('csrf-token='))
+          .find(row => row.startsWith(`${CSRF_COOKIE_NAME}=`))
           ?.split('=')[1];
         if (csrfToken) {
           config.headers['X-CSRF-Token'] = decodeURIComponent(csrfToken);

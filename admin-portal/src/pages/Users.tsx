@@ -57,12 +57,6 @@ export default function Users() {
     loadUsers(1, debouncedSearch, status, sort);
   }, [debouncedSearch, status, sort]);
 
-  useEffect(() => {
-    if (pagination.page > 1) {
-      loadUsers(pagination.page, debouncedSearch, status, sort);
-    }
-  }, [pagination.page]);
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     loadUsers(1);
@@ -244,14 +238,14 @@ export default function Users() {
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page <= 1}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  onClick={() => loadUsers(pagination.page - 1, debouncedSearch, status, sort)}
                 >
                   Previous
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page >= pagination.pages}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  onClick={() => loadUsers(pagination.page + 1, debouncedSearch, status, sort)}
                 >
                   Next
                 </button>

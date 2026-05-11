@@ -47,7 +47,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, onAcknowledge,
 
       <div className="space-y-3">
         {alerts.map((alert) => {
-          const colors = severityColors[alert.severity];
+          const colors = severityColors[alert.severity as keyof typeof severityColors] ?? severityColors.medium;
           const icon = alertTypeIcons[alert.alertType] || '⚠️';
 
           return (
@@ -89,7 +89,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, onAcknowledge,
                   )}
                   {alert.status === 'acknowledged' && (
                     <span className="text-sm text-gray-500">
-                      Acknowledged by {alert.acknowledgedByName}
+                      Acknowledged{alert.acknowledgedByName ? ` by ${alert.acknowledgedByName}` : ''}
                     </span>
                   )}
                 </div>

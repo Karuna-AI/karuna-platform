@@ -5,9 +5,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { admin, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login', { replace: true });
   };
 
   const navItems = [

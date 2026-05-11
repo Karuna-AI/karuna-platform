@@ -113,20 +113,26 @@ export default function HealthAlerts() {
   };
 
   const handleAcknowledge = async (alertId: string) => {
-    const result = await adminAPI.post(`/health-alerts/${alertId}/acknowledge`);
-    if (result.status >= 200 && result.status < 300) {
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged' } : a))
-      );
+    const prevAlerts = alerts;
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged' } : a))
+    );
+    try {
+      await adminAPI.post(`/health-alerts/${alertId}/acknowledge`);
+    } catch {
+      setAlerts(prevAlerts);
     }
   };
 
   const handleResolve = async (alertId: string) => {
-    const result = await adminAPI.post(`/health-alerts/${alertId}/resolve`);
-    if (result.status >= 200 && result.status < 300) {
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved' } : a))
-      );
+    const prevAlerts = alerts;
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved' } : a))
+    );
+    try {
+      await adminAPI.post(`/health-alerts/${alertId}/resolve`);
+    } catch {
+      setAlerts(prevAlerts);
     }
   };
 

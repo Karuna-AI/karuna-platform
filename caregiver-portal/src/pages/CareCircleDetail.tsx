@@ -125,15 +125,22 @@ export default function CareCircleDetail() {
       setCircle(result.data);
       setMembers(result.data.members || []);
 
-      // Load dashboard data
-      const dashResult = await api.getDashboard(id!);
+      // Load dashboard and vault data in parallel
+      const [dashResult, syncResult] = await Promise.all([
+        api.getDashboard(id!),
+        api.getSyncData(id!),
+      ]);
       if (dashResult.success && dashResult.data) {
         setDashboardData(dashResult.data);
+      }
+      if (syncResult.success && syncResult.data) {
+        setVaultData(syncResult.data);
       }
     } else {
       setError(result.error || 'Failed to load care circle');
     }
     setIsLoading(false);
+    setIsVaultLoading(false);
   };
 
   const handleAcknowledgeAlert = async (alertId: string) => {

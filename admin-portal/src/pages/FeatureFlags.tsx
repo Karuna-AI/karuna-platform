@@ -7,6 +7,7 @@ export default function FeatureFlags() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFlag, setNewFlag] = useState({ name: '', description: '', is_enabled: false });
+  const [createError, setCreateError] = useState<string | null>(null);
   const [pendingRollout, setPendingRollout] = useState<Record<string, number>>({});
   const { admin } = useAuth();
 
@@ -69,11 +70,14 @@ export default function FeatureFlags() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCreateError(null);
     const result = await api.createFeatureFlag(newFlag);
     if (result.success) {
       setFlags([...flags, result.data.flag]);
       setShowCreateModal(false);
       setNewFlag({ name: '', description: '', is_enabled: false });
+    } else {
+      setCreateError(result.error || 'Failed to create feature flag');
     }
   };
 
@@ -168,11 +172,11 @@ export default function FeatureFlags() {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowCreateModal(false); setCreateError(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">Create Feature Flag</h3>
-              <button className="modal-close" onClick={() => setShowCreateModal(false)}>×</button>
+              <button className="modal-close" onClick={() => { setShowCreateModal(false); setCreateError(null); }}>×</button>
             </div>
             <form onSubmit={handleCreate}>
               <div className="modal-body">
@@ -208,8 +212,13 @@ export default function FeatureFlags() {
                   </label>
                 </div>
               </div>
+              {createError && (
+                <div style={{ color: 'var(--error, #e53e3e)', fontSize: '0.875rem', padding: '0 1.5rem 0.5rem' }}>
+                  {createError}
+                </div>
+              )}
               <div className="modal-footer">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn-secondary">
+                <button type="button" onClick={() => { setShowCreateModal(false); setCreateError(null); }} className="btn btn-secondary">
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">

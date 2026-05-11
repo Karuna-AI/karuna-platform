@@ -58,8 +58,10 @@ const healthTypeConfig: Record<string, { icon: string; label: string; unit: stri
 
 const getTimeAgo = (dateStr: string): string => {
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return 'Unknown';
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 0) return 'Just now';
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
@@ -97,7 +99,10 @@ export const HealthCard: React.FC<HealthCardProps> = ({ readings }) => {
             format: (v: Record<string, number>) => JSON.stringify(v),
           };
 
-          const value = typeof reading.value === 'object' ? reading.value : { value: reading.value };
+          const value: Record<string, number> =
+            reading.value !== null && typeof reading.value === 'object'
+              ? (reading.value as Record<string, number>)
+              : { value: (reading.value as number) ?? 0 };
 
           return (
             <div
