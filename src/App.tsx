@@ -129,8 +129,15 @@ function App(): JSX.Element {
   // Security state
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [isVaultLocked, setIsVaultLocked] = useState(true);
+  const isVaultLockedRef = React.useRef(true);
   const [pendingVaultNavigation, setPendingVaultNavigation] = useState<Screen | null>(null);
   const [isSecurityInitialized, setIsSecurityInitialized] = useState(false);
+
+  // Invite token from karuna://invite/TOKEN deep links
+  const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+
+  // Keep ref in sync so the deep-link handler (useEffect with [] deps) can read current vault lock state
+  React.useEffect(() => { isVaultLockedRef.current = isVaultLocked; }, [isVaultLocked]);
 
   // State for intent action modal
   const [showIntentModal, setShowIntentModal] = useState(false);
@@ -322,12 +329,35 @@ function App(): JSX.Element {
 
   // Handle incoming deep links
   useEffect(() => {
+    const VAULT_SCREENS: string[] = [
+      'vault', 'vault_accounts', 'vault_medications', 'vault_documents',
+      'vault_doctors', 'vault_appointments', 'vault_contacts',
+    ];
+
     const handleUrl = (url: string) => {
       const parsed = parseKarunaUrl(url);
-      if (parsed) {
-        console.debug('[DeepLink] Navigating to:', parsed.screen);
-        setCurrentScreen(parsed.screen as Screen);
+      if (!parsed) return;
+
+      console.debug('[DeepLink] Navigating to:', parsed.screen, parsed.params);
+
+      // Invite links — extract token and navigate to care_circle
+      if (parsed.screen === 'join_circle') {
+        if (parsed.params?.token) {
+          setPendingInviteToken(parsed.params.token);
+        }
+        setCurrentScreen('care_circle');
+        return;
       }
+
+      // Vault screens require authentication
+      if (VAULT_SCREENS.includes(parsed.screen)) {
+        if (biometricAuthService.requiresAuthentication('vault') && isVaultLockedRef.current) {
+          setPendingVaultNavigation(parsed.screen as Screen);
+          return;
+        }
+      }
+
+      setCurrentScreen(parsed.screen as Screen);
     };
 
     // Handle URL that launched the app
@@ -597,6 +627,7 @@ function App(): JSX.Element {
   }, []);
 
   const handleCloseCareCircle = useCallback(() => {
+    setPendingInviteToken(null);
     setCurrentScreen('chat');
   }, []);
 
@@ -765,7 +796,7 @@ function App(): JSX.Element {
         return <VaultContactScreen onClose={handleVaultSubClose} />;
 
       case 'care_circle':
-        return <CareCircleScreen onBack={handleCloseCareCircle} />;
+        return <CareCircleScreen onBack={handleCloseCareCircle} inviteToken={pendingInviteToken ?? undefined} />;
 
       case 'security':
         return (
