@@ -237,6 +237,15 @@ class AdminApiService {
     }
   }
 
+  async deleteFeatureFlag(flagId: string): Promise<ApiResponse<void>> {
+    try {
+      await this.client.delete(`/feature-flags/${flagId}`);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Failed to delete feature flag' };
+    }
+  }
+
   // Audit Logs
   async getAuditLogs(params: { page?: number; limit?: number; action?: string } = {}): Promise<ApiResponse<any>> {
     try {

@@ -8,6 +8,11 @@ export default function FeatureFlags() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFlag, setNewFlag] = useState({ name: '', description: '', is_enabled: false });
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [editingFlag, setEditingFlag] = useState<any>(null);
+  const [editForm, setEditForm] = useState({ description: '' });
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingRollout, setPendingRollout] = useState<Record<string, number>>({});
   const { admin } = useAuth();
 
@@ -68,6 +73,29 @@ export default function FeatureFlags() {
     });
   };
 
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFlag) return;
+    setEditError(null);
+    const result = await api.updateFeatureFlag(editingFlag.id, { description: editForm.description });
+    if (result.success) {
+      setFlags((prev) => prev.map((f) => f.id === editingFlag.id ? { ...f, description: editForm.description } : f));
+      setEditingFlag(null);
+    } else {
+      setEditError(result.error || 'Failed to update flag');
+    }
+  };
+
+  const handleDelete = async (flag: any) => {
+    if (!confirm(`Delete flag "${flag.name}"? This cannot be undone.`)) return;
+    setDeletingId(flag.id);
+    const result = await api.deleteFeatureFlag(flag.id);
+    setDeletingId(null);
+    if (result.success) {
+      setFlags((prev) => prev.filter((f) => f.id !== flag.id));
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
@@ -112,6 +140,7 @@ export default function FeatureFlags() {
                   <th>Enabled</th>
                   <th>For All</th>
                   <th>Rollout %</th>
+                  {canManageFlags && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -162,6 +191,25 @@ export default function FeatureFlags() {
                         </span>
                       </div>
                     </td>
+                    {canManageFlags && (
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            onClick={() => { setEditingFlag(flag); setEditForm({ description: flag.description || '' }); setEditError(null); }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={() => handleDelete(flag)}
+                            disabled={deletingId === flag.id}
+                          >
+                            {deletingId === flag.id ? '...' : 'Delete'}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -223,6 +271,45 @@ export default function FeatureFlags() {
                 </button>
                 <button type="submit" className="btn btn-primary">
                   Create Flag
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingFlag && (
+        <div className="modal-overlay" onClick={() => { setEditingFlag(null); setEditError(null); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Edit Flag: {editingFlag.name}</h3>
+              <button className="modal-close" onClick={() => { setEditingFlag(null); setEditError(null); }}>×</button>
+            </div>
+            <form onSubmit={handleEdit}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <textarea
+                    className="form-input"
+                    rows={3}
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ description: e.target.value })}
+                    placeholder="What does this flag control?"
+                  />
+                </div>
+              </div>
+              {editError && (
+                <div style={{ color: 'var(--error, #e53e3e)', fontSize: '0.875rem', padding: '0 1.5rem 0.5rem' }}>
+                  {editError}
+                </div>
+              )}
+              <div className="modal-footer">
+                <button type="button" onClick={() => { setEditingFlag(null); setEditError(null); }} className="btn btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Save Changes
                 </button>
               </div>
             </form>

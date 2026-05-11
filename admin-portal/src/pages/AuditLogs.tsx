@@ -53,6 +53,25 @@ export default function AuditLogs() {
 
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleString();
 
+  const exportCsv = () => {
+    const headers = activeTab === 'admin'
+      ? ['Timestamp', 'Admin', 'Action', 'Resource Type', 'IP Address']
+      : ['Timestamp', 'Action', 'Category', 'Description'];
+    const rows = logs.map((log) => activeTab === 'admin'
+      ? [formatDate(log.created_at), log.admin_email, log.action, log.resource_type || '', log.ip_address || '']
+      : [formatDate(log.created_at), log.action, log.category || '', log.description || '']);
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-logs-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const paginationStart = (page - 1) * PAGE_LIMIT + 1;
   const paginationEnd = Math.min(page * PAGE_LIMIT, total || page * PAGE_LIMIT);
 
@@ -60,9 +79,14 @@ export default function AuditLogs() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Audit Logs</h1>
-        <button onClick={() => loadLogs(page, activeTab, actionFilter)} className="btn btn-secondary">
-          Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button onClick={exportCsv} className="btn btn-secondary" disabled={logs.length === 0}>
+            Export CSV
+          </button>
+          <button onClick={() => loadLogs(page, activeTab, actionFilter)} className="btn btn-secondary">
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="tabs">

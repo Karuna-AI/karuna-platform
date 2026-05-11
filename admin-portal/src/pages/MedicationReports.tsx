@@ -93,6 +93,31 @@ export default function MedicationReports() {
     setLoading(false);
   };
 
+  const exportCsv = () => {
+    let headers: string[];
+    let rows: string[][];
+    if (activeTab === 'overview') {
+      headers = ['Care Recipient', 'Circle', 'Total Doses', 'Taken', 'Missed', 'Adherence %'];
+      rows = adherenceByCircle.map((c) => [c.care_recipient_name, c.name, c.total_doses, c.taken, c.missed, c.adherence_rate]);
+    } else if (activeTab === 'trends') {
+      headers = ['Date', 'Total', 'Taken', 'Missed', 'Adherence %'];
+      rows = dailyAdherence.map((d) => [d.date, d.total, d.taken, d.missed, d.adherence_rate]);
+    } else {
+      headers = ['Scheduled Time', 'Medication', 'Dosage', 'Care Recipient', 'Circle'];
+      rows = missedDoses.map((d) => [new Date(d.scheduled_time).toLocaleString(), d.medication_name, d.dosage, d.care_recipient_name, d.circle_name]);
+    }
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `medications-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const getAdherenceClass = (rate: string | null) => {
     if (!rate) return 'adherence-na';
     const num = parseFloat(rate);
@@ -117,12 +142,15 @@ export default function MedicationReports() {
     <>
       <div className="page-header">
         <h1>Medication Reports</h1>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
           </select>
+          <button className="btn btn-secondary" onClick={exportCsv}>
+            Export CSV
+          </button>
         </div>
       </div>
 
