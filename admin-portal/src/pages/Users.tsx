@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../context/ToastContext';
+import type { AdminUser, Pagination } from '../types';
 
 type SortDir = 'asc' | 'desc';
 
@@ -19,8 +20,8 @@ interface SortConfig {
 
 export default function Users() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [users, setUsers] = useState<any[]>([]);
-  const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 1 });
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [isLoading, setIsLoading] = useState(true);

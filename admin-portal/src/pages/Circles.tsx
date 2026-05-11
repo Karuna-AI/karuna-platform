@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
+import type { AdminCircle, Pagination } from '../types';
 
 export default function Circles() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [circles, setCircles] = useState<any[]>([]);
-  const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
+  const [circles, setCircles] = useState<AdminCircle[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 1 });
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();

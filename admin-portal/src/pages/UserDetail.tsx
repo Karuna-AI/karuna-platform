@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import type { AdminUser, AdminCircle } from '../types';
 
 export default function UserDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [circles, setCircles] = useState<any[]>([]);
+  const [user, setUser] = useState<AdminUser | null>(null);
+  const [circles, setCircles] = useState<AdminCircle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);

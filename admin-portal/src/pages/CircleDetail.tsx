@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import type { AdminCircle, CircleMember, CircleStats } from '../types';
 
 export default function CircleDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [circle, setCircle] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [circle, setCircle] = useState<AdminCircle | null>(null);
+  const [members, setMembers] = useState<CircleMember[]>([]);
+  const [stats, setStats] = useState<CircleStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 

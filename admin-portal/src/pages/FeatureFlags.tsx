@@ -2,16 +2,17 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import type { FeatureFlag } from '../types';
 
 export default function FeatureFlags() {
-  const [flags, setFlags] = useState<any[]>([]);
+  const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFlag, setNewFlag] = useState({ name: '', description: '', is_enabled: false });
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const [editingFlag, setEditingFlag] = useState<any>(null);
+  const [editingFlag, setEditingFlag] = useState<FeatureFlag | null>(null);
   const [editForm, setEditForm] = useState({ description: '' });
   const [editError, setEditError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export default function FeatureFlags() {
     setIsLoading(false);
   };
 
-  const handleToggle = async (flag: any) => {
+  const handleToggle = async (flag: FeatureFlag) => {
     setFlags((prev) =>
       prev.map((f) => (f.id === flag.id ? { ...f, is_enabled: !f.is_enabled } : f))
     );
@@ -48,7 +49,7 @@ export default function FeatureFlags() {
     }
   };
 
-  const handleToggleForAll = async (flag: any) => {
+  const handleToggleForAll = async (flag: FeatureFlag) => {
     setFlags((prev) =>
       prev.map((f) => (f.id === flag.id ? { ...f, enabled_for_all: !f.enabled_for_all } : f))
     );
@@ -93,7 +94,7 @@ export default function FeatureFlags() {
     }
   };
 
-  const handleDelete = async (flag: any) => {
+  const handleDelete = async (flag: FeatureFlag) => {
     if (!confirm(`Delete flag "${flag.name}"? This cannot be undone.`)) return;
     setDeletingId(flag.id);
     const result = await api.deleteFeatureFlag(flag.id);

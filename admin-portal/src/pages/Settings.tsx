@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import type { SystemSetting } from '../types';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<Record<string, any[]>>({});
+  const [settings, setSettings] = useState<Record<string, SystemSetting[]>>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [editingSetting, setEditingSetting] = useState<any>(null);
+  const [editingSetting, setEditingSetting] = useState<SystemSetting | null>(null);
   const [editValue, setEditValue] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [saveError, setSaveError] = useState('');
