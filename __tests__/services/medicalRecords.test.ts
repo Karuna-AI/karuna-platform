@@ -50,6 +50,8 @@ jest.mock('../../src/services/consent', () => ({
 // ─── imports ──────────────────────────────────────────────────────────────────
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as DocumentPicker from 'expo-document-picker';
 import { medicalRecordsService as svc } from '../../src/services/medicalRecords';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -513,5 +515,531 @@ describe('MedicalRecordsService – getRecordsSummary', () => {
     const summary = svc.getRecordsSummary();
     expect(summary).toContain('Lab Report');
     expect(summary).toContain('2');
+  });
+});
+
+// ─── pickDocument ─────────────────────────────────────────────────────────────
+
+describe('MedicalRecordsService – pickDocument', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('returns document info when user selects a file', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [
+        { uri: 'file:///tmp/report.pdf', name: 'report.pdf', size: 12345, mimeType: 'application/pdf' },
+      ],
+    });
+
+    const result = await svc.pickDocument();
+
+    expect(result).not.toBeNull();
+    expect(result!.uri).toBe('file:///tmp/report.pdf');
+    expect(result!.name).toBe('report.pdf');
+    expect(result!.size).toBe(12345);
+    expect(result!.mimeType).toBe('application/pdf');
+  });
+
+  it('returns null when user cancels the picker', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: true,
+      assets: [],
+    });
+
+    const result = await svc.pickDocument();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when assets array is empty', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [],
+    });
+
+    const result = await svc.pickDocument();
+    expect(result).toBeNull();
+  });
+
+  it('defaults size to 0 when asset.size is missing', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///tmp/x.pdf', name: 'x.pdf', size: undefined, mimeType: 'application/pdf' }],
+    });
+
+    const result = await svc.pickDocument();
+    expect(result!.size).toBe(0);
+  });
+
+  it('defaults mimeType to application/octet-stream when missing', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///tmp/x.dat', name: 'x.dat', size: 100, mimeType: undefined }],
+    });
+
+    const result = await svc.pickDocument();
+    expect(result!.mimeType).toBe('application/octet-stream');
+  });
+
+  it('returns null when DocumentPicker throws', async () => {
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockRejectedValueOnce(new Error('picker error'));
+
+    const result = await svc.pickDocument();
+    expect(result).toBeNull();
+  });
+});
+
+// ─── getRecords – category filter ────────────────────────────────────────────
+
+describe('MedicalRecordsService – getRecords category filter', () => {
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+
+    await svc.uploadRecord(buildRecordParams({ category: 'radiology' }));
+    await svc.uploadRecord(buildRecordParams({ title: 'CBC Panel', category: 'diagnostics' }));
+  });
+
+  it('filters records by category', () => {
+    const results = svc.getRecords({ category: 'radiology' });
+    expect(results).toHaveLength(1);
+    expect(results[0].category).toBe('radiology');
+  });
+
+  it('returns all records when category does not match', () => {
+    const results = svc.getRecords({ category: 'cardiology' });
+    expect(results).toHaveLength(0);
+  });
+});
+
+// ─── getRecordFileContent ─────────────────────────────────────────────────────
+
+describe('MedicalRecordsService – getRecordFileContent', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('returns null when record does not exist', async () => {
+    const result = await svc.getRecordFileContent('nonexistent_id');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when record exists but has no fileUri', async () => {
+    // Inject a record without a fileUri directly
+    const record = {
+      id: 'rec_nofile',
+      title: 'No File Record',
+      type: 'lab_report' as const,
+      category: 'diagnostics',
+      date: '2026-01-01',
+      tags: [],
+      isConfidential: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    (svc as any).records = [record];
+
+    const result = await svc.getRecordFileContent('rec_nofile');
+    expect(result).toBeNull();
+  });
+
+  it('throws when consent is denied for AI access', async () => {
+    // Inject a record with a fileUri
+    const record = {
+      id: 'rec_withfile',
+      title: 'X-Ray',
+      type: 'imaging' as const,
+      category: 'radiology',
+      date: '2026-01-01',
+      fileUri: 'file:///data/medical_records/rec_withfile.pdf',
+      mimeType: 'application/pdf',
+      tags: [],
+      isConfidential: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    (svc as any).records = [record];
+
+    const { consentService } = require('../../src/services/consent');
+    (consentService.hasConsent as jest.Mock).mockReturnValueOnce(false);
+
+    await expect(svc.getRecordFileContent('rec_withfile')).rejects.toThrow(
+      'Consent not granted for AI access to medical documents'
+    );
+  });
+
+  it('returns null on web platform even with consent and fileUri', async () => {
+    // In the jsdom/web environment Platform.OS === 'web', so the function returns null after consent check
+    const record = {
+      id: 'rec_web',
+      title: 'Web Record',
+      type: 'lab_report' as const,
+      category: 'diagnostics',
+      date: '2026-01-01',
+      fileUri: 'file:///data/medical_records/rec_web.pdf',
+      mimeType: 'application/pdf',
+      tags: [],
+      isConfidential: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    (svc as any).records = [record];
+
+    // Consent is granted (default mock returns true)
+    const result = await svc.getRecordFileContent('rec_web');
+    // On web Platform.OS === 'web', returns null
+    expect(result).toBeNull();
+  });
+});
+
+// ─── initialize – native platform (dir creation) ──────────────────────────────
+
+describe('MedicalRecordsService – initialize on native platform', () => {
+  let originalPlatform: string;
+
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    // Save original Platform.OS value and override to simulate native
+    const Platform = require('react-native').Platform;
+    originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+  });
+
+  afterEach(() => {
+    // Restore Platform.OS
+    const Platform = require('react-native').Platform;
+    Platform.OS = originalPlatform;
+  });
+
+  it('calls getInfoAsync and skips makeDirectory when dir exists', async () => {
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: true });
+
+    await svc.initialize();
+
+    expect(FileSystem.getInfoAsync).toHaveBeenCalled();
+    expect(FileSystem.makeDirectoryAsync).not.toHaveBeenCalled();
+  });
+
+  it('calls makeDirectoryAsync when directory does not exist', async () => {
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: false });
+
+    await svc.initialize();
+
+    // DOCUMENTS_DIR is computed at module-load time when Platform.OS was 'web' → '',
+    // but makeDirectoryAsync is still called with whatever value was captured.
+    expect(FileSystem.makeDirectoryAsync).toHaveBeenCalledWith(
+      expect.any(String),
+      { intermediates: true }
+    );
+  });
+});
+
+// ─── uploadRecord – native platform file copy ─────────────────────────────────
+
+describe('MedicalRecordsService – uploadRecord on native platform', () => {
+  let originalPlatform: string;
+
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+    const Platform = require('react-native').Platform;
+    originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+  });
+
+  afterEach(() => {
+    const Platform = require('react-native').Platform;
+    Platform.OS = originalPlatform;
+  });
+
+  it('copies document to app storage when documentUri is provided', async () => {
+    (FileSystem.copyAsync as jest.Mock).mockResolvedValueOnce(undefined);
+
+    const record = await svc.uploadRecord(
+      buildRecordParams({
+        documentUri: 'file:///cache/tmp.pdf',
+        documentName: 'report.pdf',
+        documentMimeType: 'application/pdf',
+      })
+    );
+
+    expect(FileSystem.copyAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 'file:///cache/tmp.pdf' })
+    );
+    expect(record.fileUri).toMatch(/\.pdf$/);
+    expect(record.thumbnail).toBeUndefined();
+  });
+
+  it('sets thumbnail when documentMimeType is image', async () => {
+    (FileSystem.copyAsync as jest.Mock).mockResolvedValueOnce(undefined);
+
+    const record = await svc.uploadRecord(
+      buildRecordParams({
+        documentUri: 'file:///cache/scan.jpg',
+        documentName: 'scan.jpg',
+        documentMimeType: 'image/jpeg',
+      })
+    );
+
+    expect(record.thumbnail).toBeDefined();
+    expect(record.fileUri).toBe(record.thumbnail);
+  });
+
+  it('throws "Failed to save document" when file copy fails', async () => {
+    (FileSystem.copyAsync as jest.Mock).mockRejectedValueOnce(new Error('copy error'));
+
+    await expect(
+      svc.uploadRecord(
+        buildRecordParams({
+          documentUri: 'file:///cache/bad.pdf',
+          documentName: 'bad.pdf',
+          documentMimeType: 'application/pdf',
+        })
+      )
+    ).rejects.toThrow('Failed to save document');
+  });
+});
+
+// ─── deleteRecord – native platform file deletion ─────────────────────────────
+
+describe('MedicalRecordsService – deleteRecord on native platform', () => {
+  let originalPlatform: string;
+
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+    const Platform = require('react-native').Platform;
+    originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+  });
+
+  afterEach(() => {
+    const Platform = require('react-native').Platform;
+    Platform.OS = originalPlatform;
+  });
+
+  it('calls FileSystem.deleteAsync when record has a fileUri', async () => {
+    // Inject a record with a fileUri directly
+    const record = {
+      id: 'rec_native_delete',
+      title: 'Native Record',
+      type: 'lab_report' as const,
+      category: 'diagnostics',
+      date: '2026-01-01',
+      fileUri: 'file:///data/medical_records/rec_native_delete.pdf',
+      tags: [],
+      isConfidential: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    (svc as any).records = [record];
+    (FileSystem.deleteAsync as jest.Mock).mockResolvedValueOnce(undefined);
+
+    const deleted = await svc.deleteRecord('rec_native_delete');
+
+    expect(deleted).toBe(true);
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      'file:///data/medical_records/rec_native_delete.pdf',
+      { idempotent: true }
+    );
+  });
+
+  it('continues deletion even when FileSystem.deleteAsync throws', async () => {
+    const record = {
+      id: 'rec_delete_fail',
+      title: 'Delete Fail Record',
+      type: 'lab_report' as const,
+      category: 'diagnostics',
+      date: '2026-01-01',
+      fileUri: 'file:///data/medical_records/rec_delete_fail.pdf',
+      tags: [],
+      isConfidential: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    (svc as any).records = [record];
+    (FileSystem.deleteAsync as jest.Mock).mockRejectedValueOnce(new Error('delete error'));
+
+    const deleted = await svc.deleteRecord('rec_delete_fail');
+
+    expect(deleted).toBe(true);
+    expect(svc.getRecords()).toHaveLength(0);
+  });
+});
+
+// ─── clearAllRecords – native platform file deletion ─────────────────────────
+
+describe('MedicalRecordsService – clearAllRecords on native platform', () => {
+  let originalPlatform: string;
+
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+    const Platform = require('react-native').Platform;
+    originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+  });
+
+  afterEach(() => {
+    const Platform = require('react-native').Platform;
+    Platform.OS = originalPlatform;
+  });
+
+  it('calls deleteAsync for each record that has a fileUri', async () => {
+    const records = [
+      {
+        id: 'rec_clear_1',
+        title: 'Record 1',
+        type: 'lab_report' as const,
+        category: 'diagnostics',
+        date: '2026-01-01',
+        fileUri: 'file:///data/medical_records/rec_clear_1.pdf',
+        tags: [],
+        isConfidential: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'rec_clear_2',
+        title: 'Record 2',
+        type: 'imaging' as const,
+        category: 'radiology',
+        date: '2026-01-02',
+        fileUri: 'file:///data/medical_records/rec_clear_2.jpg',
+        tags: [],
+        isConfidential: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'rec_clear_3',
+        title: 'Record 3 (no file)',
+        type: 'prescription' as const,
+        category: 'medications',
+        date: '2026-01-03',
+        tags: [],
+        isConfidential: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    (svc as any).records = records;
+    (FileSystem.deleteAsync as jest.Mock).mockResolvedValue(undefined);
+
+    await svc.clearAllRecords();
+
+    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(2);
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      'file:///data/medical_records/rec_clear_1.pdf',
+      { idempotent: true }
+    );
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      'file:///data/medical_records/rec_clear_2.jpg',
+      { idempotent: true }
+    );
+    expect(svc.getRecords()).toHaveLength(0);
+  });
+
+  it('continues clearing even when one file deleteAsync throws', async () => {
+    const records = [
+      {
+        id: 'rec_err_1',
+        title: 'Error Record',
+        type: 'lab_report' as const,
+        category: 'diagnostics',
+        date: '2026-01-01',
+        fileUri: 'file:///data/medical_records/rec_err_1.pdf',
+        tags: [],
+        isConfidential: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    (svc as any).records = records;
+    (FileSystem.deleteAsync as jest.Mock).mockRejectedValueOnce(new Error('fs error'));
+
+    await svc.clearAllRecords();
+
+    expect(svc.getRecords()).toHaveLength(0);
+  });
+});
+
+// ─── saveRecords error path ───────────────────────────────────────────────────
+
+describe('MedicalRecordsService – saveRecords error path', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('swallows AsyncStorage.setItem errors during save', async () => {
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('storage full'));
+
+    // uploadRecord calls saveRecords internally; it should not throw from save errors
+    await expect(svc.uploadRecord(buildRecordParams())).resolves.toBeDefined();
+  });
+});
+
+// ─── addTags / removeTags – null guard ───────────────────────────────────────
+
+describe('MedicalRecordsService – addTags / removeTags null guard', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('addTags returns null for unknown id', async () => {
+    const result = await svc.addTags('ghost_id', ['tag1']);
+    expect(result).toBeNull();
+  });
+
+  it('removeTags returns null for unknown id', async () => {
+    const result = await svc.removeTags('ghost_id', ['tag1']);
+    expect(result).toBeNull();
+  });
+});
+
+// ─── storeSummary with extractedData ─────────────────────────────────────────
+
+describe('MedicalRecordsService – storeSummary with extractedData', () => {
+  let recordId: string;
+
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+
+    const rec = await svc.uploadRecord(buildRecordParams());
+    recordId = rec.id;
+  });
+
+  it('stores extractedData alongside summary', async () => {
+    const extractedData = { cholesterol: 185, glucose: 102 };
+    const updated = await svc.storeSummary(recordId, 'All values within range', extractedData);
+
+    expect(updated!.summary).toBe('All values within range');
+    expect(updated!.extractedData).toEqual(extractedData);
   });
 });

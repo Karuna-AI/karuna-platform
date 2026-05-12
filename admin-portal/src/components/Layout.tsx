@@ -14,14 +14,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { path: '/', icon: '📊', label: 'Dashboard', visible: true },
-    { path: '/users', icon: '👥', label: 'Users', visible: perms.canViewUsers === true },
-    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canViewCircles === true },
-    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewAnalytics === true },
-    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewAlerts === true },
-    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMedications === true },
-    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canViewFeatureFlags === true },
+    { path: '/users', icon: '👥', label: 'Users', visible: perms.canManageUsers === true },
+    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canManageCircles === true },
+    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewMetrics === true },
+    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewMetrics === true },
+    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMetrics === true },
+    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canManageFeatureFlags === true },
     { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs === true },
-    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canViewSettings === true },
+    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canManageSettings === true },
     { path: '/admins', icon: '🔐', label: 'Admin Management', visible: admin?.role === 'super_admin' },
   ].filter((item) => item.visible);
 

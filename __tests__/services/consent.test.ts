@@ -623,4 +623,206 @@ describe('ConsentService', () => {
       expect(exported.userId).toBe('user-1');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // initialize – error path (lines 67-78)
+  // ---------------------------------------------------------------------------
+  describe('initialize – AsyncStorage error path', () => {
+    it('creates minimal preferences when AsyncStorage.getItem throws', async () => {
+      // Simulate a storage failure during initialization
+      jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('Storage failure'));
+
+      await consentService.initialize('error-user');
+
+      // Service should be functional with default preferences
+      expect(consentService.isGlobalSharingEnabled()).toBe(false);
+      expect(consentService.hasAllRequiredConsents()).toBe(false);
+    });
+
+    it('marks service as initialized even after AsyncStorage error', async () => {
+      jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('Storage failure'));
+
+      await consentService.initialize('error-user');
+
+      // isInitialized flag should be set so subsequent calls are no-ops
+      expect((consentService as any).isInitialized).toBe(true);
+      // preferences should exist (minimal defaults) so the service is usable
+      expect((consentService as any).preferences).not.toBeNull();
+      expect((consentService as any).preferences.userId).toBe('error-user');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // grantConsent – not initialized (line 96)
+  // ---------------------------------------------------------------------------
+  describe('grantConsent – not initialized', () => {
+    it('returns error when preferences are null (not initialized)', async () => {
+      // Do NOT call initialize — preferences remain null
+      const result = await consentService.grantConsent('health_data', 'app', 'read');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not initialized/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // revokeConsent – not initialized (line 153)
+  // ---------------------------------------------------------------------------
+  describe('revokeConsent – not initialized', () => {
+    it('returns error when preferences are null (not initialized)', async () => {
+      const result = await consentService.revokeConsent('health_data', 'app');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not initialized/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // updateConsentScope – not initialized (line 388)
+  // ---------------------------------------------------------------------------
+  describe('updateConsentScope – not initialized', () => {
+    it('returns error when preferences are null (not initialized)', async () => {
+      const result = await consentService.updateConsentScope('health_data', 'app', {});
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not initialized/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // markAsReviewed (lines 418-428)
+  // ---------------------------------------------------------------------------
+  describe('markAsReviewed', () => {
+    beforeEach(async () => {
+      await consentService.initialize('user-1');
+    });
+
+    it('updates lastReviewedAt and sets nextReviewReminder ~90 days out', async () => {
+      const before = Date.now();
+      await consentService.markAsReviewed();
+
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const prefs = JSON.parse(raw as string);
+
+      expect(prefs.lastReviewedAt).toBeDefined();
+      const reviewedAt = new Date(prefs.lastReviewedAt).getTime();
+      expect(reviewedAt).toBeGreaterThanOrEqual(before);
+
+      expect(prefs.nextReviewReminder).toBeDefined();
+      const nextReview = new Date(prefs.nextReviewReminder).getTime();
+      // Should be approximately 90 days in the future (within 1 minute tolerance)
+      const expectedNext = before + 90 * 24 * 60 * 60 * 1000;
+      expect(nextReview).toBeGreaterThanOrEqual(expectedNext - 60_000);
+      expect(nextReview).toBeLessThanOrEqual(expectedNext + 60_000);
+    });
+
+    it('calls auditLogService.logConsentChange with action "viewed"', async () => {
+      await consentService.markAsReviewed();
+
+      expect(auditLogService.logConsentChange).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'viewed' })
+      );
+    });
+
+    it('is a no-op when not initialized (does not throw)', async () => {
+      // Reset so preferences is null
+      (consentService as any).preferences = null;
+
+      await expect(consentService.markAsReviewed()).resolves.toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // resetAllConsents – not initialized (line 447)
+  // ---------------------------------------------------------------------------
+  describe('resetAllConsents – not initialized', () => {
+    it('returns error when preferences are null (not initialized)', async () => {
+      const result = await consentService.resetAllConsents();
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not initialized/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // save() – AsyncStorage.setItem error path (line 500)
+  // ---------------------------------------------------------------------------
+  describe('save – AsyncStorage.setItem error path', () => {
+    beforeEach(async () => {
+      await consentService.initialize('user-1');
+    });
+
+    it('does not throw when AsyncStorage.setItem fails during grantConsent', async () => {
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('setItem failure'));
+
+      // Should not throw even when save() fails internally
+      await expect(
+        consentService.grantConsent('health_data', 'app', 'read')
+      ).resolves.toBeDefined();
+    });
+
+    it('does not throw when AsyncStorage.setItem fails during markAsReviewed', async () => {
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('setItem failure'));
+
+      await expect(consentService.markAsReviewed()).resolves.toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Uninitialized-state branch coverage for query methods
+  // ---------------------------------------------------------------------------
+  describe('query methods – not initialized (null preferences branch)', () => {
+    // Do NOT call initialize — preferences remains null
+
+    it('hasConsent returns false when preferences is null', () => {
+      expect(consentService.hasConsent('health_data', 'app')).toBe(false);
+    });
+
+    it('getConsent returns null when preferences is null', () => {
+      expect(consentService.getConsent('health_data', 'app')).toBeNull();
+    });
+
+    it('getConsentsForCategory returns [] when preferences is null', () => {
+      expect(consentService.getConsentsForCategory('health_data')).toEqual([]);
+    });
+
+    it('getConsentsForGrantee returns [] when preferences is null', () => {
+      expect(consentService.getConsentsForGrantee('app')).toEqual([]);
+    });
+
+    it('isGlobalSharingEnabled returns false when preferences is null', () => {
+      expect(consentService.isGlobalSharingEnabled()).toBe(false);
+    });
+
+    it('setGlobalDataSharing is a no-op when preferences is null', async () => {
+      // Should not throw
+      await expect(consentService.setGlobalDataSharing(true)).resolves.toBeUndefined();
+      // Still false since preferences was null
+      expect(consentService.isGlobalSharingEnabled()).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // processConsentRequest – uses requestedAccessLevel fallback (line 370)
+  // ---------------------------------------------------------------------------
+  describe('processConsentRequest – accessLevel fallback branch', () => {
+    beforeEach(async () => {
+      await consentService.initialize('user-1');
+    });
+
+    it('uses requestedAccessLevel when response.accessLevel is not provided', async () => {
+      const request = {
+        id: 'req-fallback',
+        category: 'contact_info' as ConsentCategory,
+        grantee: 'app' as ConsentGrantee,
+        requestedAccessLevel: 'write' as AccessLevel,
+        reason: 'Test fallback',
+        isRequired: false,
+      };
+      // No accessLevel in response — should fall back to requestedAccessLevel
+      const response = { requestId: 'req-fallback', granted: true };
+
+      const result = await consentService.processConsentRequest(request, response);
+      expect(result.success).toBe(true);
+
+      const record = consentService.getConsent('contact_info', 'app');
+      expect(record?.accessLevel).toBe('write');
+    });
+  });
 });

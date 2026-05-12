@@ -556,6 +556,78 @@ describe('HealthDataService – requestPermissions', () => {
   });
 });
 
+// ─── initialization – syncStatus loaded from storage (line 58) ────────────────
+
+describe('HealthDataService – initialize loads syncStatus from storage', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+  });
+
+  it('loads persisted syncStatus from AsyncStorage (line 58)', async () => {
+    const storedStatus = {
+      isConnected: true,
+      platform: 'ios',
+      permissionsGranted: ['heart_rate'],
+      permissionsDenied: [],
+      lastSyncTime: '2026-05-01T10:00:00.000Z',
+    };
+    _store['@karuna_health_sync_status'] = JSON.stringify(storedStatus);
+
+    await svc.initialize();
+
+    const status = svc.getSyncStatus();
+    expect(status.isConnected).toBe(true);
+    expect(status.permissionsGranted).toContain('heart_rate');
+  });
+});
+
+// ─── requestPermissions – native adapter path (lines 97-102) ─────────────────
+
+describe('HealthDataService – requestPermissions with native adapter', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('uses adapter result when healthAdapter is available (lines 97-102)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.requestPermissions as jest.Mock).mockResolvedValueOnce({
+      granted: ['heart_rate', 'weight'],
+      denied: ['steps'],
+    });
+
+    const result = await svc.requestPermissions(['heart_rate', 'weight', 'steps']);
+
+    expect(result.granted).toContain('heart_rate');
+    expect(result.granted).toContain('weight');
+    expect(result.denied).toContain('steps');
+  });
+
+  it('grants steps via Pedometer when adapter is unavailable', async () => {
+    const { Pedometer } = require('expo-sensors');
+    (Pedometer.isAvailableAsync as jest.Mock).mockResolvedValueOnce(true);
+
+    const result = await svc.requestPermissions(['steps']);
+
+    expect(result.granted).toContain('steps');
+  });
+
+  it('still grants steps even when Pedometer.isAvailableAsync throws', async () => {
+    const { Pedometer } = require('expo-sensors');
+    (Pedometer.isAvailableAsync as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
+
+    const result = await svc.requestPermissions(['steps']);
+
+    // Falls through catch block — still grants for manual entry
+    expect(result.granted).toContain('steps');
+  });
+});
+
 // ─── syncFromHealthPlatform ───────────────────────────────────────────────────
 
 describe('HealthDataService – syncFromHealthPlatform', () => {
@@ -580,5 +652,277 @@ describe('HealthDataService – syncFromHealthPlatform', () => {
     const result = await svc.syncFromHealthPlatform();
     expect(result.success).toBe(false);
     expect(result.error).toContain('consent');
+  });
+
+  it('enters the steps sync branch but skips adding when fetchStepsFromPlatform returns null (lines 150-165)', async () => {
+    // In jsdom (Platform.OS='web'), fetchStepsFromPlatform always returns null
+    // The steps-permission branch is still exercised, just synced remains 0
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['steps'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    // No steps reading added because Platform.OS is 'web'
+    expect(result.synced).toBe(0);
+    expect(svc.getVitalsByType('steps')).toHaveLength(0);
+  });
+
+  it('syncs steps=0 when Pedometer unavailable (fetchStepsFromPlatform returns null, no sync)', async () => {
+    // Pedometer not available => fetchStepsFromPlatform returns null => no step reading added
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['steps'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(0);
+  });
+
+  it('syncs heart_rate when adapter is available and returns data (lines 167-174)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getHeartRate as jest.Mock).mockResolvedValueOnce({
+      value: 72,
+      unit: 'bpm',
+      startDate: new Date().toISOString(),
+    });
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['heart_rate'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(1);
+    expect(svc.getVitalsByType('heart_rate')[0].value).toBe(72);
+  });
+
+  it('syncs blood_pressure when adapter is available and returns data (lines 176-187)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getBloodPressure as jest.Mock).mockResolvedValueOnce({
+      systolic: 120,
+      diastolic: 80,
+    });
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['blood_pressure'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(1);
+    const bp = svc.getVitalsByType('blood_pressure')[0];
+    expect(bp.value).toBe(120);
+    expect(bp.secondaryValue).toBe(80);
+  });
+
+  it('syncs blood_glucose when adapter is available and returns data (lines 190-195)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getBloodGlucose as jest.Mock).mockResolvedValueOnce({
+      value: 95,
+      unit: 'mg/dL',
+    });
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['blood_glucose'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(1);
+    expect(svc.getVitalsByType('blood_glucose')[0].value).toBe(95);
+  });
+
+  it('syncs weight when adapter is available and returns data (lines 198-203)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getWeight as jest.Mock).mockResolvedValueOnce({
+      value: 70,
+      unit: 'kg',
+    });
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['weight'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(1);
+    expect(svc.getVitalsByType('weight')[0].value).toBe(70);
+  });
+
+  it('syncs oxygen_saturation when adapter is available and returns data (lines 206-211)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getOxygenSaturation as jest.Mock).mockResolvedValueOnce({
+      value: 98,
+      unit: '%',
+    });
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['oxygen_saturation'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(1);
+    expect(svc.getVitalsByType('oxygen_saturation')[0].value).toBe(98);
+  });
+
+  it('does not sync vitals that return null from adapter (lines 168-212 null branches)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    // All adapters return null
+    (healthAdapter.getHeartRate as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getBloodPressure as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getBloodGlucose as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getWeight as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getOxygenSaturation as jest.Mock).mockResolvedValueOnce(null);
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = [
+      'heart_rate', 'blood_pressure', 'blood_glucose', 'weight', 'oxygen_saturation',
+    ];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(0);
+  });
+
+  it('syncs multiple vitals in one call and updates lastSyncTime (lines 215-223)', async () => {
+    const { healthAdapter } = require('../../src/services/healthAdapter');
+    // In jsdom, Platform.OS='web' so steps sync will yield 0 even with pedometer mocked.
+    // Use only adapter-based vitals so synced count is deterministic.
+    (healthAdapter.isAvailable as jest.Mock).mockResolvedValueOnce(true);
+    (healthAdapter.getHeartRate as jest.Mock).mockResolvedValueOnce({ value: 68, unit: 'bpm', startDate: new Date().toISOString() });
+    (healthAdapter.getBloodGlucose as jest.Mock).mockResolvedValueOnce({ value: 90, unit: 'mg/dL' });
+    (healthAdapter.getBloodPressure as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getWeight as jest.Mock).mockResolvedValueOnce(null);
+    (healthAdapter.getOxygenSaturation as jest.Mock).mockResolvedValueOnce(null);
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['heart_rate', 'blood_glucose'];
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(2);
+    expect(svc.getSyncStatus().lastSyncTime).toBeTruthy();
+  });
+
+  it('returns success=false and synced=0 when an unexpected error occurs (lines 225-228)', async () => {
+    const { Pedometer } = require('expo-sensors');
+    // Make addVitalReading throw by making saveVitals throw via AsyncStorage
+    (Pedometer.isAvailableAsync as jest.Mock).mockResolvedValueOnce(true);
+    (Pedometer.getStepCountAsync as jest.Mock).mockResolvedValueOnce({ steps: 500 });
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('storage full'));
+
+    (svc as any).syncStatus.isConnected = true;
+    (svc as any).syncStatus.permissionsGranted = ['steps'];
+
+    // The error in saveVitals is caught internally, so we test the overall catch by
+    // making auditLogService.log throw to trigger the outer catch
+    const { auditLogService } = require('../../src/services/auditLog');
+    (auditLogService.log as jest.Mock).mockRejectedValueOnce(new Error('audit fail'));
+
+    const result = await svc.syncFromHealthPlatform();
+
+    expect(result.success).toBe(false);
+    expect(result.synced).toBe(0);
+  });
+});
+
+// ─── getVitalSummary – 'month' period (lines 410-411) ────────────────────────
+
+describe('HealthDataService – getVitalSummary with month period', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('returns readings from the last month (lines 410-411)', () => {
+    const now = Date.now();
+    // Inject a reading 15 days ago (within the last month)
+    injectReading('heart_rate', 70, new Date(now - 15 * 24 * 3600000).toISOString(), { unit: 'bpm' });
+    // Inject a reading 40 days ago (outside the last month)
+    injectReading('heart_rate', 90, new Date(now - 40 * 24 * 3600000).toISOString(), { unit: 'bpm' });
+
+    const summary = svc.getVitalSummary('heart_rate', 'month');
+
+    // Only the reading within the last month should count
+    expect(summary.average).toBe(70);
+    expect(summary.latestReading?.value).toBe(70);
+  });
+});
+
+// ─── saveVitals – 1000-reading truncation (line 519) ─────────────────────────
+
+describe('HealthDataService – saveVitals truncation', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('truncates vitals array to 1000 entries when it exceeds 1000 (line 519)', async () => {
+    // Inject 1001 readings directly into internal state
+    const now = Date.now();
+    for (let i = 0; i < 1001; i++) {
+      (svc as any).vitals.push({
+        id: `vital_${i}`,
+        type: 'heart_rate',
+        value: 70 + i,
+        unit: 'bpm',
+        timestamp: new Date(now - i * 1000).toISOString(),
+        source: 'manual',
+      });
+    }
+
+    // addVitalReading calls saveVitals internally
+    await svc.addVitalReading(makeReading('heart_rate', 60, { unit: 'bpm' }));
+
+    // After save the internal array should be 1000 (slice(0, 1000))
+    expect((svc as any).vitals.length).toBe(1000);
+  });
+});
+
+// ─── saveVitals error handler (line 523) ─────────────────────────────────────
+
+describe('HealthDataService – saveVitals error handling', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('does not throw when AsyncStorage.setItem fails for vitals (line 523)', async () => {
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    // Should not throw — error is swallowed inside saveVitals
+    await expect(svc.addVitalReading(makeReading('heart_rate', 80, { unit: 'bpm' }))).resolves.toBeDefined();
+  });
+});
+
+// ─── saveSyncStatus error handler (line 531) ─────────────────────────────────
+
+describe('HealthDataService – saveSyncStatus error handling', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('does not throw when AsyncStorage.setItem fails for sync status (line 531)', async () => {
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    // setStepsGoal doesn't call saveSyncStatus — use requestPermissions which does
+    await expect(svc.requestPermissions(['heart_rate'])).resolves.toBeDefined();
   });
 });

@@ -334,5 +334,50 @@ describe('EncryptionService', () => {
       const result = await encryptionService.initialize('new-pin');
       expect(result).toBe(true);
     });
+
+    it('returns false when AsyncStorage.removeItem throws during changePin', async () => {
+      await encryptionService.initialize('original-pin');
+      (AsyncStorage.removeItem as jest.Mock).mockRejectedValueOnce(new Error('storage error'));
+      const result = await encryptionService.changePin('original-pin', 'new-pin');
+      expect(result).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge cases: tampered key check and storage errors
+  // ---------------------------------------------------------------------------
+  describe('edge cases', () => {
+    it('initialize() returns false when key check decrypts to unexpected value', async () => {
+      // Set up a fresh vault and then tamper with the key check
+      await encryptionService.initialize('test-pin');
+      // Encrypt a different sentinel with the current key, store as key check
+      const tamperedCheck = await encryptionService.encrypt('TAMPERED_VALUE');
+      mockStore[KEY_CHECK_KEY] = tamperedCheck;
+      encryptionService.lock();
+
+      // Re-initialize — decryption succeeds but the plaintext won't match
+      const result = await encryptionService.initialize('test-pin');
+      expect(result).toBe(false);
+    });
+
+    it('initialize() returns false when AsyncStorage.getItem throws', async () => {
+      (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('storage failure'));
+      const result = await encryptionService.initialize('any-pin');
+      expect(result).toBe(false);
+    });
+
+    it('uses fallback key derivation when PBKDF2 deriveBits throws', async () => {
+      // Force the PBKDF2 path to fail, triggering the iterative SHA-256 fallback
+      const spy = jest.spyOn(globalThis.crypto.subtle, 'deriveBits').mockRejectedValueOnce(
+        new Error('PBKDF2 not supported')
+      );
+      try {
+        const result = await encryptionService.initialize('fallback-pin');
+        // Service should still initialize successfully via the fallback path
+        expect(result).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });

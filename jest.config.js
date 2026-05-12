@@ -81,6 +81,27 @@ module.exports = {
   coverageDirectory: '<rootDir>/coverage',
   coverageReporters: ['text', 'lcov', 'html'],
 
+  coverageThreshold: {
+    // Global floor: many native-only files (tts, voiceRecorder, permissions, weather,
+    // vaultTools) are not testable in jsdom and drag the average to ~37-38%.
+    // Per-file thresholds on critical services are the meaningful gates.
+    global: {
+      lines: 35,
+      functions: 30,
+      branches: 20,
+      statements: 35,
+    },
+    // Security-critical services — must be thoroughly tested
+    './src/services/vault.ts': { lines: 90, functions: 90, branches: 85 },
+    './src/services/encryption.ts': { lines: 90, functions: 90, branches: 85 },
+    './src/services/consent.ts': { lines: 90, functions: 90, branches: 85 },
+    // Health & compliance services
+    './src/services/medication.ts': { lines: 80, functions: 80, branches: 75 },
+    './src/services/medicalRecords.ts': { lines: 80, functions: 80, branches: 75 },
+    './src/services/healthData.ts': { lines: 80, functions: 80, branches: 75 },
+    './src/services/auditLog.ts': { lines: 80, functions: 80, branches: 75 },
+  },
+
   testTimeout: 10000,
   verbose: true,
 

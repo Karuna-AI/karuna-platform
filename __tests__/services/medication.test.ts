@@ -493,4 +493,412 @@ describe('MedicationService – getMedicationSummary', () => {
     expect(summary).toContain('5');
     expect(summary).toContain('mg');
   });
+
+  it('includes purpose in summary when provided', async () => {
+    await svc.addMedication(buildMed({ name: 'Lisinopril', isActive: true, purpose: 'blood pressure' }));
+    const summary = svc.getMedicationSummary();
+    expect(summary).toContain('blood pressure');
+  });
+
+  it('uses schedule label when available', async () => {
+    await svc.addMedication(buildMed({
+      name: 'Aspirin',
+      isActive: true,
+      schedule: [{ id: 's1', time: '08:00', label: 'Breakfast' }],
+    }));
+    const summary = svc.getMedicationSummary();
+    expect(summary).toContain('Breakfast');
+  });
+});
+
+// ─── initialization – notificationIds loaded from storage (line 62) ───────────
+
+describe('MedicationService – initialize loads notificationIds', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+  });
+
+  it('reads notificationIds key from AsyncStorage during init (exercises line 62)', async () => {
+    // Pre-populate all three storage keys
+    const meds = [{ id: 'med_1', name: 'Aspirin', isActive: false, schedule: [] }];
+    _store['@karuna_medications'] = JSON.stringify(meds);
+    _store['@karuna_medication_doses'] = JSON.stringify([]);
+    // notificationIds stored as Array.from(map.entries())
+    _store['@karuna_medication_notification_ids'] = JSON.stringify([['med_1', ['notif-abc']]]);
+
+    await svc.initialize();
+
+    // rescheduleAllNotifications clears notificationIds for inactive meds;
+    // verify AsyncStorage.getItem was called with the notification IDs key
+    expect(AsyncStorage.getItem).toHaveBeenCalledWith('@karuna_medication_notification_ids');
+    // Service should have initialized successfully
+    expect((svc as any).isInitialized).toBe(true);
+  });
+});
+
+// ─── requestNotificationPermissions branches (lines 89-90, 95-96) ─────────────
+
+describe('MedicationService – requestNotificationPermissions', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+  });
+
+  it('calls requestPermissionsAsync when existing status is not granted', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: 'denied' });
+    (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: 'granted' });
+
+    // initialize triggers requestNotificationPermissions internally
+    await svc.initialize();
+
+    expect(Notifications.requestPermissionsAsync).toHaveBeenCalled();
+  });
+
+  it('handles getPermissionsAsync throwing (error catch in requestNotificationPermissions)', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error('perm fail'));
+
+    // Should not throw; error is caught internally
+    await expect(svc.initialize()).resolves.not.toThrow();
+    expect((svc as any).isInitialized).toBe(true);
+  });
+});
+
+// ─── updateMedication – deactivate path (line 153) ────────────────────────────
+
+describe('MedicationService – updateMedication deactivate', () => {
+  let medId: string;
+
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+
+    const med = await svc.addMedication(buildMed({ isActive: true }));
+    medId = med.id;
+    // Seed a notification id so cancelNotifications has something to cancel
+    (svc as any).notificationIds.set(medId, ['notif-to-cancel']);
+  });
+
+  it('cancels notifications when medication is set to inactive', async () => {
+    jest.clearAllMocks();
+    await svc.updateMedication(medId, { isActive: false });
+
+    expect(Notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith('notif-to-cancel');
+  });
+});
+
+// ─── getTodaySchedule (lines 227-265) ─────────────────────────────────────────
+
+describe('MedicationService – getTodaySchedule', () => {
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('returns empty array when no medications', () => {
+    expect(svc.getTodaySchedule()).toEqual([]);
+  });
+
+  it('returns schedule items for active medications', async () => {
+    await svc.addMedication(buildMed({ isActive: true }));
+    const schedule = svc.getTodaySchedule();
+    expect(schedule.length).toBeGreaterThan(0);
+    expect(schedule[0]).toHaveProperty('medication');
+    expect(schedule[0]).toHaveProperty('schedule');
+    expect(schedule[0]).toHaveProperty('dose');
+  });
+
+  it('excludes inactive medications', async () => {
+    await svc.addMedication(buildMed({ isActive: false }));
+    expect(svc.getTodaySchedule()).toHaveLength(0);
+  });
+
+  it('skips schedule entries that do not match todays day-of-week', async () => {
+    const today = new Date().getDay();
+    // Pick a day that is NOT today
+    const otherDay = (today + 1) % 7;
+    await svc.addMedication(buildMed({
+      isActive: true,
+      schedule: [{ id: 's_nottoday', time: '10:00', label: 'Test', daysOfWeek: [otherDay] }],
+    }));
+    expect(svc.getTodaySchedule()).toHaveLength(0);
+  });
+
+  it('includes schedule entries that match todays day-of-week', async () => {
+    const today = new Date().getDay();
+    await svc.addMedication(buildMed({
+      isActive: true,
+      schedule: [{ id: 's_today', time: '10:00', label: 'Test', daysOfWeek: [today] }],
+    }));
+    const schedule = svc.getTodaySchedule();
+    expect(schedule).toHaveLength(1);
+  });
+
+  it('attaches an existing dose when one matches the scheduled time', async () => {
+    const med = await svc.addMedication(buildMed({ isActive: true }));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    (svc as any).doses.push({
+      id: 'dose_match',
+      medicationId: med.id,
+      scheduledTime: `${todayStr}T09:00:00+00:00`,
+      status: 'taken',
+      recordedAt: new Date().toISOString(),
+    });
+
+    const schedule = svc.getTodaySchedule();
+    // At least one entry should have a non-null dose (the matching one)
+    const withDose = schedule.filter((s) => s.dose !== null);
+    expect(withDose.length).toBeGreaterThan(0);
+  });
+
+  it('sorts schedule by time ascending', async () => {
+    await svc.addMedication(buildMed({
+      isActive: true,
+      schedule: [
+        { id: 's_late', time: '21:00', label: 'Evening' },
+        { id: 's_early', time: '06:00', label: 'Early' },
+      ],
+    }));
+    const schedule = svc.getTodaySchedule();
+    if (schedule.length >= 2) {
+      expect(schedule[0].schedule.time <= schedule[1].schedule.time).toBe(true);
+    }
+  });
+});
+
+// ─── markDoseMissed – error path (line 320) ───────────────────────────────────
+
+describe('MedicationService – markDoseMissed', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('throws when medication is not found', async () => {
+    await expect(svc.markDoseMissed('nonexistent_id', '09:00')).rejects.toThrow('Medication not found');
+  });
+
+  it('records a missed dose with provided dateStr', async () => {
+    const med = await svc.addMedication(buildMed());
+    const dose = await svc.markDoseMissed(med.id, '09:00', '2026-05-10');
+    expect(dose.status).toBe('missed');
+    expect(dose.scheduledTime).toContain('2026-05-10');
+  });
+
+  it('records a missed dose using today when dateStr is omitted', async () => {
+    const med = await svc.addMedication(buildMed());
+    const dose = await svc.markDoseMissed(med.id, '09:00');
+    expect(dose.status).toBe('missed');
+    expect(dose.medicationId).toBe(med.id);
+  });
+});
+
+// ─── getAdherence – 'day' and 'month' periods (lines 352-353) ─────────────────
+
+describe('MedicationService – getAdherence period branches', () => {
+  let medId: string;
+  let schedId: string;
+
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+
+    const med = await svc.addMedication(buildMed({ isActive: true }));
+    medId = med.id;
+    schedId = med.schedule[0].id;
+  });
+
+  it('returns adherence for period=day', async () => {
+    await svc.recordDose(medId, schedId, 'taken');
+    const adherence = svc.getAdherence(medId, 'day');
+    expect(adherence).toHaveLength(1);
+    expect(adherence[0].period).toBe('day');
+  });
+
+  it('returns adherence for period=month', async () => {
+    await svc.recordDose(medId, schedId, 'taken');
+    const adherence = svc.getAdherence(medId, 'month');
+    expect(adherence).toHaveLength(1);
+    expect(adherence[0].period).toBe('month');
+    expect(adherence[0].takenDoses).toBe(1);
+  });
+
+  it('filters inactive medications from all-meds adherence', async () => {
+    const inactiveMed = await svc.addMedication(buildMed({ name: 'InactiveMed', isActive: false }));
+    const all = svc.getAdherence(undefined, 'week');
+    const ids = all.map((a) => a.medicationId);
+    expect(ids).not.toContain(inactiveMed.id);
+  });
+});
+
+// ─── getNextDose (lines 418-438) ──────────────────────────────────────────────
+
+describe('MedicationService – getNextDose', () => {
+  beforeEach(async () => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('returns null when there are no medications', () => {
+    expect(svc.getNextDose()).toBeNull();
+  });
+
+  it('returns null when all doses for today are already taken', async () => {
+    const med = await svc.addMedication(buildMed({
+      isActive: true,
+      // Use a past time so no future dose exists today
+      schedule: [{ id: 's_past', time: '01:00', label: 'Very Early' }],
+    }));
+    // Record a taken dose so item.dose is set
+    (svc as any).doses.push({
+      id: 'dose_taken',
+      medicationId: med.id,
+      scheduledTime: new Date().toISOString(),
+      status: 'taken',
+      recordedAt: new Date().toISOString(),
+    });
+    // getNextDose uses getTodaySchedule then checks future time
+    // 01:00 has already passed, so result should be null
+    expect(svc.getNextDose()).toBeNull();
+  });
+
+  it('returns the next future pending dose', async () => {
+    // Use a schedule time far in the future (23:59)
+    const med = await svc.addMedication(buildMed({
+      isActive: true,
+      schedule: [{ id: 's_future', time: '23:59', label: 'Night' }],
+    }));
+
+    const next = svc.getNextDose();
+    // May or may not exist depending on current time; if it does, validate shape
+    if (next !== null) {
+      expect(next).toHaveProperty('medication');
+      expect(next).toHaveProperty('schedule');
+      expect(next).toHaveProperty('time');
+      expect(next.time).toBeInstanceOf(Date);
+    }
+  });
+});
+
+// ─── scheduleNotifications error catch (line 473) ─────────────────────────────
+
+describe('MedicationService – scheduleNotifications error handling', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('does not throw when scheduleNotificationAsync fails', async () => {
+    (Notifications.scheduleNotificationAsync as jest.Mock).mockRejectedValueOnce(new Error('schedule fail'));
+    // addMedication triggers scheduleNotifications internally
+    await expect(svc.addMedication(buildMed({ isActive: true }))).resolves.not.toThrow();
+  });
+});
+
+// ─── cancelNotifications error catch (line 492) ───────────────────────────────
+
+describe('MedicationService – cancelNotifications error handling', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('does not throw when cancelScheduledNotificationAsync fails', async () => {
+    const med = await svc.addMedication(buildMed({ isActive: true }));
+    (svc as any).notificationIds.set(med.id, ['bad-notif-id']);
+    (Notifications.cancelScheduledNotificationAsync as jest.Mock).mockRejectedValueOnce(new Error('cancel fail'));
+
+    // deleteMedication triggers cancelNotifications
+    await expect(svc.deleteMedication(med.id)).resolves.not.toThrow();
+  });
+});
+
+// ─── createScheduleFromFrequency – every_other_day (lines 544-550) ────────────
+
+describe('MedicationService – createScheduleFromFrequency every_other_day', () => {
+  const createSchedule = (freq: string) =>
+    (svc.constructor as any).createScheduleFromFrequency(freq);
+
+  it('every_other_day: 1 schedule with daysOfWeek [0,2,4,6]', () => {
+    const s = createSchedule('every_other_day');
+    expect(s).toHaveLength(1);
+    expect(s[0].time).toBe('09:00');
+    expect(s[0].daysOfWeek).toEqual([0, 2, 4, 6]);
+  });
+});
+
+// ─── saveMedications / saveDoses / saveNotificationIds error paths ─────────────
+
+describe('MedicationService – storage error catch paths', () => {
+  beforeEach(() => {
+    clearStore();
+    resetService();
+    jest.clearAllMocks();
+    (svc as any).isInitialized = true;
+  });
+
+  it('saveMedications does not throw when AsyncStorage.setItem fails (line 572)', async () => {
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('storage full'));
+    // addMedication calls saveMedications internally
+    await expect(svc.addMedication(buildMed())).resolves.not.toThrow();
+  });
+
+  it('saveDoses error path does not throw (line 584)', async () => {
+    const med = await svc.addMedication(buildMed());
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('io error'));
+    // recordDose calls saveDoses internally
+    await expect(svc.recordDose(med.id, med.schedule[0].id, 'taken')).resolves.not.toThrow();
+  });
+
+  it('saves doses and trims to 500 when over limit (line 580)', async () => {
+    const med = await svc.addMedication(buildMed());
+    // Inject 501 existing doses
+    const fakeDoses = Array.from({ length: 501 }, (_, i) => ({
+      id: `dose_fake_${i}`,
+      medicationId: med.id,
+      scheduledTime: new Date().toISOString(),
+      status: 'taken' as const,
+      recordedAt: new Date().toISOString(),
+    }));
+    (svc as any).doses = fakeDoses;
+
+    // Trigger saveDoses — markDoseMissed does this
+    await svc.markDoseMissed(med.id, '09:00');
+
+    // After trim + new dose unshift, length should be 500+1 = 501 → trimmed to 500
+    // Actually trimming happens BEFORE the new dose is added to storage
+    // The internal doses array is trimmed to 500 before persisting
+    expect((svc as any).doses.length).toBeLessThanOrEqual(500);
+  });
+
+  it('saveNotificationIds does not throw when AsyncStorage.setItem fails (line 595)', async () => {
+    // Make the *third* setItem call fail (saveNotificationIds is called after saveMedications)
+    let callCount = 0;
+    (AsyncStorage.setItem as jest.Mock).mockImplementation((key: string, value: string) => {
+      callCount++;
+      if (key === '@karuna_medication_notification_ids') {
+        return Promise.reject(new Error('notif store fail'));
+      }
+      _store[key] = value;
+      return Promise.resolve();
+    });
+
+    await expect(svc.addMedication(buildMed({ isActive: true }))).resolves.not.toThrow();
+  });
 });

@@ -1565,26 +1565,39 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
     const role = memberResult.rows[0].role;
     const permissions = ROLE_PERMISSIONS[role];
 
+    // Load patient consent prefs — used to gate each data category below
+    const circleResult = await db.query(
+      'SELECT patient_consent FROM care_circles WHERE id = $1',
+      [circleId]
+    );
+    const consentData = circleResult.rows[0]?.patient_consent || {};
+
     const paginationSuffix = paginated ? ` LIMIT ${limit} OFFSET ${offset}` : '';
 
-    // Get vault data based on permissions
+    // Get vault data based on permissions AND patient consent
+    const canSeeHealth    = permissions.canViewMedications && checkConsent(consentData, role, 'health_data');
+    const canSeeDoctors   = permissions.canViewDoctors     && checkConsent(consentData, role, 'health_data');
+    const canSeeAppts     = permissions.canViewAppointments && checkConsent(consentData, role, 'health_data');
+    const canSeeContacts  = permissions.canViewContacts    && checkConsent(consentData, role, 'contact_info');
+    const canSeeAccounts  = permissions.canViewAccounts    && checkConsent(consentData, role, 'financial_data');
+
     const [medications, doctors, appointments, contacts, notes, accounts] = await Promise.all([
-      permissions.canViewMedications
+      canSeeHealth
         ? db.query(`SELECT * FROM vault_medications WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewDoctors
+      canSeeDoctors
         ? db.query(`SELECT * FROM vault_doctors WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewAppointments
+      canSeeAppts
         ? db.query(`SELECT * FROM vault_appointments WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewContacts
+      canSeeContacts
         ? db.query(`SELECT * FROM vault_contacts WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
       permissions.canViewAllNotes
         ? db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 ORDER BY created_at DESC${paginationSuffix}`, [circleId])
         : db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 AND author_id = $2 ORDER BY created_at DESC${paginationSuffix}`, [circleId, req.user.id]),
-      permissions.canViewAccounts
+      canSeeAccounts
         ? db.query(`SELECT * FROM vault_accounts WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
     ]);
@@ -2593,7 +2606,7 @@ router.get('/circles/:circleId/health', authMiddleware, requireConsent('health_d
 });
 
 // Sync health data from device
-router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { readings } = req.body;
@@ -2671,7 +2684,7 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
 // ============================================================================
 
 // Get medication adherence data
-router.get('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { days = 7 } = req.query;
@@ -2765,7 +2778,7 @@ router.get('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
 });
 
 // Sync medication doses from device
-router.post('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { doses } = req.body;
@@ -3075,7 +3088,7 @@ router.post('/circles/:circleId/alerts/:alertId/dismiss', authMiddleware, async 
 // ============================================================================
 
 // Get check-in logs
-router.get('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { days = 7 } = req.query;
@@ -3135,7 +3148,7 @@ router.get('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
 });
 
 // Sync check-ins from device
-router.post('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { checkins } = req.body;
