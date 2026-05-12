@@ -105,7 +105,10 @@ const upload = multer({
 // General rate limit: 100 requests per minute per IP
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 100 : 500,
+  // 300/min in production: enough for an admin navigating many portal pages
+  // (each page load can fire 5–10 parallel requests). Login, AI, and STT
+  // have their own tighter buckets for the operations that actually need it.
+  max: process.env.NODE_ENV === 'production' ? 300 : 500,
   message: { error: 'Too many requests. Please wait a moment and try again.' },
   standardHeaders: true,
   legacyHeaders: false,
