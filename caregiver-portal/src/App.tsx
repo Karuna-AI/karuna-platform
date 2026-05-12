@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ToastProvider } from './context/ToastContext';
+import { ToastProvider, useToast } from './context/ToastContext';
 
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -57,9 +57,24 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ConsentErrorListener() {
+  const { showToast } = useToast();
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent<string>).detail || 'Access denied: patient has not granted consent for this data.';
+      showToast(msg, 'error');
+    };
+    window.addEventListener('karuna:consent:denied', handler);
+    return () => window.removeEventListener('karuna:consent:denied', handler);
+  }, [showToast]);
+  return null;
+}
+
 function AppRoutes() {
   return (
-    <Routes>
+    <>
+      <ConsentErrorListener />
+      <Routes>
       {/* Public routes */}
       <Route
         path="/login"
@@ -113,6 +128,7 @@ function AppRoutes() {
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
 

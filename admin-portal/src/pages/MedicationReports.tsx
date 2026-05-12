@@ -63,6 +63,7 @@ export default function MedicationReports() {
   const [hourlyPattern, setHourlyPattern] = useState<HourlyPattern[]>([]);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'trends' | 'missed'>('overview');
   const [circleId, setCircleId] = useState('');
   const [circles, setCircles] = useState<{ id: string; name: string; care_recipient_name: string }[]>([]);
@@ -94,9 +95,9 @@ export default function MedicationReports() {
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
       setTopMedications(overviewRes.data.topMedications);
       setMissedDoses(overviewRes.data.missedDoses);
-    } catch (error) {
+    } catch (error: any) {
       if (signal.aborted) return;
-      console.error('Failed to load medication overview:', error);
+      setLoadError(error?.response?.data?.error || 'Failed to load medication overview');
     }
 
     try {
@@ -104,9 +105,9 @@ export default function MedicationReports() {
       if (signal.aborted) return;
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);
-    } catch (error) {
+    } catch (error: any) {
       if (signal.aborted) return;
-      console.error('Failed to load medication trends:', error);
+      if (!loadError) setLoadError(error?.response?.data?.error || 'Failed to load medication trends');
     }
 
     if (!signal.aborted) setLoading(false);
@@ -155,6 +156,17 @@ export default function MedicationReports() {
 
   if (loading) {
     return <div className="loading">Loading medication reports...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={() => { setLoadError(''); setLoading(true); }}>
+          Retry
+        </button>
+      </div>
+    );
   }
 
   return (

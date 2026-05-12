@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import type { AuthState, LoginCredentials, RegisterData } from '../types';
 import api from '../services/api';
+import { useIdleTimeout } from '../hooks/useIdleTimeout';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string }>;
@@ -81,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: result.error };
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await api.logout();
     setState({
       user: null,
@@ -89,7 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: false,
       isLoading: false,
     });
-  };
+  }, []);
+
+  useIdleTimeout(logout, state.isAuthenticated);
 
   return (
     <AuthContext.Provider value={{ ...state, login, register, logout }}>

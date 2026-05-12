@@ -51,8 +51,8 @@ jobs:
       - name: Install admin portal dependencies
         run: cd admin-portal && npm ci
 
-      - name: Run mobile app tests
-        run: npm test
+      - name: Run mobile app tests with coverage gate
+        run: npm run test:coverage -- --runInBand --testPathIgnorePatterns='__tests__/server'
 
       - name: Run server tests
         run: npm run test:server
@@ -87,8 +87,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci
 
-      - name: Run linter
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Lint mobile app
         run: npm run lint
+
+      - name: Lint server
+        run: cd server && npm run lint

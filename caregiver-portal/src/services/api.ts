@@ -67,6 +67,12 @@ class ApiService {
           this.clearToken();
           window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
         }
+        if (error.response?.status === 403) {
+          const msg = (error.response.data as { error?: string })?.error ?? '';
+          if (msg.toLowerCase().includes('consent')) {
+            window.dispatchEvent(new CustomEvent('karuna:consent:denied', { detail: msg }));
+          }
+        }
         return Promise.reject(error);
       }
     );

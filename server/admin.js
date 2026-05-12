@@ -14,6 +14,66 @@ const { z } = require('zod');
 const db = require('./db');
 const router = express.Router();
 
+let resend = null;
+try {
+  const { Resend } = require('resend');
+  if (process.env.RESEND_API_KEY) resend = new Resend(process.env.RESEND_API_KEY);
+} catch (_) {}
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
+
+async function sendAdminWelcomeEmail(email, name, password) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Admin Account',
+      html: `<p>Hi ${name},</p>
+<p>Your Karuna admin account has been created.</p>
+<p><strong>Email:</strong> ${email}<br>
+<strong>Temporary password:</strong> ${password}</p>
+<p>Please log in and change your password immediately.</p>`,
+    });
+  } catch (err) {
+    console.error('Admin welcome email failed:', err.message);
+  }
+}
+
+async function sendUserTempPasswordEmail(email, name, tempPassword) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Account',
+      html: `<p>Hi ${name},</p>
+<p>An account has been created for you on Karuna.</p>
+<p><strong>Email:</strong> ${email}<br>
+<strong>Temporary password:</strong> ${tempPassword}</p>
+<p>Please log in and change your password on first sign-in.</p>`,
+    });
+  } catch (err) {
+    console.error('User temp password email failed:', err.message);
+  }
+}
+
+async function sendPasswordResetEmail(email, name, newPassword) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Password Has Been Reset',
+      html: `<p>Hi ${name},</p>
+<p>An admin has reset your Karuna account password.</p>
+<p><strong>New password:</strong> ${newPassword}</p>
+<p>Please log in and change your password immediately.</p>`,
+    });
+  } catch (err) {
+    console.error('Password reset email failed:', err.message);
+  }
+}
+
 function validate(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
@@ -438,6 +498,7 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
     );
 
     await logAdminAction(req.admin.id, req.admin.email, 'create_admin', 'admin', result.rows[0].id, null, { email, name, role }, req);
+    await sendAdminWelcomeEmail(email, name, password);
 
     res.json({ success: true, admin: result.rows[0] });
   } catch (error) {
@@ -641,9 +702,14 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
     // Use bcrypt for password hashing (same as careCircle.js)
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
-    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
+    const userResult = await db.query('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING email, name', [passwordHash, userId]);
 
     await logAdminAction(req.admin.id, req.admin.email, 'reset_password', 'user', userId, null, { passwordReset: true }, req);
+
+    if (userResult.rows.length > 0) {
+      const { email: userEmail, name: userName } = userResult.rows[0];
+      await sendPasswordResetEmail(userEmail, userName, newPassword);
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -689,6 +755,7 @@ router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), 
     );
 
     await logAdminAction(req.admin.id, req.admin.email, 'create_user', 'user', result.rows[0].id, null, { email, name }, req);
+    await sendUserTempPasswordEmail(email, name.trim(), tempPassword);
 
     res.status(201).json({ success: true, user: result.rows[0], tempPassword });
   } catch (error) {

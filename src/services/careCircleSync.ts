@@ -10,6 +10,8 @@ const STORAGE_KEYS = {
   AUTH_TOKEN: '@karuna_care_auth_token',
 };
 
+const MAX_CHANGE_RETRIES = 5;
+
 interface SyncChange {
   id: string;
   entityType: string;
@@ -18,6 +20,7 @@ interface SyncChange {
   data: Record<string, unknown>;
   timestamp: string;
   deviceId: string;
+  retryCount?: number;
 }
 
 interface SyncResult {
@@ -108,7 +111,12 @@ class CareCircleSyncService {
   async leaveCircle(): Promise<void> {
     this.disconnectWebSocket();
     this.careCircleId = null;
-    await AsyncStorage.removeItem(STORAGE_KEYS.CARE_CIRCLE_ID);
+    this.pendingChanges = [];
+    await AsyncStorage.multiRemove([
+      STORAGE_KEYS.CARE_CIRCLE_ID,
+      STORAGE_KEYS.PENDING_CHANGES,
+      STORAGE_KEYS.LAST_SYNC,
+    ]);
     this.notifyListeners('left_circle');
   }
 
@@ -312,6 +320,17 @@ class CareCircleSyncService {
       };
     } catch (error) {
       console.error('[CareCircleSync] Push error:', error);
+      // Increment retry counts; drop changes that have exceeded the cap
+      this.pendingChanges = this.pendingChanges
+        .map((c) => ({ ...c, retryCount: (c.retryCount ?? 0) + 1 }))
+        .filter((c) => {
+          if ((c.retryCount ?? 0) > MAX_CHANGE_RETRIES) {
+            console.warn('[CareCircleSync] Dropping change after max retries:', c.id, c.entityType, c.action);
+            return false;
+          }
+          return true;
+        });
+      await this.savePendingChanges();
       return { success: false, synced: 0, conflicts: [], error: 'Network error' };
     }
   }

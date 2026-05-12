@@ -6,11 +6,14 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "lint": "eslint . --ext .js",
     "seed:admin": "node scripts/seed-admin.js",
+    "db:migrate": "node db/migrations/run.js",
     "db:init": "psql -d karuna -f db/init.sql",
     "db:admin": "psql -d karuna -f db/admin_tables.sql"
   },
   "dependencies": {
+    "@sentry/node": "^8.0.0",
     "axios": "^1.13.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -27,6 +30,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "eslint": "^8.57.1",
     "nodemon": "^3.0.2"
   }
 }

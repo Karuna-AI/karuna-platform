@@ -11,6 +11,16 @@
  * - Health check endpoint
  */
 
+// Sentry must be initialized before any other imports that it needs to instrument
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -597,6 +607,38 @@ app.use('/api/care', careCircleRouter);
 
 const { router: adminRouter } = require('./admin');
 app.use('/api/admin', adminRouter);
+
+// ============================================================================
+// API Documentation
+// ============================================================================
+
+// Serve OpenAPI spec at /api/docs (YAML raw) and /api/docs/ui (Swagger UI)
+// Only enabled in non-production or when ENABLE_API_DOCS=true
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+  const path = require('path');
+  const fs = require('fs');
+  const specPath = path.join(__dirname, 'openapi.yaml');
+
+  app.get('/api/docs', (_req, res) => {
+    res.type('text/yaml').send(fs.readFileSync(specPath, 'utf8'));
+  });
+
+  app.get('/api/docs/ui', (_req, res) => {
+    const specUrl = '/api/docs';
+    res.type('text/html').send(`<!DOCTYPE html>
+<html><head><title>Karuna API Docs</title>
+<meta charset="utf-8"/>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css"/>
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({ url: '${specUrl}', dom_id: '#swagger-ui', presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
+</script></body></html>`);
+  });
+
+  console.log('[API] Docs available at /api/docs and /api/docs/ui');
+}
 
 // ============================================================================
 // Error Handlers

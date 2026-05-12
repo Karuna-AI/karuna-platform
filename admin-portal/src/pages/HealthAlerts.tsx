@@ -109,8 +109,8 @@ export default function HealthAlerts() {
 
       const res = await adminAPI.get(`/health-alerts?${params.toString()}`);
       setAlerts(res.data.alerts);
-    } catch (error) {
-      console.error('Failed to load alerts:', error);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.error || 'Failed to load health alerts');
     }
   };
 
