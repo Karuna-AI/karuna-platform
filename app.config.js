@@ -126,6 +126,31 @@ module.exports = {
           ios: {
             // New Architecture enabled with TurboModule crash patch (react-native+0.81.5.patch)
             newArchEnabled: true,
+            // iOS 26 Privacy Manifest (required for App Store submission since Spring 2024)
+            // Declares which privacy-sensitive APIs the app uses and why.
+            // https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
+            privacyManifests: {
+              NSPrivacyAccessedAPITypes: [
+                {
+                  // NSUserDefaults — used by AsyncStorage (@react-native-async-storage)
+                  NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults',
+                  NSPrivacyAccessedAPITypeReasons: ['CA92.1'],
+                },
+                {
+                  // File timestamp — used by expo-file-system for media attachments
+                  NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp',
+                  NSPrivacyAccessedAPITypeReasons: ['C617.1'],
+                },
+                {
+                  // Disk space — used by expo-file-system
+                  NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace',
+                  NSPrivacyAccessedAPITypeReasons: ['85F4.1'],
+                },
+              ],
+              NSPrivacyCollectedDataTypes: [],
+              NSPrivacyTracking: false,
+              NSPrivacyTrackingDomains: [],
+            },
           },
           android: {
             compileSdkVersion: 35,

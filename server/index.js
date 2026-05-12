@@ -671,8 +671,25 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   handleWebSocket(ws, req);
 });
+
+// Heartbeat: ping all clients every 30s and terminate those that don't respond.
+// Prevents wsClients map from leaking dead connections on network drops.
+const wsHeartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => clearInterval(wsHeartbeatInterval));
 
 server.listen(PORT, () => {
   console.log(`Karuna AI Gateway running on port ${PORT}`);
