@@ -17,6 +17,7 @@ import Settings from './pages/Settings';
 import AIUsageAnalytics from './pages/AIUsageAnalytics';
 import HealthAlerts from './pages/HealthAlerts';
 import MedicationReports from './pages/MedicationReports';
+import AdminManagement from './pages/AdminManagement';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,7 @@ export default function App() {
                 <Route path="/ai-usage" element={<AIUsageAnalytics />} />
                 <Route path="/health-alerts" element={<HealthAlerts />} />
                 <Route path="/medications" element={<MedicationReports />} />
+                <Route path="/admins" element={<AdminManagement />} />
                 <Route path="/audit-logs" element={<AuditLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={

@@ -22,6 +22,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canViewFeatureFlags === true },
     { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs === true },
     { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canViewSettings === true },
+    { path: '/admins', icon: '🔐', label: 'Admin Management', visible: admin?.role === 'super_admin' },
   ].filter((item) => item.visible);
 
   return (

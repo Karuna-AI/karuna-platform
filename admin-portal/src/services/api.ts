@@ -290,6 +290,27 @@ class AdminApiService {
     }
   }
 
+  // Admin Management
+  async getAdmins(): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.get('/admins');
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to get admins' };
+    }
+  }
+
+  async createAdmin(data: { name: string; email: string; password: string; role: string }): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post('/auth/create', data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to create admin' };
+    }
+  }
+
   // Settings
   async getSettings(): Promise<ApiResponse<any>> {
     try {

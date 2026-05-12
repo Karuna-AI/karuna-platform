@@ -12,8 +12,12 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
+const { Resend } = require('resend');
 const db = require('./db');
 const router = express.Router();
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -286,17 +290,80 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-// Placeholder — replace with real transactional email (Resend, Postmark, SES, etc.)
 async function sendVerificationEmail(email, name, verificationUrl) {
-  console.log(`[EmailVerification] To: ${email} | Name: ${name} | URL: ${verificationUrl}`);
-  // TODO: integrate email provider — example with nodemailer / Resend:
-  // await emailClient.send({ to: email, subject: 'Verify your Karuna account', html: `...${verificationUrl}...` });
+  if (!resend) {
+    console.warn('[Email] RESEND_API_KEY not set — skipping verification email to:', email);
+    return;
+  }
+  const firstName = name.split(' ')[0];
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: 'Verify your Karuna account',
+    html: `<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:40px">
+    <h1 style="color:#2563eb;margin-top:0">Welcome to Karuna, ${firstName}!</h1>
+    <p style="color:#374151;line-height:1.6">
+      Thank you for joining Karuna — your personal AI care companion. Please verify
+      your email address to activate your account.
+    </p>
+    <a href="${verificationUrl}"
+       style="display:inline-block;margin:24px 0;padding:14px 28px;background:#2563eb;
+              color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+      Verify Email Address
+    </a>
+    <p style="color:#6b7280;font-size:14px">
+      This link expires in 24 hours. If you didn't create a Karuna account, you can
+      safely ignore this email.
+    </p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+    <p style="color:#9ca3af;font-size:12px">
+      Karuna Care &bull; <a href="https://karunaapp.in" style="color:#9ca3af">karunaapp.in</a>
+    </p>
+  </div>
+</body>
+</html>`,
+  });
 }
 
 async function sendPasswordResetEmail(email, name, resetUrl) {
-  console.log(`[PasswordReset] To: ${email} | Name: ${name} | URL: ${resetUrl}`);
-  // TODO: integrate email provider
-  // await emailClient.send({ to: email, subject: 'Reset your Karuna password', html: `...${resetUrl}...` });
+  if (!resend) {
+    console.warn('[Email] RESEND_API_KEY not set — skipping password reset email to:', email);
+    return;
+  }
+  const firstName = name.split(' ')[0];
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: 'Reset your Karuna password',
+    html: `<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:40px">
+    <h1 style="color:#2563eb;margin-top:0">Password Reset</h1>
+    <p style="color:#374151;line-height:1.6">
+      Hi ${firstName}, we received a request to reset your Karuna account password.
+      Click the button below to choose a new password.
+    </p>
+    <a href="${resetUrl}"
+       style="display:inline-block;margin:24px 0;padding:14px 28px;background:#dc2626;
+              color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+      Reset Password
+    </a>
+    <p style="color:#6b7280;font-size:14px">
+      This link expires in 1 hour. If you didn't request a password reset, please
+      ignore this email — your password will not change.
+    </p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+    <p style="color:#9ca3af;font-size:12px">
+      Karuna Care &bull; <a href="https://karunaapp.in" style="color:#9ca3af">karunaapp.in</a>
+    </p>
+  </div>
+</body>
+</html>`,
+  });
 }
 
 // Ensure password_reset_tokens table exists (idempotent)
@@ -1548,12 +1615,13 @@ function vaultListRoute(table, permissionKey, transform) {
       const { limit, offset } = parsePagination(req.query, 50);
 
       const memberResult = await db.query(
-        'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+        'SELECT cm.role, u.name as accessor_name FROM circle_members cm JOIN users u ON cm.user_id = u.id WHERE cm.circle_id = $1 AND cm.user_id = $2',
         [circleId, req.user.id]
       );
       if (memberResult.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
 
-      const permissions = ROLE_PERMISSIONS[memberResult.rows[0].role];
+      const { role, accessor_name } = memberResult.rows[0];
+      const permissions = ROLE_PERMISSIONS[role];
       if (!permissions[permissionKey]) return res.status(403).json({ error: 'Permission denied' });
 
       const countResult = await db.query(`SELECT COUNT(*) FROM ${table} WHERE circle_id = $1`, [circleId]);
@@ -1563,6 +1631,21 @@ function vaultListRoute(table, permissionKey, transform) {
         `SELECT * FROM ${table} WHERE circle_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
         [circleId, limit, offset]
       );
+
+      // Log caregiver data access so the patient can see who viewed their data
+      if (role !== 'owner') {
+        db.query(
+          `INSERT INTO audit_logs (user_id, circle_id, action, category, description, metadata, ip_address, user_agent)
+           VALUES ($1, $2, $3, 'vault', $4, $5, $6, $7)`,
+          [
+            req.user.id, circleId,
+            'caregiver_data_viewed',
+            `${accessor_name} (${role}) viewed ${table.replace('vault_', '')}`,
+            JSON.stringify({ table, role, accessorName: accessor_name, count: total }),
+            req.ip, req.headers['user-agent'],
+          ]
+        ).catch(err => console.error('[Audit] Failed to log caregiver access:', err));
+      }
 
       const rows = transform ? result.rows.map(transform) : result.rows;
       res.json({ data: rows, pagination: { total, limit, offset, pages: Math.ceil(total / limit) } });
@@ -2565,6 +2648,12 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
         [circleId, reading.dataType, JSON.stringify(reading.value), reading.unit, reading.measuredAt, reading.source || 'device', reading.notes]
       );
       inserted++;
+
+      try {
+        await checkVitalThreshold(circleId, reading.dataType, numValue, reading.unit);
+      } catch (thresholdErr) {
+        console.error('Vital threshold check failed:', thresholdErr);
+      }
     }
 
     // Broadcast to caregivers
@@ -3223,6 +3312,56 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
 // ============================================================================
 
 const wsClients = new Map(); // circleId -> Set of WebSocket connections
+
+const VITAL_THRESHOLDS = {
+  heart_rate:               { low: 50, high: 110, unit: 'bpm',    lowSeverity: 'high', highSeverity: 'high' },
+  blood_pressure_systolic:  { low: 85, high: 140, unit: 'mmHg',   lowSeverity: 'high', highSeverity: 'high' },
+  blood_pressure_diastolic: { low: 55, high: 95,  unit: 'mmHg',   lowSeverity: 'medium', highSeverity: 'medium' },
+  temperature:              { low: 35.5, high: 38.5, unit: '°C',  lowSeverity: 'medium', highSeverity: 'high' },
+  glucose:                  { low: 60, high: 180, unit: 'mg/dL',  lowSeverity: 'high', highSeverity: 'medium' },
+  spo2:                     { low: 90, high: null, unit: '%',     lowSeverity: 'critical', highSeverity: null },
+  weight:                   { low: null, high: null, unit: 'kg',  lowSeverity: null, highSeverity: null },
+};
+
+async function checkVitalThreshold(circleId, dataType, numValue, unit) {
+  const threshold = VITAL_THRESHOLDS[dataType];
+  if (!threshold || typeof numValue !== 'number') return;
+
+  let severity = null;
+  let direction = null;
+
+  if (threshold.low !== null && numValue < threshold.low) {
+    severity = threshold.lowSeverity;
+    direction = 'low';
+  } else if (threshold.high !== null && numValue > threshold.high) {
+    severity = threshold.highSeverity;
+    direction = 'high';
+  }
+
+  if (!severity) return;
+
+  const label = dataType.replace(/_/g, ' ');
+  const title = `Abnormal ${label} detected`;
+  const message = direction === 'low'
+    ? `${label} of ${numValue} ${threshold.unit} is below the safe threshold of ${threshold.low} ${threshold.unit}.`
+    : `${label} of ${numValue} ${threshold.unit} is above the safe threshold of ${threshold.high} ${threshold.unit}.`;
+
+  const result = await db.query(
+    `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [circleId, 'abnormal_vital', severity, title, message,
+     JSON.stringify({ data_type: dataType, value: numValue, unit: unit || threshold.unit, threshold })]
+  );
+
+  broadcastToCircle(circleId, {
+    type: 'alert',
+    alertType: 'abnormal_vital',
+    alertId: result.rows[0].id,
+    severity,
+    dataType,
+  });
+}
 
 function broadcastToCircle(circleId, event) {
   const clients = wsClients.get(circleId);

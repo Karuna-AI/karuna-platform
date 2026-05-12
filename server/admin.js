@@ -10,8 +10,53 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
+const { z } = require('zod');
 const db = require('./db');
 const router = express.Router();
+
+function validate(schema) {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: 'Validation failed', details: result.error.issues.map(i => i.message) });
+    }
+    req.body = result.data;
+    next();
+  };
+}
+
+const createUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1),
+  phone: z.string().optional(),
+});
+
+const suspendUserSchema = z.object({
+  reason: z.string().min(1),
+});
+
+const resetPasswordSchema = z.object({
+  newPassword: z.string().min(12),
+});
+
+const createFeatureFlagSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  is_enabled: z.boolean().optional(),
+  enabled_for_all: z.boolean().optional(),
+});
+
+const updateFeatureFlagSchema = z.object({
+  is_enabled: z.boolean().optional(),
+  enabled_for_all: z.boolean().optional(),
+  rollout_percentage: z.number().int().min(0).max(100).optional(),
+  enabled_user_ids: z.array(z.string()).optional(),
+  enabled_circle_ids: z.array(z.string()).optional(),
+});
+
+const updateSettingSchema = z.object({
+  value: z.unknown(),
+});
 
 // Defense-in-depth: Verify custom header on mutating requests
 // Browsers won't send X-Requested-With cross-origin without CORS preflight
@@ -401,6 +446,19 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
   }
 });
 
+// List all admins (super_admin only)
+router.get('/admins', adminAuthMiddleware, requirePermission('canManageAdmins'), async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, email, name, role, created_at FROM admin_users ORDER BY created_at DESC`
+    );
+    res.json({ admins: result.rows });
+  } catch (error) {
+    console.error('List admins error:', error);
+    res.status(500).json({ error: 'Failed to list admins' });
+  }
+});
+
 // ============================================================================
 // User Management Routes
 // ============================================================================
@@ -514,7 +572,7 @@ router.get('/users/:userId', adminAuthMiddleware, requirePermission('canManageUs
 });
 
 // Suspend user
-router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(suspendUserSchema), async (req, res) => {
   try {
     const { userId } = req.params;
     const { reason } = req.body;
@@ -568,7 +626,7 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
 });
 
 // Reset user password
-router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(resetPasswordSchema), async (req, res) => {
   try {
     const { userId } = req.params;
     const { newPassword } = req.body;
@@ -595,7 +653,7 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
 });
 
 // Create user account (admin-provisioned; sets is_verified=true, returns temp password)
-router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(createUserSchema), async (req, res) => {
   try {
     const { email, name, phone } = req.body;
 
@@ -1103,7 +1161,7 @@ router.post('/feature-flags/evaluate', adminAuthMiddleware, async (req, res) => 
 });
 
 // Update feature flag
-router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), async (req, res) => {
+router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), validate(updateFeatureFlagSchema), async (req, res) => {
   try {
     const { flagId } = req.params;
     const { is_enabled, enabled_for_all, rollout_percentage, enabled_user_ids, enabled_circle_ids } = req.body;
@@ -1134,7 +1192,7 @@ router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('can
 });
 
 // Create feature flag
-router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), async (req, res) => {
+router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), validate(createFeatureFlagSchema), async (req, res) => {
   try {
     const { name, description, is_enabled, enabled_for_all } = req.body;
 
@@ -1204,7 +1262,7 @@ router.get('/settings', adminAuthMiddleware, async (req, res) => {
 });
 
 // Update setting
-router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSettings'), async (req, res) => {
+router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSettings'), validate(updateSettingSchema), async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
