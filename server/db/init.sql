@@ -13,6 +13,12 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
+    is_verified BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    email_verification_token_hash VARCHAR(255),
+    email_verification_expires_at TIMESTAMP WITH TIME ZONE,
+    password_reset_token_hash VARCHAR(255),
+    password_reset_expires_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
