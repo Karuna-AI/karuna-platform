@@ -54,6 +54,13 @@ jobs:
       - name: Run mobile app tests with coverage gate
         run: npm run test:coverage -- --runInBand --testPathIgnorePatterns='__tests__/server'
 
+      - name: Initialize test database schema
+        env:
+          PGPASSWORD: test_password
+        run: |
+          psql -h localhost -U karuna_test -d karuna_test -f server/db/init.sql
+          psql -h localhost -U karuna_test -d karuna_test -f server/db/admin_tables.sql
+
       - name: Run server tests
         run: npm run test:server
         env:

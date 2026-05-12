@@ -56,8 +56,18 @@ let adminJwt: string;   // Bearer JWT from login response — no CSRF needed
 
 // ── App setup ─────────────────────────────────────────────────────────────────
 beforeAll(async () => {
-  // Must be set BEFORE any server module is required (module-level const reads)
-  process.env.DATABASE_URL = 'postgresql://karuna:ganesh@localhost:5437/karuna_test';
+  // Must be set BEFORE any server module is required (module-level const reads).
+  // In CI the individual DB_* env vars are injected; locally developers connect
+  // to their own Postgres on 5437 with karuna:ganesh. Prefer a pre-built
+  // DATABASE_URL if already set (e.g. from CI secrets or local .env).
+  if (!process.env.DATABASE_URL) {
+    const host = process.env.DB_HOST || 'localhost';
+    const port = process.env.DB_PORT || '5437';
+    const user = process.env.DB_USER || 'karuna';
+    const pass = process.env.DB_PASSWORD || 'ganesh';
+    const name = process.env.DB_NAME || 'karuna_test';
+    process.env.DATABASE_URL = `postgresql://${user}:${pass}@${host}:${port}/${name}`;
+  }
   process.env.JWT_SECRET = 'realdb-test-jwt-secret-at-least-32ch!!';
   process.env.ADMIN_JWT_SECRET = 'realdb-test-admin-jwt-secret-32ch!!';
   process.env.NODE_ENV = 'test';
