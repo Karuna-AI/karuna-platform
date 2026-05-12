@@ -594,6 +594,51 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
   }
 });
 
+// Create user account (admin-provisioned; sets is_verified=true, returns temp password)
+router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+  try {
+    const { email, name, phone } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({ error: 'Email and name are required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    const existing = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'A user with this email already exists' });
+    }
+
+    // Generate a secure temporary password (16 chars: upper + lower + digits + special)
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$';
+    let tempPassword = '';
+    const randBytes = require('crypto').randomBytes(16);
+    for (let i = 0; i < 16; i++) {
+      tempPassword += chars[randBytes[i] % chars.length];
+    }
+
+    const passwordHash = await hashPassword(tempPassword);
+
+    const result = await db.query(
+      `INSERT INTO users (email, password_hash, name, phone, is_verified)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id, email, name, phone, is_verified, is_active, created_at`,
+      [email.toLowerCase(), passwordHash, name.trim(), phone || null]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'create_user', 'user', result.rows[0].id, null, { email, name }, req);
+
+    res.status(201).json({ success: true, user: result.rows[0], tempPassword });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
 // ============================================================================
 // Care Circle Management Routes
 // ============================================================================
@@ -1112,6 +1157,27 @@ router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageF
   }
 });
 
+// Delete feature flag
+router.delete('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), adminActionLimiter, async (req, res) => {
+  try {
+    const { flagId } = req.params;
+
+    const existing = await db.query('SELECT * FROM feature_flags WHERE id = $1', [flagId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Feature flag not found' });
+    }
+
+    await db.query('DELETE FROM feature_flags WHERE id = $1', [flagId]);
+
+    await logAdminAction(req.admin.id, req.admin.email, 'delete_feature_flag', 'feature_flag', flagId, existing.rows[0], null, req);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete feature flag error:', error);
+    res.status(500).json({ error: 'Failed to delete feature flag' });
+  }
+});
+
 // ============================================================================
 // System Settings Routes
 // ============================================================================
@@ -1352,6 +1418,66 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
 // ============================================================================
 // Health Alerts Dashboard Routes
 // ============================================================================
+
+// Acknowledge a health alert (admin panel action)
+router.post('/health-alerts/:alertId/acknowledge', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    const existing = await db.query('SELECT id, status FROM caregiver_alerts WHERE id = $1', [alertId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+    if (existing.rows[0].status !== 'active') {
+      return res.status(400).json({ error: `Alert is already ${existing.rows[0].status}` });
+    }
+
+    const result = await db.query(
+      `UPDATE caregiver_alerts
+       SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [alertId]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'acknowledge_alert', 'alert', alertId, { status: 'active' }, { status: 'acknowledged' }, req);
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Acknowledge alert error:', error);
+    res.status(500).json({ error: 'Failed to acknowledge alert' });
+  }
+});
+
+// Resolve a health alert (admin panel action)
+router.post('/health-alerts/:alertId/resolve', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    const existing = await db.query('SELECT id, status FROM caregiver_alerts WHERE id = $1', [alertId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+    if (existing.rows[0].status === 'resolved') {
+      return res.status(400).json({ error: 'Alert is already resolved' });
+    }
+
+    const result = await db.query(
+      `UPDATE caregiver_alerts
+       SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [alertId]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'resolve_alert', 'alert', alertId, { status: existing.rows[0].status }, { status: 'resolved' }, req);
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Resolve alert error:', error);
+    res.status(500).json({ error: 'Failed to resolve alert' });
+  }
+});
 
 // Get health alerts overview
 router.get('/health-alerts/overview', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {

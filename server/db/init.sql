@@ -29,6 +29,7 @@ CREATE TABLE care_circles (
     care_recipient_device_id VARCHAR(255),
     care_recipient_last_sync_at TIMESTAMP WITH TIME ZONE,
     settings JSONB DEFAULT '{"allowDeviceSync": true, "requireApprovalForChanges": false, "syncIntervalSeconds": 30}',
+    patient_consent JSONB DEFAULT '{}',
     sync_version INTEGER DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

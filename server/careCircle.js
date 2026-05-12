@@ -477,6 +477,111 @@ function requirePermission(permission) {
 }
 
 // ============================================================================
+// Consent Enforcement
+// ============================================================================
+
+// Maps vault entity types and API route identifiers to consent categories.
+// Owners (patients) are never blocked by consent — they control their own data.
+const VAULT_CONSENT_CATEGORY = {
+  vault_medications:   'health_data',
+  vault_doctors:       'health_data',
+  vault_appointments:  'health_data',
+  vault_contacts:      'contact_info',
+  vault_accounts:      'financial_data',
+  vault_documents:     'personal_documents',
+  health_data:         'health_data',
+};
+
+// Role → grantee name as stored in consent records
+const ROLE_TO_GRANTEE = {
+  owner:     'caregiver_owner',
+  caregiver: 'caregiver_member',
+  viewer:    'caregiver_member',
+};
+
+/**
+ * Checks whether the member's role has been granted access to `category`
+ * according to the patient's stored consent preferences.
+ * Returns true (allow) when:
+ *  - The member is the owner (patient controls their own data)
+ *  - patient_consent is empty / not yet synced (fail-open for backward compat)
+ *  - globalDataSharing is true AND the category has no explicit denial
+ *  - An explicit ConsentRecord grants read (or higher) access to the grantee
+ */
+function checkConsent(consentData, role, category) {
+  if (role === 'owner') return true;
+  if (!consentData || Object.keys(consentData).length === 0) return true; // not yet synced
+
+  const grantee = ROLE_TO_GRANTEE[role] || 'caregiver_member';
+
+  // Global sharing off means deny everything unless explicitly granted
+  const globalDataSharing = consentData.globalDataSharing === true;
+
+  const consents = Array.isArray(consentData.consents) ? consentData.consents : [];
+
+  // Find an active, non-expired grant for this category+grantee
+  const now = new Date();
+  const activeGrant = consents.find(c =>
+    c.category === category &&
+    c.grantee === grantee &&
+    c.accessLevel !== 'none' &&
+    (!c.revokedAt) &&
+    (!c.expiresAt || new Date(c.expiresAt) > now)
+  );
+
+  if (activeGrant) return true;
+  if (globalDataSharing) {
+    // Global sharing on: allow unless this category is explicitly revoked
+    const explicitRevoke = consents.find(c =>
+      c.category === category && c.grantee === grantee && c.accessLevel === 'none'
+    );
+    return !explicitRevoke;
+  }
+
+  return false;
+}
+
+/**
+ * Express middleware: reads patient_consent from care_circles and blocks
+ * non-owner members whose access to `category` has been denied by the patient.
+ */
+function requireConsent(category) {
+  return async (req, res, next) => {
+    try {
+      const { circleId } = req.params;
+
+      const memberResult = await db.query(
+        'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+        [circleId, req.user.id]
+      );
+      if (memberResult.rows.length === 0) {
+        return res.status(403).json({ error: 'Not a member of this circle' });
+      }
+
+      const { role } = memberResult.rows[0];
+
+      // Owners always pass — they control the data
+      if (role === 'owner') return next();
+
+      const circleResult = await db.query(
+        'SELECT patient_consent FROM care_circles WHERE id = $1',
+        [circleId]
+      );
+      const consentData = circleResult.rows[0]?.patient_consent || {};
+
+      if (!checkConsent(consentData, role, category)) {
+        return res.status(403).json({ error: 'Access denied: patient has not granted consent for this data category' });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Consent check error:', error);
+      next(); // fail-open: don't block on DB errors
+    }
+  };
+}
+
+// ============================================================================
 // Global CSRF enforcement for all mutating routes
 // ============================================================================
 
@@ -1314,6 +1419,65 @@ function parsePagination(query, defaultLimit = 100) {
   return { limit, offset };
 }
 
+// ============================================================================
+// Consent Sync Routes (patient device → server)
+// ============================================================================
+
+// Sync patient consent preferences from device to server (owner only)
+router.put('/circles/:circleId/consent', authMiddleware, requirePermission('canEditCircle'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const { consent } = req.body;
+
+    if (!consent || typeof consent !== 'object') {
+      return res.status(400).json({ error: 'consent object is required' });
+    }
+
+    // Only the owner (patient) may update consent
+    if (req.member.role !== 'owner') {
+      return res.status(403).json({ error: 'Only the circle owner can update consent settings' });
+    }
+
+    await db.query(
+      'UPDATE care_circles SET patient_consent = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [JSON.stringify(consent), circleId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Update consent error:', error);
+    res.status(500).json({ error: 'Failed to update consent' });
+  }
+});
+
+// Get stored consent preferences (owner only)
+router.get('/circles/:circleId/consent', authMiddleware, async (req, res) => {
+  try {
+    const { circleId } = req.params;
+
+    const memberResult = await db.query(
+      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+      [circleId, req.user.id]
+    );
+    if (memberResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Not a member of this circle' });
+    }
+    if (memberResult.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only the circle owner can view consent settings' });
+    }
+
+    const result = await db.query(
+      'SELECT patient_consent FROM care_circles WHERE id = $1',
+      [circleId]
+    );
+
+    res.json({ consent: result.rows[0]?.patient_consent || {} });
+  } catch (error) {
+    console.error('Get consent error:', error);
+    res.status(500).json({ error: 'Failed to get consent' });
+  }
+});
+
 // Get sync data for a circle — supports optional ?limit=&offset= for large vaults
 router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
   try {
@@ -1409,12 +1573,12 @@ function vaultListRoute(table, permissionKey, transform) {
   };
 }
 
-router.get('/circles/:circleId/vault/medications', authMiddleware, vaultListRoute('vault_medications', 'canViewMedications', null));
-router.get('/circles/:circleId/vault/doctors', authMiddleware, vaultListRoute('vault_doctors', 'canViewDoctors', null));
-router.get('/circles/:circleId/vault/appointments', authMiddleware, vaultListRoute('vault_appointments', 'canViewAppointments', null));
-router.get('/circles/:circleId/vault/contacts', authMiddleware, vaultListRoute('vault_contacts', 'canViewContacts', null));
-router.get('/circles/:circleId/vault/accounts', authMiddleware, vaultListRoute('vault_accounts', 'canViewAccounts', decryptAccount));
-router.get('/circles/:circleId/vault/documents', authMiddleware, vaultListRoute('vault_documents', 'canViewDocuments', stripDocumentFileData));
+router.get('/circles/:circleId/vault/medications',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_medications',  'canViewMedications', null));
+router.get('/circles/:circleId/vault/doctors',        authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_doctors',       'canViewDoctors',    null));
+router.get('/circles/:circleId/vault/appointments',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_appointments',  'canViewAppointments', null));
+router.get('/circles/:circleId/vault/contacts',       authMiddleware, requireConsent('contact_info'),       vaultListRoute('vault_contacts',      'canViewContacts',   null));
+router.get('/circles/:circleId/vault/accounts',       authMiddleware, requireConsent('financial_data'),     vaultListRoute('vault_accounts',      'canViewAccounts',   decryptAccount));
+router.get('/circles/:circleId/vault/documents',      authMiddleware, requireConsent('personal_documents'), vaultListRoute('vault_documents',     'canViewDocuments',  stripDocumentFileData));
 
 // Sync changes from device (bidirectional sync)
 router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
@@ -2286,7 +2450,7 @@ router.delete('/circles/:circleId/notes/:noteId', authMiddleware, async (req, re
 // ============================================================================
 
 // Get health data for a circle
-router.get('/circles/:circleId/health', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { type, days = 7 } = req.query;
