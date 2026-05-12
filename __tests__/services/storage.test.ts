@@ -10,6 +10,20 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   jest.requireActual('../../src/web/async-storage-mock')
 );
 
+// Force storageService to use the plaintext AsyncStorage path throughout all
+// tests. Without this mock, jsdom's crypto.subtle causes encryptedDatabaseService
+// to open successfully, making _encDbReady = true. After localStorage.clear()
+// in beforeEach, the service then reads nothing from the encrypted path → returns
+// defaults, causing "preferredName: undefined" failures across the test suite.
+jest.mock('../../src/services/encryptedDatabase', () => ({
+  encryptedDatabaseService: {
+    isDbOpen:       jest.fn().mockReturnValue(false),
+    open:           jest.fn().mockResolvedValue({ success: false }),
+    saveCollection: jest.fn().mockResolvedValue(undefined),
+    getCollection:  jest.fn().mockResolvedValue([]),
+  },
+}));
+
 import { storageService } from '../../src/services/storage';
 import type { UserMemory, AppSettings, KeyPerson } from '../../src/services/storage';
 
