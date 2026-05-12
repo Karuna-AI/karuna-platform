@@ -44,6 +44,13 @@ async function initDatabase() {
     await client.query(adminSql);
     console.log('Admin tables created successfully!');
 
+    // Read and execute archival.sql (archive tables + archive_old_data stored procedure)
+    const archivalSqlPath = path.join(__dirname, '..', 'db', 'archival.sql');
+    console.log(`\nExecuting ${archivalSqlPath}...`);
+    const archivalSql = fs.readFileSync(archivalSqlPath, 'utf8');
+    await client.query(archivalSql);
+    console.log('Archival schema created successfully!');
+
     // Verify tables were created
     const tablesResult = await client.query(`
       SELECT table_name
