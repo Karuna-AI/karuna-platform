@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@karuna_audit_log';
+const LAST_PRUNE_KEY = '@karuna_audit_log_last_prune';
 const MAX_LOG_ENTRIES = 1000;
 const LOG_RETENTION_DAYS = 90;
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 day
 
 export type AuditCategory =
   | 'security'
@@ -93,6 +95,7 @@ class AuditLogService {
   private logs: AuditLogEntry[] = [];
   private isInitialized: boolean = false;
   private deviceId: string = '';
+  private lastPruneTime: number = 0;
 
   async initialize(deviceId?: string): Promise<void> {
     if (this.isInitialized) return;
@@ -100,12 +103,15 @@ class AuditLogService {
     this.deviceId = deviceId || 'unknown';
 
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      const [stored, lastPruneRaw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEY),
+        AsyncStorage.getItem(LAST_PRUNE_KEY),
+      ]);
       if (stored) {
         this.logs = JSON.parse(stored);
-        // Clean up old entries
-        await this.pruneOldEntries();
       }
+      this.lastPruneTime = lastPruneRaw ? parseInt(lastPruneRaw, 10) : 0;
+      await this.pruneOldEntries();
       this.isInitialized = true;
       console.debug('[AuditLog] Initialized with', this.logs.length, 'entries');
     } catch (error) {
@@ -152,7 +158,12 @@ class AuditLogService {
       this.logs = this.logs.slice(0, MAX_LOG_ENTRIES);
     }
 
-    await this.save();
+    // Prune by TTL once per day even while the app stays in memory
+    if (Date.now() - this.lastPruneTime >= PRUNE_INTERVAL_MS) {
+      await this.pruneOldEntries();
+    } else {
+      await this.save();
+    }
   }
 
   /**
@@ -368,14 +379,16 @@ class AuditLogService {
       (log) => new Date(log.timestamp) > cutoffDate
     );
 
+    this.lastPruneTime = Date.now();
+
     if (this.logs.length < originalCount) {
-      console.debug(
-        '[AuditLog] Pruned',
-        originalCount - this.logs.length,
-        'old entries'
-      );
-      await this.save();
+      console.debug('[AuditLog] Pruned', originalCount - this.logs.length, 'old entries');
     }
+
+    await Promise.all([
+      this.save(),
+      AsyncStorage.setItem(LAST_PRUNE_KEY, String(this.lastPruneTime)),
+    ]);
   }
 
   /**

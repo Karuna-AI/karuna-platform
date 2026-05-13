@@ -14,6 +14,7 @@ import { careCircleSyncService } from '../services/careCircleSync';
 
 interface CareCircleScreenProps {
   onBack: () => void;
+  inviteToken?: string;
 }
 
 interface SyncStatus {
@@ -23,9 +24,9 @@ interface SyncStatus {
   lastSync: string | null;
 }
 
-export default function CareCircleScreen({ onBack }: CareCircleScreenProps) {
+export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScreenProps) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
-  const [inviteCode, setInviteCode] = useState('');
+  const [inviteCode, setInviteCode] = useState(inviteToken ?? '');
   const [isJoining, setIsJoining] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);

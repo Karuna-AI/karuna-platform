@@ -244,6 +244,15 @@ a {
   background: #dc2626;
 }
 
+.btn-warning {
+  background: var(--warning, #f59e0b);
+  color: white;
+}
+
+.btn-warning:hover {
+  background: #d97706;
+}
+
 .btn-sm {
   padding: 0.5rem 0.875rem;
   font-size: 0.8125rem;
@@ -288,6 +297,16 @@ a {
 
 .form-input::placeholder {
   color: var(--text-muted);
+}
+
+.form-input.input-error {
+  border-color: var(--error, #e53e3e);
+}
+
+.field-error {
+  color: var(--error, #e53e3e);
+  font-size: 0.8125rem;
+  margin: 0.25rem 0 0;
 }
 
 /* Search */

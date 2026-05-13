@@ -9,6 +9,7 @@ class WebSocketService {
   private maxReconnectDelay = 30000;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private connectPending: ReturnType<typeof setTimeout> | null = null;
   private circleId: string | null = null;
   private _isConnected = false;
   private intentionalClose = false;
@@ -16,7 +17,12 @@ class WebSocketService {
   connect(circleId: string): void {
     this.circleId = circleId;
     this.intentionalClose = false;
-    this.doConnect();
+    // 50ms defer: lets React StrictMode cleanup cancel this before the WebSocket
+    // is ever created, preventing "closed before connection established" console errors.
+    this.connectPending = setTimeout(() => {
+      this.connectPending = null;
+      if (!this.intentionalClose) this.doConnect();
+    }, 50);
   }
 
   private doConnect(): void {
@@ -73,6 +79,11 @@ class WebSocketService {
   disconnect(): void {
     this.intentionalClose = true;
     this.stopPing();
+
+    if (this.connectPending) {
+      clearTimeout(this.connectPending);
+      this.connectPending = null;
+    }
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);

@@ -5,22 +5,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { admin, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login', { replace: true });
   };
 
+  const perms = admin?.permissions ?? {};
+
   const navItems = [
-    { path: '/', icon: '📊', label: 'Dashboard' },
-    { path: '/users', icon: '👥', label: 'Users' },
-    { path: '/circles', icon: '🔵', label: 'Care Circles' },
-    { path: '/ai-usage', icon: '🤖', label: 'AI Usage' },
-    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts' },
-    { path: '/medications', icon: '💊', label: 'Medications' },
-    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags' },
-    { path: '/audit-logs', icon: '📜', label: 'Audit Logs' },
-    { path: '/settings', icon: '⚙️', label: 'Settings' },
-  ];
+    { path: '/', icon: '📊', label: 'Dashboard', visible: true },
+    { path: '/users', icon: '👥', label: 'Users', visible: perms.canManageUsers === true },
+    { path: '/circles', icon: '🔵', label: 'Care Circles', visible: perms.canManageCircles === true },
+    { path: '/ai-usage', icon: '🤖', label: 'AI Usage', visible: perms.canViewMetrics === true },
+    { path: '/health-alerts', icon: '🏥', label: 'Health Alerts', visible: perms.canViewMetrics === true },
+    { path: '/medications', icon: '💊', label: 'Medications', visible: perms.canViewMetrics === true },
+    { path: '/feature-flags', icon: '🚩', label: 'Feature Flags', visible: perms.canManageFeatureFlags === true },
+    { path: '/audit-logs', icon: '📜', label: 'Audit Logs', visible: perms.canViewAuditLogs === true },
+    { path: '/settings', icon: '⚙️', label: 'Settings', visible: perms.canManageSettings === true },
+    { path: '/admins', icon: '🔐', label: 'Admin Management', visible: admin?.role === 'super_admin' },
+  ].filter((item) => item.visible);
 
   return (
     <div className="app-layout">

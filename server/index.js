@@ -11,6 +11,16 @@
  * - Health check endpoint
  */
 
+// Sentry must be initialized before any other imports that it needs to instrument
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -95,7 +105,10 @@ const upload = multer({
 // General rate limit: 100 requests per minute per IP
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  // 300/min in production: enough for an admin navigating many portal pages
+  // (each page load can fire 5–10 parallel requests). Login, AI, and STT
+  // have their own tighter buckets for the operations that actually need it.
+  max: process.env.NODE_ENV === 'production' ? 300 : 500,
   message: { error: 'Too many requests. Please wait a moment and try again.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -313,7 +326,7 @@ app.get('/metrics', (req, res) => {
 });
 
 // Public feature flags endpoint (for mobile app) — only expose name and enabled status
-app.get('/api/feature-flags', async (req, res) => {
+app.get('/api/feature-flags', generalLimiter, async (req, res) => {
   try {
     const db = require('./db');
     const result = await db.query('SELECT name, is_enabled, enabled_for_all FROM feature_flags WHERE is_enabled = true');
@@ -599,6 +612,38 @@ const { router: adminRouter } = require('./admin');
 app.use('/api/admin', adminRouter);
 
 // ============================================================================
+// API Documentation
+// ============================================================================
+
+// Serve OpenAPI spec at /api/docs (YAML raw) and /api/docs/ui (Swagger UI)
+// Only enabled in non-production or when ENABLE_API_DOCS=true
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+  const path = require('path');
+  const fs = require('fs');
+  const specPath = path.join(__dirname, 'openapi.yaml');
+
+  app.get('/api/docs', (_req, res) => {
+    res.type('text/yaml').send(fs.readFileSync(specPath, 'utf8'));
+  });
+
+  app.get('/api/docs/ui', (_req, res) => {
+    const specUrl = '/api/docs';
+    res.type('text/html').send(`<!DOCTYPE html>
+<html><head><title>Karuna API Docs</title>
+<meta charset="utf-8"/>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css"/>
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({ url: '${specUrl}', dom_id: '#swagger-ui', presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
+</script></body></html>`);
+  });
+
+  console.log('[API] Docs available at /api/docs and /api/docs/ui');
+}
+
+// ============================================================================
 // Error Handlers
 // ============================================================================
 
@@ -629,8 +674,25 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   handleWebSocket(ws, req);
 });
+
+// Heartbeat: ping all clients every 30s and terminate those that don't respond.
+// Prevents wsClients map from leaking dead connections on network drops.
+const wsHeartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => clearInterval(wsHeartbeatInterval));
 
 server.listen(PORT, () => {
   console.log(`Karuna AI Gateway running on port ${PORT}`);
@@ -638,5 +700,34 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Allowed origins: ${process.env.ALLOWED_ORIGINS || 'http://localhost:3020, http://localhost:3000'}`);
 });
+
+// Periodic session cleanup — removes expired sessions every hour
+setInterval(async () => {
+  try {
+    const db = require('./db');
+    await db.query("DELETE FROM sessions WHERE expires_at < NOW()");
+  } catch (err) {
+    console.error('[Session] Cleanup error:', err.message);
+  }
+}, 60 * 60 * 1000);
+
+// Graceful shutdown
+const shutdown = async (signal) => {
+  console.log(`[Server] ${signal} received — shutting down gracefully`);
+  server.close(async () => {
+    try {
+      const db = require('./db');
+      await db.close();
+      console.log('[Server] Database connections closed');
+    } catch (err) {
+      console.error('[Server] Error closing DB:', err.message);
+    }
+    process.exit(0);
+  });
+  setTimeout(() => { console.error('[Server] Forced shutdown after timeout'); process.exit(1); }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = { app, server, wss };

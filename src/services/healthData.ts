@@ -68,7 +68,7 @@ class HealthDataService {
       console.debug('[HealthData] Initialized with', this.vitals.length, 'readings');
     } catch (error) {
       console.error('[HealthData] Initialization error:', error);
-      this.isInitialized = true;
+      // Do NOT set isInitialized=true here — allow the next call to retry
     }
   }
 

@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProfile = async () => {
-    const result = await api.getProfile();
+    const result = await api.checkSession();
     if (result.success && result.data) {
       setAdmin(result.data.admin);
     } else {

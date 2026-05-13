@@ -35,12 +35,16 @@ export default function AuditLogScreen({ onBack }: AuditLogScreenProps): JSX.Ele
   }, [filter]);
 
   const loadLogs = () => {
-    if (filter === 'all') {
-      setLogs(auditLogService.getLogs({ limit: 100 }));
-    } else {
-      setLogs(auditLogService.getLogs({ category: filter, limit: 100 }));
+    try {
+      if (filter === 'all') {
+        setLogs(auditLogService.getLogs({ limit: 100 }));
+      } else {
+        setLogs(auditLogService.getLogs({ category: filter, limit: 100 }));
+      }
+      setSummary(auditLogService.getActivitySummary());
+    } catch (error) {
+      console.error('[AuditLog] Failed to load logs:', error);
     }
-    setSummary(auditLogService.getActivitySummary());
   };
 
   const formatTimestamp = (timestamp: string) => {

@@ -1,14 +1,63 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Message } from '../types';
 import { LanguageCode } from '../i18n/languages';
+import { encryptedDatabaseService } from './encryptedDatabase';
 
-// Storage keys
+// Storage keys — settings and metadata stay in plain AsyncStorage (non-sensitive).
+// Messages and memory are encrypted via encryptedDatabaseService.
 const STORAGE_KEYS = {
   MESSAGES: '@karuna/messages',
   MEMORY: '@karuna/memory',
   SETTINGS: '@karuna/settings',
   LAST_SUMMARY_INDEX: '@karuna/last_summary_index',
 } as const;
+
+// Encrypted collection names used by encryptedDatabaseService
+const ENC_COLLECTION = {
+  MESSAGES: 'chat_messages',
+  MEMORY: 'user_memory',
+} as const;
+
+let _encDbReady: boolean | null = null; // null = not attempted yet
+
+async function _ensureEncryptedDb(): Promise<boolean> {
+  if (_encDbReady === true) return true;
+  if (_encDbReady === false) return false;
+  try {
+    if (encryptedDatabaseService.isDbOpen()) {
+      _encDbReady = true;
+      return true;
+    }
+    const result = await encryptedDatabaseService.open();
+    _encDbReady = result.success;
+    if (!result.success) {
+      console.warn('[Storage] Encrypted DB unavailable, falling back to plaintext:', result.error);
+    }
+    return _encDbReady;
+  } catch (err) {
+    _encDbReady = false;
+    console.warn('[Storage] Encrypted DB open error, falling back to plaintext:', err);
+    return false;
+  }
+}
+
+/** Migrate plaintext AsyncStorage key → encrypted DB collection, then delete the old key. */
+async function _migrateIfNeeded<T>(storageKey: string, collectionName: string): Promise<void> {
+  try {
+    const plain = await AsyncStorage.getItem(storageKey);
+    if (!plain) return;
+    const data: T[] = JSON.parse(plain);
+    if (!Array.isArray(data) || data.length === 0) {
+      await AsyncStorage.removeItem(storageKey);
+      return;
+    }
+    await encryptedDatabaseService.saveCollection(collectionName, data);
+    await AsyncStorage.removeItem(storageKey);
+    console.debug(`[Storage] Migrated ${storageKey} → encrypted:${collectionName} (${data.length} items)`);
+  } catch (err) {
+    console.warn(`[Storage] Migration failed for ${storageKey}:`, err);
+  }
+}
 
 export interface StoredMessage extends Message {
   timestamp: number;
@@ -105,7 +154,7 @@ class StorageService {
   private messagesCache: StoredMessage[] | null = null;
 
   /**
-   * Save messages to storage
+   * Save messages to encrypted storage (falls back to AsyncStorage if encryption unavailable).
    */
   async saveMessages(messages: Message[]): Promise<void> {
     try {
@@ -114,10 +163,12 @@ class StorageService {
         timestamp: msg.timestamp || Date.now(),
       }));
 
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.MESSAGES,
-        JSON.stringify(storedMessages)
-      );
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MESSAGES, storedMessages);
+      } else {
+        await AsyncStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(storedMessages));
+      }
       this.messagesCache = storedMessages;
     } catch (error) {
       console.error('Error saving messages:', error);
@@ -125,7 +176,7 @@ class StorageService {
   }
 
   /**
-   * Load messages from storage
+   * Load messages from encrypted storage, migrating plaintext data on first read.
    */
   async loadMessages(): Promise<StoredMessage[]> {
     try {
@@ -133,6 +184,15 @@ class StorageService {
         return this.messagesCache;
       }
 
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        await _migrateIfNeeded<StoredMessage>(STORAGE_KEYS.MESSAGES, ENC_COLLECTION.MESSAGES);
+        const messages = await encryptedDatabaseService.getCollection<StoredMessage>(ENC_COLLECTION.MESSAGES);
+        this.messagesCache = messages;
+        return messages;
+      }
+
+      // Fallback: plaintext AsyncStorage
       const data = await AsyncStorage.getItem(STORAGE_KEYS.MESSAGES);
       if (data) {
         const messages = JSON.parse(data) as StoredMessage[];
@@ -147,10 +207,15 @@ class StorageService {
   }
 
   /**
-   * Clear all messages
+   * Clear all messages from encrypted storage.
    */
   async clearMessages(): Promise<void> {
     try {
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MESSAGES, []);
+      }
+      // Always remove the plaintext key in case it still exists from before migration
       await AsyncStorage.removeItem(STORAGE_KEYS.MESSAGES);
       this.messagesCache = null;
     } catch (error) {
@@ -159,12 +224,18 @@ class StorageService {
   }
 
   /**
-   * Save user memory
+   * Save user memory to encrypted storage.
    */
   async saveMemory(memory: UserMemory): Promise<void> {
     try {
       memory.lastUpdated = Date.now();
-      await AsyncStorage.setItem(STORAGE_KEYS.MEMORY, JSON.stringify(memory));
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        // Store memory as a single-element collection
+        await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MEMORY, [memory]);
+      } else {
+        await AsyncStorage.setItem(STORAGE_KEYS.MEMORY, JSON.stringify(memory));
+      }
       this.memoryCache = memory;
     } catch (error) {
       console.error('Error saving memory:', error);
@@ -172,7 +243,7 @@ class StorageService {
   }
 
   /**
-   * Load user memory
+   * Load user memory from encrypted storage, migrating plaintext data on first read.
    */
   async loadMemory(): Promise<UserMemory> {
     try {
@@ -180,6 +251,23 @@ class StorageService {
         return this.memoryCache;
       }
 
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        // Migrate plaintext memory (stored as a plain object, not an array) if present
+        const plainRaw = await AsyncStorage.getItem(STORAGE_KEYS.MEMORY);
+        if (plainRaw) {
+          const plainMemory = JSON.parse(plainRaw) as UserMemory;
+          await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MEMORY, [plainMemory]);
+          await AsyncStorage.removeItem(STORAGE_KEYS.MEMORY);
+          console.debug('[Storage] Migrated @karuna/memory → encrypted:user_memory');
+        }
+        const items = await encryptedDatabaseService.getCollection<UserMemory>(ENC_COLLECTION.MEMORY);
+        const memory = items.length > 0 ? items[0] : { ...DEFAULT_MEMORY };
+        this.memoryCache = memory;
+        return memory;
+      }
+
+      // Fallback: plaintext AsyncStorage
       const data = await AsyncStorage.getItem(STORAGE_KEYS.MEMORY);
       if (data) {
         const memory = JSON.parse(data) as UserMemory;
@@ -325,6 +413,10 @@ class StorageService {
    */
   async clearAllData(): Promise<void> {
     try {
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MESSAGES, []);
+      }
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.MESSAGES,
         STORAGE_KEYS.LAST_SUMMARY_INDEX,
@@ -340,6 +432,10 @@ class StorageService {
    */
   async clearMemory(): Promise<void> {
     try {
+      const enc = await _ensureEncryptedDb();
+      if (enc) {
+        await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MEMORY, []);
+      }
       await AsyncStorage.removeItem(STORAGE_KEYS.MEMORY);
       this.memoryCache = null;
     } catch (error) {

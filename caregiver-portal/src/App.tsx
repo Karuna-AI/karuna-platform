@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider, useToast } from './context/ToastContext';
+
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import CareCircleDetail from './pages/CareCircleDetail';
 import AcceptInvitation from './pages/AcceptInvitation';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -32,6 +36,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -44,15 +49,32 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    const raw = new URLSearchParams(location.search).get('redirect') || '/';
+    const redirectTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <>{children}</>;
 }
 
+function ConsentErrorListener() {
+  const { showToast } = useToast();
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent<string>).detail || 'Access denied: patient has not granted consent for this data.';
+      showToast(msg, 'error');
+    };
+    window.addEventListener('karuna:consent:denied', handler);
+    return () => window.removeEventListener('karuna:consent:denied', handler);
+  }, [showToast]);
+  return null;
+}
+
 function AppRoutes() {
   return (
-    <Routes>
+    <>
+      <ConsentErrorListener />
+      <Routes>
       {/* Public routes */}
       <Route
         path="/login"
@@ -70,6 +92,17 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <ForgotPassword />
+          </PublicRoute>
+        }
+      />
+      {/* Reset password is always public — token is single-use */}
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Invitation route (semi-public) */}
       <Route path="/invite/:token" element={<AcceptInvitation />} />
@@ -95,6 +128,7 @@ function AppRoutes() {
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
 
@@ -102,7 +136,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <AppRoutes />
+        <ToastProvider>
+          <AppRoutes />
+        </ToastProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

@@ -140,7 +140,12 @@ export function VaultDocumentScreen({
       });
 
       if (!result.canceled && result.assets[0]) {
-        setCapturedImage(result.assets[0].uri);
+        const asset = result.assets[0];
+        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Please use an image under 10 MB.');
+          return;
+        }
+        setCapturedImage(asset.uri);
       }
     } catch (error) {
       console.error('Camera error:', error);
@@ -169,7 +174,12 @@ export function VaultDocumentScreen({
       });
 
       if (!result.canceled && result.assets[0]) {
-        setCapturedImage(result.assets[0].uri);
+        const asset = result.assets[0];
+        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Please use an image under 10 MB.');
+          return;
+        }
+        setCapturedImage(asset.uri);
       }
     } catch (error) {
       console.error('Gallery error:', error);
@@ -195,7 +205,7 @@ export function VaultDocumentScreen({
         expiryDate: expiryDate.trim() || undefined,
         notes: notes.trim() || undefined,
         filePath: capturedImage || undefined,
-        isEncrypted: true,
+        isEncrypted: false,
       };
 
       if (editingDoc) {

@@ -1,30 +1,98 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import type { AdminCircle, CircleMember, CircleStats } from '../types';
 
 export default function CircleDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [circle, setCircle] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [circle, setCircle] = useState<AdminCircle | null>(null);
+  const [members, setMembers] = useState<CircleMember[]>([]);
+  const [stats, setStats] = useState<CircleStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editRecipient, setEditRecipient] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  // Status toggle state
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false);
+  const [statusError, setStatusError] = useState('');
+
+  // Remove member state
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [removeMemberError, setRemoveMemberError] = useState('');
 
   useEffect(() => {
     if (id) loadCircle();
   }, [id]);
 
   const loadCircle = async () => {
+    setLoadError('');
     const result = await api.getCircleDetail(id!);
     if (result.success) {
       setCircle(result.data.circle);
       setMembers(result.data.members);
       setStats(result.data.stats);
+    } else {
+      setLoadError(result.error || 'Failed to load circle');
     }
     setIsLoading(false);
   };
 
-  const formatDate = (dateStr: string) => {
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError('');
+    setIsEditing(true);
+    const result = await api.updateCircle(id!, {
+      name: editName || undefined,
+      care_recipient_name: editRecipient || undefined,
+    });
+    setIsEditing(false);
+    if (result.success) {
+      setCircle(result.data.circle);
+      setShowEditModal(false);
+    } else {
+      setEditError(result.error || 'Failed to update circle');
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    if (!circle) return;
+    const action = circle.is_active ? 'deactivate' : 'activate';
+    if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this circle?`)) return;
+    setStatusError('');
+    setIsTogglingStatus(true);
+    const result = circle.is_active
+      ? await api.deactivateCircle(id!)
+      : await api.activateCircle(id!);
+    setIsTogglingStatus(false);
+    if (result.success) {
+      setCircle(result.data.circle);
+    } else {
+      setStatusError(result.error || `Failed to ${action} circle`);
+    }
+  };
+
+  const handleRemoveMember = async (member: CircleMember) => {
+    if (member.role === 'owner') return;
+    if (!confirm(`Remove ${member.name} from this circle?`)) return;
+    setRemoveMemberError('');
+    setRemovingMemberId(member.id);
+    const result = await api.removeCircleMember(id!, member.id);
+    setRemovingMemberId(null);
+    if (result.success) {
+      setMembers((prev) => prev.filter((m) => m.id !== member.id));
+    } else {
+      setRemoveMemberError(result.error || 'Failed to remove member');
+    }
+  };
+
+  const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString();
   };
@@ -33,11 +101,11 @@ export default function CircleDetail() {
     return <div className="loading"><div className="spinner" /></div>;
   }
 
-  if (!circle) {
+  if (loadError || !circle) {
     return (
       <div className="card">
         <div className="empty-state">
-          <p>Circle not found</p>
+          <p>{loadError || 'Circle not found'}</p>
           <button onClick={() => navigate('/circles')} className="btn btn-secondary">Back to Circles</button>
         </div>
       </div>
@@ -56,12 +124,35 @@ export default function CircleDetail() {
             <h2 style={{ marginBottom: '0.25rem' }}>{circle.name}</h2>
             <p style={{ color: 'var(--text-muted)' }}>Caring for: {circle.care_recipient_name}</p>
           </div>
-          {circle.is_active ? (
-            <span className="badge badge-success">Active</span>
-          ) : (
-            <span className="badge">Inactive</span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {circle.is_active ? (
+              <span className="badge badge-success">Active</span>
+            ) : (
+              <span className="badge">Inactive</span>
+            )}
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => {
+                setEditName(circle.name);
+                setEditRecipient(circle.care_recipient_name);
+                setEditError('');
+                setShowEditModal(true);
+              }}
+            >
+              Edit
+            </button>
+            <button
+              className={`btn btn-sm ${circle.is_active ? 'btn-warning' : 'btn-primary'}`}
+              onClick={handleToggleStatus}
+              disabled={isTogglingStatus}
+            >
+              {isTogglingStatus ? '...' : circle.is_active ? 'Deactivate' : 'Activate'}
+            </button>
+          </div>
         </div>
+        {statusError && (
+          <div style={{ color: 'var(--error, #e53e3e)', fontSize: '0.875rem', marginTop: '0.75rem' }}>{statusError}</div>
+        )}
       </div>
 
       <div className="stats-grid" style={{ marginBottom: '1.5rem' }}>
@@ -79,7 +170,7 @@ export default function CircleDetail() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Active Alerts</div>
-          <div className="stat-value" style={{ color: stats?.active_alerts > 0 ? 'var(--warning)' : 'var(--success)' }}>
+          <div className="stat-value" style={{ color: (stats?.active_alerts ?? 0) > 0 ? 'var(--warning)' : 'var(--success)' }}>
             {stats?.active_alerts || 0}
           </div>
         </div>
@@ -116,6 +207,9 @@ export default function CircleDetail() {
         <div className="card-header">
           <h3 className="card-title">Members ({members.length})</h3>
         </div>
+        {removeMemberError && (
+          <div style={{ color: 'var(--error, #e53e3e)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>{removeMemberError}</div>
+        )}
         {members.length === 0 ? (
           <p style={{ color: 'var(--text-muted)' }}>No members</p>
         ) : (
@@ -146,12 +240,23 @@ export default function CircleDetail() {
                       </span>
                     </td>
                     <td>
-                      <button
-                        onClick={() => navigate(`/users/${member.user_id}`)}
-                        className="btn btn-sm btn-secondary"
-                      >
-                        View User
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          onClick={() => navigate(`/users/${member.user_id}`)}
+                          className="btn btn-sm btn-secondary"
+                        >
+                          View User
+                        </button>
+                        {member.role !== 'owner' && (
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={() => handleRemoveMember(member)}
+                            disabled={removingMemberId === member.id}
+                          >
+                            {removingMemberId === member.id ? '...' : 'Remove'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -160,6 +265,57 @@ export default function CircleDetail() {
           </div>
         )}
       </div>
+
+      {/* Edit Modal */}
+      {showEditModal && (
+        <div className="modal-overlay" onClick={() => { setShowEditModal(false); setEditError(''); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Edit Circle</h3>
+              <button className="modal-close" onClick={() => { setShowEditModal(false); setEditError(''); }}>×</button>
+            </div>
+            <form onSubmit={handleEdit}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">Circle Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    required
+                    disabled={isEditing}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Care Recipient Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editRecipient}
+                    onChange={(e) => setEditRecipient(e.target.value)}
+                    required
+                    disabled={isEditing}
+                  />
+                </div>
+              </div>
+              {editError && (
+                <div style={{ color: 'var(--error, #e53e3e)', fontSize: '0.875rem', padding: '0 1.5rem 0.5rem' }}>
+                  {editError}
+                </div>
+              )}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => { setShowEditModal(false); setEditError(''); }} disabled={isEditing}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isEditing}>
+                  {isEditing ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

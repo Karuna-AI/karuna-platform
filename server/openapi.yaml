@@ -1,0 +1,1039 @@
+openapi: 3.0.3
+info:
+  title: Karuna Platform API
+  description: |
+    Karuna AI Companion Platform API.
+
+    Authentication: Most endpoints require a session cookie (`care_session` or `admin_session`)
+    set by the respective login endpoint. Some routes also accept a Bearer token for mobile clients.
+    All mutating requests require an `X-CSRF-Token` header matching the `csrf-token` cookie.
+  version: 1.0.0
+  contact:
+    name: Karuna Support
+
+servers:
+  - url: /api
+    description: Relative path (same origin)
+
+security:
+  - cookieAuth: []
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: care_session
+    adminCookieAuth:
+      type: apiKey
+      in: cookie
+      name: admin_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    User:
+      type: object
+      properties:
+        id:         { type: string }
+        email:      { type: string, format: email }
+        name:       { type: string }
+        phone:      { type: string, nullable: true }
+        is_active:  { type: boolean }
+        is_verified: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    CareCircle:
+      type: object
+      properties:
+        id:           { type: string }
+        name:         { type: string }
+        elderly_name: { type: string }
+        owner_id:     { type: string }
+        created_at:   { type: string, format: date-time }
+
+    CareCircleMember:
+      type: object
+      properties:
+        id:         { type: string }
+        user_id:    { type: string }
+        name:       { type: string }
+        email:      { type: string }
+        role:       { type: string, enum: [owner, caregiver, viewer] }
+        joined_at:  { type: string, format: date-time }
+
+    Alert:
+      type: object
+      properties:
+        id:           { type: string }
+        alert_type:   { type: string }
+        severity:     { type: string, enum: [critical, high, medium, low] }
+        title:        { type: string }
+        message:      { type: string }
+        status:       { type: string, enum: [active, acknowledged, resolved] }
+        created_at:   { type: string, format: date-time }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+        resolved_at:  { type: string, format: date-time, nullable: true }
+
+    AdminUser:
+      type: object
+      properties:
+        id:         { type: string }
+        email:      { type: string }
+        name:       { type: string }
+        role:       { type: string, enum: [super_admin, admin, support] }
+        created_at: { type: string, format: date-time }
+
+    FeatureFlag:
+      type: object
+      properties:
+        id:           { type: string }
+        name:         { type: string }
+        description:  { type: string }
+        enabled:      { type: boolean }
+        rollout_percentage: { type: integer, minimum: 0, maximum: 100 }
+        updated_at:   { type: string, format: date-time }
+
+    AuditLog:
+      type: object
+      properties:
+        id:          { type: string }
+        admin_email: { type: string }
+        action:      { type: string }
+        entity_type: { type: string }
+        entity_id:   { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+        ip_address:  { type: string, nullable: true }
+
+tags:
+  - name: health
+    description: Health check
+  - name: care-auth
+    description: Caregiver portal authentication
+  - name: care-circles
+    description: Care circle management
+  - name: health-data
+    description: Patient health data (requires caregiver auth + consent)
+  - name: admin-auth
+    description: Admin portal authentication
+  - name: admin-users
+    description: User management (admin only)
+  - name: admin-system
+    description: System administration (admin only)
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: API health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:  { type: string, example: ok }
+                  version: { type: string }
+                  uptime:  { type: number }
+
+  # ──────────────────────────────────────────────────────────────
+  # Care Auth
+  # ──────────────────────────────────────────────────────────────
+  /care/auth/register:
+    post:
+      tags: [care-auth]
+      summary: Register a new caregiver account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name:     { type: string }
+                phone:    { type: string }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:  { $ref: '#/components/schemas/User' }
+                  token: { type: string }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Email already registered }
+
+  /care/auth/login:
+    post:
+      tags: [care-auth]
+      summary: Login (sets session cookie)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:  { $ref: '#/components/schemas/User' }
+                  token: { type: string }
+        '401': { description: Invalid credentials }
+
+  /care/auth/logout:
+    post:
+      tags: [care-auth]
+      summary: Logout (clears session cookie)
+      responses:
+        '200':
+          description: Logged out
+
+  /care/auth/me:
+    get:
+      tags: [care-auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { description: Not authenticated }
+
+  /care/auth/forgot-password:
+    post:
+      tags: [care-auth]
+      summary: Request a password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Reset email sent (always returns 200 to prevent enumeration)
+
+  /care/auth/reset-password:
+    post:
+      tags: [care-auth]
+      summary: Reset password using token from email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:    { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Password reset }
+        '400': { description: Invalid or expired token }
+
+  # ──────────────────────────────────────────────────────────────
+  # Care Circles
+  # ──────────────────────────────────────────────────────────────
+  /care/circles:
+    get:
+      tags: [care-circles]
+      summary: List circles the current user belongs to
+      responses:
+        '200':
+          description: List of circles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CareCircle' }
+    post:
+      tags: [care-circles]
+      summary: Create a new care circle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, elderlyName]
+              properties:
+                name:        { type: string }
+                elderlyName: { type: string }
+      responses:
+        '201':
+          description: Circle created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareCircle' }
+
+  /care/circles/{circleId}:
+    parameters:
+      - name: circleId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [care-circles]
+      summary: Get circle details and members
+      responses:
+        '200':
+          description: Circle with members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/CareCircle' }
+                  - type: object
+                    properties:
+                      members:
+                        type: array
+                        items: { $ref: '#/components/schemas/CareCircleMember' }
+        '404': { description: Circle not found }
+    put:
+      tags: [care-circles]
+      summary: Update circle details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:        { type: string }
+                elderlyName: { type: string }
+      responses:
+        '200':
+          description: Updated circle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareCircle' }
+    delete:
+      tags: [care-circles]
+      summary: Delete a care circle (owner only)
+      responses:
+        '200': { description: Circle deleted }
+        '403': { description: Not the owner }
+
+  /care/circles/{circleId}/invite:
+    post:
+      tags: [care-circles]
+      summary: Invite a caregiver to the circle
+      parameters:
+        - name: circleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role:  { type: string, enum: [caregiver, viewer] }
+      responses:
+        '201': { description: Invitation sent }
+        '403': { description: Insufficient permissions }
+
+  /care/invitations/{token}/accept:
+    post:
+      tags: [care-circles]
+      summary: Accept a circle invitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Joined circle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareCircle' }
+        '404': { description: Invalid or expired invitation }
+
+  /care/circles/{circleId}/members/{memberId}:
+    parameters:
+      - { name: circleId, in: path, required: true, schema: { type: string } }
+      - { name: memberId, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [care-circles]
+      summary: Update a member's role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [caregiver, viewer] }
+      responses:
+        '200': { description: Role updated }
+    delete:
+      tags: [care-circles]
+      summary: Remove a member from the circle
+      responses:
+        '200': { description: Member removed }
+
+  # ──────────────────────────────────────────────────────────────
+  # Health Data
+  # ──────────────────────────────────────────────────────────────
+  /care/circles/{circleId}/dashboard:
+    get:
+      tags: [health-data]
+      summary: Get comprehensive dashboard summary for a circle
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Dashboard data }
+        '403': { description: Access denied (consent or permissions) }
+
+  /care/circles/{circleId}/health:
+    get:
+      tags: [health-data]
+      summary: Get health readings for a circle
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: days, in: query, schema: { type: integer, default: 7 } }
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Health readings }
+        '403': { description: Consent denied }
+
+  /care/circles/{circleId}/adherence:
+    get:
+      tags: [health-data]
+      summary: Get medication adherence data
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: days, in: query, schema: { type: integer, default: 7 } }
+      responses:
+        '200': { description: Adherence data }
+        '403': { description: Consent denied }
+    post:
+      tags: [health-data]
+      summary: Record a medication adherence event
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [medicationId, taken, scheduledTime]
+              properties:
+                medicationId:  { type: string }
+                taken:         { type: boolean }
+                scheduledTime: { type: string, format: date-time }
+                takenTime:     { type: string, format: date-time, nullable: true }
+                notes:         { type: string }
+      responses:
+        '201': { description: Adherence event recorded }
+        '403': { description: Consent denied }
+
+  /care/circles/{circleId}/activity:
+    get:
+      tags: [health-data]
+      summary: Get activity monitoring data
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: days, in: query, schema: { type: integer, default: 7 } }
+      responses:
+        '200': { description: Activity data }
+
+  /care/circles/{circleId}/alerts:
+    get:
+      tags: [health-data]
+      summary: Get health alerts for a circle
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, acknowledged, resolved], default: active } }
+      responses:
+        '200':
+          description: Alerts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Alert' }
+
+  /care/circles/{circleId}/alerts/{alertId}/acknowledge:
+    post:
+      tags: [health-data]
+      summary: Acknowledge an alert
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: alertId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Alert acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alert: { $ref: '#/components/schemas/Alert' }
+
+  /care/circles/{circleId}/alerts/{alertId}/dismiss:
+    post:
+      tags: [health-data]
+      summary: Dismiss (resolve) an alert
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: alertId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Alert dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alert: { $ref: '#/components/schemas/Alert' }
+
+  /care/circles/{circleId}/checkins:
+    get:
+      tags: [health-data]
+      summary: Get check-in history
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: days, in: query, schema: { type: integer, default: 7 } }
+      responses:
+        '200': { description: Check-in data }
+        '403': { description: Consent denied }
+    post:
+      tags: [health-data]
+      summary: Record a check-in
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mood, notes]
+              properties:
+                mood:  { type: integer, minimum: 1, maximum: 5 }
+                notes: { type: string }
+      responses:
+        '201': { description: Check-in recorded }
+        '403': { description: Consent denied }
+
+  /care/circles/{circleId}/sync:
+    get:
+      tags: [health-data]
+      summary: Pull vault data from cloud (consent-filtered)
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Vault snapshot (categories depend on granted consent) }
+    post:
+      tags: [health-data]
+      summary: Push local changes to cloud
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                changes:
+                  type: array
+                  items:
+                    type: object
+                    required: [entityType, entityId, action, data]
+                    properties:
+                      entityType: { type: string }
+                      entityId:   { type: string }
+                      action:     { type: string, enum: [create, update, delete] }
+                      data:       { type: object }
+      responses:
+        '200':
+          description: Changes synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced:    { type: integer }
+                  conflicts: { type: array, items: { type: object } }
+
+  /care/circles/{circleId}/notes:
+    post:
+      tags: [health-data]
+      summary: Add a vault note
+      parameters:
+        - { name: circleId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content, category]
+              properties:
+                title:    { type: string }
+                content:  { type: string }
+                category: { type: string }
+                tags:     { type: array, items: { type: string } }
+      responses:
+        '201': { description: Note created }
+
+  /care/circles/{circleId}/notes/{noteId}:
+    parameters:
+      - { name: circleId, in: path, required: true, schema: { type: string } }
+      - { name: noteId,   in: path, required: true, schema: { type: string } }
+    put:
+      tags: [health-data]
+      summary: Update a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:   { type: string }
+                content: { type: string }
+      responses:
+        '200': { description: Note updated }
+    delete:
+      tags: [health-data]
+      summary: Delete a note
+      responses:
+        '200': { description: Note deleted }
+
+  # ──────────────────────────────────────────────────────────────
+  # Admin Auth
+  # ──────────────────────────────────────────────────────────────
+  /admin/auth/login:
+    post:
+      tags: [admin-auth]
+      security: []
+      summary: Admin login (sets admin_session cookie)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admin: { $ref: '#/components/schemas/AdminUser' }
+                  token: { type: string }
+        '401': { description: Invalid credentials }
+
+  /admin/auth/me:
+    get:
+      tags: [admin-auth]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get current admin profile and permissions
+      responses:
+        '200':
+          description: Admin profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admin:       { $ref: '#/components/schemas/AdminUser' }
+                  permissions: { type: object }
+
+  /admin/auth/create:
+    post:
+      tags: [admin-auth]
+      security: [{ adminCookieAuth: [] }]
+      summary: Create a new admin account (super_admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string, minLength: 12 }
+                name:     { type: string }
+                role:     { type: string, enum: [admin, support] }
+      responses:
+        '200':
+          description: Admin account created (welcome email sent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  admin:   { $ref: '#/components/schemas/AdminUser' }
+        '403': { description: Insufficient permissions }
+
+  # ──────────────────────────────────────────────────────────────
+  # Admin Users
+  # ──────────────────────────────────────────────────────────────
+  /admin/users:
+    get:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: List all users with pagination and search
+      parameters:
+        - { name: page,   in: query, schema: { type: integer, default: 1 } }
+        - { name: limit,  in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, suspended, unverified] } }
+        - { name: sort,   in: query, schema: { type: string } }
+        - { name: order,  in: query, schema: { type: string, enum: [asc, desc] } }
+      responses:
+        '200':
+          description: Paginated user list with CSV export link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users: { type: array, items: { $ref: '#/components/schemas/User' } }
+                  total: { type: integer }
+                  page:  { type: integer }
+                  pages: { type: integer }
+    post:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Provision a new user account (temp password emailed to user)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name:  { type: string }
+                phone: { type: string }
+      responses:
+        '201':
+          description: User created; temp password returned and emailed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:      { type: boolean }
+                  user:         { $ref: '#/components/schemas/User' }
+                  tempPassword: { type: string }
+        '409': { description: Email already exists }
+
+  /admin/users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get detailed user profile
+      responses:
+        '200': { description: User details }
+        '404': { description: User not found }
+
+  /admin/users/{userId}/suspend:
+    post:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Suspend a user account
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: User suspended }
+
+  /admin/users/{userId}/unsuspend:
+    post:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Unsuspend a user account
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: User unsuspended }
+
+  /admin/users/{userId}/reset-password:
+    post:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Reset a user's password (new password emailed to user)
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                newPassword: { type: string, minLength: 12 }
+      responses:
+        '200': { description: Password reset and email sent }
+
+  /admin/users/export:
+    get:
+      tags: [admin-users]
+      security: [{ adminCookieAuth: [] }]
+      summary: Export users as CSV
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+
+  # ──────────────────────────────────────────────────────────────
+  # Admin System
+  # ──────────────────────────────────────────────────────────────
+  /admin/dashboard:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get system-wide dashboard metrics
+      responses:
+        '200':
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalUsers:   { type: integer }
+                  activeUsers:  { type: integer }
+                  totalCircles: { type: integer }
+                  activeAlerts: { type: integer }
+
+  /admin/feature-flags:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: List all feature flags
+      responses:
+        '200':
+          description: Feature flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flags:
+                    type: array
+                    items: { $ref: '#/components/schemas/FeatureFlag' }
+
+  /admin/feature-flags/{flagId}:
+    parameters:
+      - { name: flagId, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Update a feature flag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:            { type: boolean }
+                rollout_percentage: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '200': { description: Flag updated }
+
+  /admin/audit-logs:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Query admin audit log
+      parameters:
+        - { name: page,       in: query, schema: { type: integer, default: 1 } }
+        - { name: limit,      in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: adminEmail, in: query, schema: { type: string } }
+        - { name: action,     in: query, schema: { type: string } }
+        - { name: entityType, in: query, schema: { type: string } }
+        - { name: startDate,  in: query, schema: { type: string, format: date } }
+        - { name: endDate,    in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:  { type: array, items: { $ref: '#/components/schemas/AuditLog' } }
+                  total: { type: integer }
+
+  /admin/health-alerts/overview:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get health alert overview statistics
+      responses:
+        '200':
+          description: Alert overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:      { type: object }
+                  bySeverity:   { type: array, items: { type: object } }
+                  byType:       { type: array, items: { type: object } }
+                  recentAlerts: { type: array, items: { type: object } }
+                  topCircles:   { type: array, items: { type: object } }
+
+  /admin/health-alerts:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: List health alerts with optional filters
+      parameters:
+        - { name: status,   in: query, schema: { type: string, enum: [active, acknowledged, resolved] } }
+        - { name: severity, in: query, schema: { type: string, enum: [critical, high, medium, low] } }
+      responses:
+        '200':
+          description: Filtered alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+
+  /admin/health-alerts/{alertId}/acknowledge:
+    post:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Acknowledge an alert
+      parameters:
+        - { name: alertId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Alert acknowledged }
+
+  /admin/health-alerts/{alertId}/resolve:
+    post:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Resolve an alert
+      parameters:
+        - { name: alertId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Alert resolved }
+
+  /admin/medications:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get medication reports overview
+      responses:
+        '200': { description: Medication statistics }
+
+  /admin/settings:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get system settings (super_admin only)
+      responses:
+        '200': { description: Settings object }
+    put:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Update system settings (super_admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Settings updated }
+
+  /admin/circles:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: List all care circles
+      parameters:
+        - { name: page,   in: query, schema: { type: integer, default: 1 } }
+        - { name: limit,  in: query, schema: { type: integer, default: 50 } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Paginated circle list }
+
+  /admin/ai-usage:
+    get:
+      tags: [admin-system]
+      security: [{ adminCookieAuth: [] }]
+      summary: Get AI usage metrics
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        '200': { description: AI usage statistics }

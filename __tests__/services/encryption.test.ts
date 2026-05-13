@@ -1,165 +1,383 @@
 /**
+ * @jest-environment node
+ *
  * Encryption Service Tests
- * Tests for data encryption, decryption, and key management
+ * Tests for AES-256-GCM encryption, key derivation, PIN management, and vault operations.
+ *
+ * Node environment is required because jsdom's window.crypto lacks crypto.subtle
+ * (the Web Crypto API used by AES-256-GCM / PBKDF2). Node 18+ exposes globalThis.crypto
+ * with full subtle support — no polyfill needed.
+ *
+ * AsyncStorage is mocked with an in-memory Map (localStorage is undefined in Node env).
+ * expo-crypto is mocked via the project's web mock.
  */
 
-describe('Encryption Service', () => {
-  const mockPlaintext = 'Sensitive data to encrypt';
-  const _mockKey = 'test-encryption-key-32chars!!!';
+// ---------------------------------------------------------------------------
+// In-memory AsyncStorage mock — must be declared before any imports that
+// reference @react-native-async-storage/async-storage.
+// ---------------------------------------------------------------------------
+const mockStore: Record<string, string | null> = {};
 
-  describe('encrypt', () => {
-    it('should encrypt plaintext data', async () => {
-      // Mock encryption result
-      const encrypted = btoa(mockPlaintext); // Simple base64 for testing
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(async (key: string) => mockStore[key] ?? null),
+  setItem: jest.fn(async (key: string, value: string) => { mockStore[key] = value; }),
+  removeItem: jest.fn(async (key: string) => { delete mockStore[key]; }),
+  clear: jest.fn(async () => { Object.keys(mockStore).forEach(k => delete mockStore[k]); }),
+  multiRemove: jest.fn(async (keys: string[]) => { keys.forEach(k => delete mockStore[k]); }),
+}));
+// expo-crypto is already routed to src/web/expo-crypto-mock.ts via moduleNameMapper.
 
-      expect(encrypted).not.toBe(mockPlaintext);
-      expect(typeof encrypted).toBe('string');
-    });
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { encryptionService } from '../../src/services/encryption';
 
-    it('should produce different ciphertext for same plaintext (with salt)', () => {
-      const encrypt1 = btoa(mockPlaintext + '1');
-      const encrypt2 = btoa(mockPlaintext + '2');
+const SALT_KEY = '@karuna/vault_salt';
+const KEY_CHECK_KEY = '@karuna/vault_key_check';
 
-      expect(encrypt1).not.toBe(encrypt2);
-    });
+function clearMockStore() {
+  Object.keys(mockStore).forEach(k => delete mockStore[k]);
+}
 
-    it('should handle empty string', async () => {
-      const encrypted = btoa('');
+async function freshVault(pin = '123456'): Promise<boolean> {
+  await encryptionService.resetVault();
+  return encryptionService.initialize(pin);
+}
 
-      expect(encrypted).toBe('');
-    });
-
-    it('should handle special characters', async () => {
-      const specialText = 'Password: P@$$w0rd! 中文 🔐';
-      const encrypted = btoa(unescape(encodeURIComponent(specialText)));
-
-      expect(typeof encrypted).toBe('string');
-    });
-
-    it('should handle large data', async () => {
-      const largeData = 'x'.repeat(10000);
-      const encrypted = btoa(largeData);
-
-      expect(encrypted.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('decrypt', () => {
-    it('should decrypt ciphertext back to plaintext', async () => {
-      const encrypted = btoa(mockPlaintext);
-      const decrypted = atob(encrypted);
-
-      expect(decrypted).toBe(mockPlaintext);
-    });
-
-    it('should fail with wrong key', async () => {
-      const encrypted = btoa(mockPlaintext);
-
-      // In real encryption, wrong key would produce garbage or fail
-      // For this mock, we just verify the mechanism
-      expect(typeof encrypted).toBe('string');
-    });
-
-    it('should handle corrupted ciphertext', async () => {
-      const corruptedCiphertext = 'not-valid-base64!!!';
-
-      expect(() => atob(corruptedCiphertext)).toThrow();
-    });
-  });
-
-  describe('key derivation', () => {
-    it('should derive key from password', () => {
-      const password = 'user-password-123-extra-chars-for-length';
-      // Mock PBKDF2-like derivation
-      const derivedKey = btoa(password).substring(0, 32);
-
-      expect(derivedKey.length).toBe(32);
-    });
-
-    it('should produce consistent key for same password', () => {
-      const password = 'consistent-password';
-      const key1 = btoa(password).substring(0, 32);
-      const key2 = btoa(password).substring(0, 32);
-
-      expect(key1).toBe(key2);
-    });
-  });
-
-  describe('hash', () => {
-    it('should create hash of data', () => {
-      const data = 'data to hash';
-      // Simple mock hash
-      const hash = btoa(data).split('').reverse().join('');
-
-      expect(hash).not.toBe(data);
-    });
-
-    it('should produce same hash for same input', () => {
-      const data = 'consistent data';
-      const hash1 = btoa(data).split('').reverse().join('');
-      const hash2 = btoa(data).split('').reverse().join('');
-
-      expect(hash1).toBe(hash2);
-    });
-
-    it('should produce different hash for different input', () => {
-      const hash1 = btoa('data1').split('').reverse().join('');
-      const hash2 = btoa('data2').split('').reverse().join('');
-
-      expect(hash1).not.toBe(hash2);
-    });
-  });
+// Diagnostic — confirms Node's built-in webcrypto is available.
+it('diagnostic: crypto.subtle is available in test environment', () => {
+  expect(typeof (globalThis as any).crypto?.subtle).toBe('object');
 });
 
-describe('Secure Data Handling', () => {
-  it('should clear sensitive data from memory', () => {
-    let sensitiveData: string | null = 'sensitive-value';
-    sensitiveData = null;
-
-    expect(sensitiveData).toBeNull();
+describe('EncryptionService', () => {
+  beforeEach(async () => {
+    clearMockStore();
+    await encryptionService.resetVault();
   });
 
-  it('should not expose encryption key in plaintext', () => {
-    const key = 'secret-key';
-    const encrypted = btoa(key);
+  // ---------------------------------------------------------------------------
+  // initialize
+  // ---------------------------------------------------------------------------
+  describe('initialize', () => {
+    it('returns true on first-time setup and marks service as ready', async () => {
+      const result = await encryptionService.initialize('my-pin-1234');
 
-    expect(encrypted).not.toContain(key);
+      expect(result).toBe(true);
+      expect(encryptionService.isReady()).toBe(true);
+    });
+
+    it('persists a salt to AsyncStorage on first call', async () => {
+      await encryptionService.initialize('pin');
+
+      const salt = await AsyncStorage.getItem(SALT_KEY);
+      expect(salt).not.toBeNull();
+      expect(typeof salt).toBe('string');
+      expect((salt as string).length).toBeGreaterThan(0);
+    });
+
+    it('persists a key-check ciphertext to AsyncStorage on first call', async () => {
+      await encryptionService.initialize('pin');
+
+      const keyCheck = await AsyncStorage.getItem(KEY_CHECK_KEY);
+      expect(keyCheck).not.toBeNull();
+    });
+
+    it('reuses the existing salt on subsequent initializations with the same PIN', async () => {
+      await encryptionService.initialize('pin');
+      const saltAfterFirst = await AsyncStorage.getItem(SALT_KEY);
+
+      // Lock and re-initialize
+      encryptionService.lock();
+      await encryptionService.initialize('pin');
+      const saltAfterSecond = await AsyncStorage.getItem(SALT_KEY);
+
+      expect(saltAfterFirst).toBe(saltAfterSecond);
+    });
+
+    it('returns true when the correct PIN is provided for an existing vault', async () => {
+      await encryptionService.initialize('correct-pin');
+      encryptionService.lock();
+
+      const result = await encryptionService.initialize('correct-pin');
+      expect(result).toBe(true);
+    });
+
+    it('returns false when the wrong PIN is provided for an existing vault', async () => {
+      await encryptionService.initialize('correct-pin');
+      encryptionService.lock();
+
+      const result = await encryptionService.initialize('wrong-pin');
+      expect(result).toBe(false);
+    });
+
+    it('leaves isReady() false after a wrong-PIN attempt', async () => {
+      await encryptionService.initialize('correct-pin');
+      encryptionService.lock();
+
+      await encryptionService.initialize('bad-pin');
+      expect(encryptionService.isReady()).toBe(false);
+    });
   });
-});
 
-describe('Vault Encryption', () => {
-  const vaultData = {
-    accounts: [
-      { id: '1', username: 'user1', password: 'pass1' },
-    ],
-    medications: [
-      { id: '1', name: 'Med1', dosage: '10mg' },
-    ],
-    documents: [
-      { id: '1', title: 'Doc1', content: 'Sensitive content' },
-    ],
-  };
+  // ---------------------------------------------------------------------------
+  // isReady / lock
+  // ---------------------------------------------------------------------------
+  describe('isReady and lock', () => {
+    it('isReady() is false before initialize()', () => {
+      expect(encryptionService.isReady()).toBe(false);
+    });
 
-  it('should encrypt entire vault', () => {
-    const vaultString = JSON.stringify(vaultData);
-    const encrypted = btoa(vaultString);
+    it('isReady() becomes false after lock()', async () => {
+      await encryptionService.initialize('pin');
+      expect(encryptionService.isReady()).toBe(true);
 
-    expect(encrypted).not.toContain('password');
-    expect(encrypted).not.toContain('Sensitive');
+      encryptionService.lock();
+      expect(encryptionService.isReady()).toBe(false);
+    });
   });
 
-  it('should decrypt vault completely', () => {
-    const vaultString = JSON.stringify(vaultData);
-    const encrypted = btoa(vaultString);
-    const decrypted = JSON.parse(atob(encrypted));
+  // ---------------------------------------------------------------------------
+  // encrypt / decrypt round-trip
+  // ---------------------------------------------------------------------------
+  describe('encrypt and decrypt', () => {
+    beforeEach(async () => {
+      await freshVault('test-pin');
+    });
 
-    expect(decrypted).toEqual(vaultData);
+    it('encrypts plaintext to a different string', async () => {
+      const plain = 'Hello, World!';
+      const ciphertext = await encryptionService.encrypt(plain);
+
+      expect(ciphertext).not.toBe(plain);
+      expect(typeof ciphertext).toBe('string');
+      expect(ciphertext.length).toBeGreaterThan(0);
+    });
+
+    it('decrypts ciphertext back to the original plaintext', async () => {
+      const plain = 'Sensitive medical data: blood pressure 120/80';
+      const ciphertext = await encryptionService.encrypt(plain);
+      const decrypted = await encryptionService.decrypt(ciphertext);
+
+      expect(decrypted).toBe(plain);
+    });
+
+    it('produces different ciphertext each call due to random IV', async () => {
+      const plain = 'same input';
+      const ct1 = await encryptionService.encrypt(plain);
+      const ct2 = await encryptionService.encrypt(plain);
+
+      expect(ct1).not.toBe(ct2);
+    });
+
+    it('handles empty-string round-trip correctly', async () => {
+      const ct = await encryptionService.encrypt('');
+      const result = await encryptionService.decrypt(ct);
+
+      expect(result).toBe('');
+    });
+
+    it('handles strings with Unicode characters', async () => {
+      const plain = 'दवाई: पैरासिटामोल 500mg — 2x daily 🩺';
+      const ct = await encryptionService.encrypt(plain);
+      const decrypted = await encryptionService.decrypt(ct);
+
+      expect(decrypted).toBe(plain);
+    });
+
+    it('handles large payloads', async () => {
+      const plain = 'x'.repeat(50000);
+      const ct = await encryptionService.encrypt(plain);
+      const decrypted = await encryptionService.decrypt(ct);
+
+      expect(decrypted).toBe(plain);
+    });
+
+    it('throws if encrypt is called before initialize()', async () => {
+      await encryptionService.resetVault();
+
+      await expect(encryptionService.encrypt('data')).rejects.toThrow(
+        'Encryption not initialized'
+      );
+    });
+
+    it('throws if decrypt is called before initialize()', async () => {
+      await encryptionService.resetVault();
+
+      await expect(encryptionService.decrypt('ciphertext')).rejects.toThrow(
+        'Encryption not initialized'
+      );
+    });
+
+    it('rejects when decrypting with a different (wrong) key', async () => {
+      const ct = await encryptionService.encrypt('secret');
+      encryptionService.lock();
+
+      // Re-init with wrong pin will fail; force a fresh vault with different pin
+      await encryptionService.resetVault();
+      await encryptionService.initialize('different-pin');
+
+      await expect(encryptionService.decrypt(ct)).rejects.toBeDefined();
+    });
   });
 
-  it('should encrypt individual vault entries', () => {
-    const entry = vaultData.accounts[0];
-    const encrypted = btoa(JSON.stringify(entry));
+  // ---------------------------------------------------------------------------
+  // encryptObject / decryptObject
+  // ---------------------------------------------------------------------------
+  describe('encryptObject and decryptObject', () => {
+    beforeEach(async () => {
+      await freshVault('obj-pin');
+    });
 
-    expect(typeof encrypted).toBe('string');
+    it('serializes and round-trips a plain object', async () => {
+      const obj = { name: 'Aadhaar', number: '1234-5678-9012', expiry: null };
+      const ct = await encryptionService.encryptObject(obj);
+      const result = await encryptionService.decryptObject<typeof obj>(ct);
+
+      expect(result).toEqual(obj);
+    });
+
+    it('round-trips an array', async () => {
+      const arr = [1, 'two', { three: true }];
+      const ct = await encryptionService.encryptObject(arr);
+      const result = await encryptionService.decryptObject<typeof arr>(ct);
+
+      expect(result).toEqual(arr);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // hasExistingVault
+  // ---------------------------------------------------------------------------
+  describe('hasExistingVault', () => {
+    it('returns false when no vault has been created', async () => {
+      const result = await encryptionService.hasExistingVault();
+      expect(result).toBe(false);
+    });
+
+    it('returns true after a vault is initialized', async () => {
+      await encryptionService.initialize('pin');
+      const result = await encryptionService.hasExistingVault();
+      expect(result).toBe(true);
+    });
+
+    it('returns false after resetVault()', async () => {
+      await encryptionService.initialize('pin');
+      await encryptionService.resetVault();
+
+      const result = await encryptionService.hasExistingVault();
+      expect(result).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // resetVault
+  // ---------------------------------------------------------------------------
+  describe('resetVault', () => {
+    it('removes both storage keys', async () => {
+      await encryptionService.initialize('pin');
+      await encryptionService.resetVault();
+
+      const salt = await AsyncStorage.getItem(SALT_KEY);
+      const keyCheck = await AsyncStorage.getItem(KEY_CHECK_KEY);
+      expect(salt).toBeNull();
+      expect(keyCheck).toBeNull();
+    });
+
+    it('clears the in-memory state', async () => {
+      await encryptionService.initialize('pin');
+      await encryptionService.resetVault();
+
+      expect(encryptionService.isReady()).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // changePin
+  // ---------------------------------------------------------------------------
+  describe('changePin', () => {
+    it('returns false when old PIN is wrong', async () => {
+      await encryptionService.initialize('original-pin');
+      const result = await encryptionService.changePin('wrong-pin', 'new-pin');
+
+      expect(result).toBe(false);
+    });
+
+    it('returns true when old PIN is correct and new PIN is accepted', async () => {
+      await encryptionService.initialize('original-pin');
+      const result = await encryptionService.changePin('original-pin', 'new-pin');
+
+      expect(result).toBe(true);
+    });
+
+    it('generates a new salt when the PIN changes', async () => {
+      await encryptionService.initialize('original-pin');
+      const saltBefore = await AsyncStorage.getItem(SALT_KEY);
+
+      await encryptionService.changePin('original-pin', 'new-pin');
+      const saltAfter = await AsyncStorage.getItem(SALT_KEY);
+
+      expect(saltBefore).not.toBe(saltAfter);
+    });
+
+    it('old PIN no longer works after a successful PIN change', async () => {
+      await encryptionService.initialize('original-pin');
+      await encryptionService.changePin('original-pin', 'new-pin');
+      encryptionService.lock();
+
+      const result = await encryptionService.initialize('original-pin');
+      expect(result).toBe(false);
+    });
+
+    it('new PIN works after a successful PIN change', async () => {
+      await encryptionService.initialize('original-pin');
+      await encryptionService.changePin('original-pin', 'new-pin');
+      encryptionService.lock();
+
+      const result = await encryptionService.initialize('new-pin');
+      expect(result).toBe(true);
+    });
+
+    it('returns false when AsyncStorage.removeItem throws during changePin', async () => {
+      await encryptionService.initialize('original-pin');
+      (AsyncStorage.removeItem as jest.Mock).mockRejectedValueOnce(new Error('storage error'));
+      const result = await encryptionService.changePin('original-pin', 'new-pin');
+      expect(result).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge cases: tampered key check and storage errors
+  // ---------------------------------------------------------------------------
+  describe('edge cases', () => {
+    it('initialize() returns false when key check decrypts to unexpected value', async () => {
+      // Set up a fresh vault and then tamper with the key check
+      await encryptionService.initialize('test-pin');
+      // Encrypt a different sentinel with the current key, store as key check
+      const tamperedCheck = await encryptionService.encrypt('TAMPERED_VALUE');
+      mockStore[KEY_CHECK_KEY] = tamperedCheck;
+      encryptionService.lock();
+
+      // Re-initialize — decryption succeeds but the plaintext won't match
+      const result = await encryptionService.initialize('test-pin');
+      expect(result).toBe(false);
+    });
+
+    it('initialize() returns false when AsyncStorage.getItem throws', async () => {
+      (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('storage failure'));
+      const result = await encryptionService.initialize('any-pin');
+      expect(result).toBe(false);
+    });
+
+    it('uses fallback key derivation when PBKDF2 deriveBits throws', async () => {
+      // Force the PBKDF2 path to fail, triggering the iterative SHA-256 fallback
+      const spy = jest.spyOn(globalThis.crypto.subtle, 'deriveBits').mockRejectedValueOnce(
+        new Error('PBKDF2 not supported')
+      );
+      try {
+        const result = await encryptionService.initialize('fallback-pin');
+        // Service should still initialize successfully via the fallback path
+        expect(result).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });

@@ -180,17 +180,31 @@ export default function LockScreen({
     }
   };
 
-  // MOB-2: Forgot PIN recovery — wipes all security data then unlocks
+  // MOB-2: Forgot PIN recovery — requires biometric auth if available before wiping security data
   const handleForgotPin = () => {
+    const hasBiometric = biometricCapabilities?.isAvailable && biometricCapabilities?.isEnrolled;
     Alert.alert(
       'Forgot PIN?',
-      'This will reset all security settings and unlock the app. You will need to set up a new PIN afterwards.',
+      hasBiometric
+        ? 'To reset your PIN you must first verify with biometrics. This will clear all security settings.'
+        : 'This will reset all security settings and unlock the app. You will need to set up a new PIN afterwards.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset & Continue',
+          text: hasBiometric ? 'Verify & Reset' : 'Reset & Continue',
           style: 'destructive',
           onPress: async () => {
+            if (hasBiometric) {
+              const result = await biometricAuthService.authenticateWithBiometric(
+                'Verify identity to reset security settings'
+              );
+              if (!result.success) {
+                if (result.error !== 'Cancelled') {
+                  setError('Biometric verification failed. PIN reset cancelled.');
+                }
+                return;
+              }
+            }
             await biometricAuthService.resetAllSecurity();
             await AsyncStorage.removeItem(LOCKOUT_KEY).catch(() => {});
             onUnlock();

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import type { AdminUser, AdminCircle } from '../types';
 
 export default function UserDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [circles, setCircles] = useState<any[]>([]);
+  const [user, setUser] = useState<AdminUser | null>(null);
+  const [circles, setCircles] = useState<AdminCircle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -14,6 +15,10 @@ export default function UserDetail() {
   const [newPassword, setNewPassword] = useState('');
   const [actionError, setActionError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isSuspending, setIsSuspending] = useState(false);
+  const [isUnsuspending, setIsUnsuspending] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   useEffect(() => {
     if (id) loadUser();
@@ -34,7 +39,9 @@ export default function UserDetail() {
       setActionError('Suspension reason is required');
       return;
     }
+    setIsSuspending(true);
     const result = await api.suspendUser(id!, suspendReason);
+    setIsSuspending(false);
     if (result.success) {
       setShowSuspendModal(false);
       setSuspendReason('');
@@ -45,7 +52,10 @@ export default function UserDetail() {
   };
 
   const handleUnsuspend = async () => {
+    if (!window.confirm(`Unsuspend ${user?.name}? They will regain full access to the platform.`)) return;
+    setIsUnsuspending(true);
     const result = await api.unsuspendUser(id!);
+    setIsUnsuspending(false);
     if (result.success) {
       loadUser();
     }
@@ -53,22 +63,28 @@ export default function UserDetail() {
 
   const handleResetPassword = async () => {
     setActionError('');
-    if (newPassword.length < 6) {
-      setActionError('Password must be at least 6 characters');
+    if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setActionError('Password must be at least 12 characters with an uppercase letter and a number');
       return;
     }
+    if (newPassword.length > 72) {
+      setActionError('Password must be 72 characters or fewer');
+      return;
+    }
+    setIsResetting(true);
     const result = await api.resetUserPassword(id!, newPassword);
+    setIsResetting(false);
     if (result.success) {
       setShowResetModal(false);
       setNewPassword('');
       setSuccessMessage('Password reset successfully');
-      setTimeout(() => setSuccessMessage(''), 5000); // Auto-dismiss after 5 seconds
+      setTimeout(() => setSuccessMessage(''), 5000);
     } else {
       setActionError(result.error || 'Failed to reset password');
     }
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString();
   };
@@ -122,7 +138,9 @@ export default function UserDetail() {
 
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
           {user.suspended_at ? (
-            <button onClick={handleUnsuspend} className="btn btn-success">Unsuspend</button>
+            <button onClick={handleUnsuspend} className="btn btn-success" disabled={isUnsuspending}>
+              {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+            </button>
           ) : (
             <button onClick={() => setShowSuspendModal(true)} className="btn btn-danger">Suspend User</button>
           )}
@@ -226,8 +244,10 @@ export default function UserDetail() {
               </div>
             </div>
             <div className="modal-footer">
-              <button onClick={() => setShowSuspendModal(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleSuspend} className="btn btn-danger">Suspend</button>
+              <button onClick={() => setShowSuspendModal(false)} className="btn btn-secondary" disabled={isSuspending}>Cancel</button>
+              <button onClick={handleSuspend} className="btn btn-danger" disabled={isSuspending}>
+                {isSuspending ? 'Suspending...' : 'Suspend'}
+              </button>
             </div>
           </div>
         </div>
@@ -235,28 +255,41 @@ export default function UserDetail() {
 
       {/* Reset Password Modal */}
       {showResetModal && (
-        <div className="modal-overlay" onClick={() => setShowResetModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">Reset Password</h3>
-              <button className="modal-close" onClick={() => setShowResetModal(false)}>×</button>
+              <button className="modal-close" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>×</button>
             </div>
             <div className="modal-body">
               {actionError && <div className="alert alert-error">{actionError}</div>}
               <div className="form-group">
                 <label className="form-label">New Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password..."
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    className="form-input"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password..."
+                    style={{ paddingRight: '2.5rem' }}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
+                  >
+                    {showNewPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
-              <button onClick={() => setShowResetModal(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleResetPassword} className="btn btn-primary">Reset Password</button>
+              <button onClick={() => setShowResetModal(false)} className="btn btn-secondary" disabled={isResetting}>Cancel</button>
+              <button onClick={handleResetPassword} className="btn btn-primary" disabled={isResetting}>
+                {isResetting ? 'Resetting...' : 'Reset Password'}
+              </button>
             </div>
           </div>
         </div>

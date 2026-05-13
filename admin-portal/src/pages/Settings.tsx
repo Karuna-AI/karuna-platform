@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import type { SystemSetting } from '../types';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<Record<string, any[]>>({});
+  const [settings, setSettings] = useState<Record<string, SystemSetting[]>>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [editingSetting, setEditingSetting] = useState<any>(null);
+  const [editingSetting, setEditingSetting] = useState<SystemSetting | null>(null);
   const [editValue, setEditValue] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const { admin } = useAuth();
+  const canManageSettings = admin?.permissions?.canManageSettings;
 
   useEffect(() => {
     loadSettings();
@@ -43,6 +45,7 @@ export default function Settings() {
 
   const handleSave = async () => {
     if (!editingSetting) return;
+    if (!canManageSettings) return;
     if (jsonError) return;
 
     let parsedValue: unknown;
@@ -71,8 +74,6 @@ export default function Settings() {
       setSaveError(result.error || 'Failed to save setting');
     }
   };
-
-  const canManageSettings = admin?.permissions?.canManageSettings;
 
   const formatValue = (value: any) => {
     if (typeof value === 'object') {

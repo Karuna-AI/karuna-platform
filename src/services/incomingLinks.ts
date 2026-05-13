@@ -16,7 +16,8 @@ export type DeepLinkScreen =
   | 'vault_accounts'
   | 'vault_documents'
   | 'security'
-  | 'proactive_settings';
+  | 'proactive_settings'
+  | 'join_circle';
 
 interface ParsedDeepLink {
   screen: DeepLinkScreen;
@@ -69,6 +70,15 @@ export function parseKarunaUrl(url: string): ParsedDeepLink | null {
 
     // Normalize path
     path = path.replace(/\/$/, '').toLowerCase();
+
+    // Handle invite/TOKEN sub-path
+    if (path.startsWith('invite/')) {
+      const token = path.slice('invite/'.length);
+      if (token) {
+        return { screen: 'join_circle', params: { token } };
+      }
+      return null;
+    }
 
     const screen = SCREEN_MAP[path];
     if (!screen) {

@@ -25,9 +25,13 @@ export function MemoryViewer({ onClose }: MemoryViewerProps): JSX.Element {
   const [editName, setEditName] = useState('');
 
   const loadMemory = useCallback(async () => {
-    const data = await storageService.loadMemory();
-    setMemory(data);
-    setEditName(data.preferredName || '');
+    try {
+      const data = await storageService.loadMemory();
+      setMemory(data);
+      setEditName(data.preferredName || '');
+    } catch (error) {
+      console.error('[MemoryViewer] Failed to load memory:', error);
+    }
   }, []);
 
   useEffect(() => {
@@ -35,9 +39,14 @@ export function MemoryViewer({ onClose }: MemoryViewerProps): JSX.Element {
   }, [loadMemory]);
 
   const handleSaveName = useCallback(async () => {
-    await storageService.updateMemory({ preferredName: editName.trim() || undefined });
-    setIsEditing(false);
-    loadMemory();
+    try {
+      await storageService.updateMemory({ preferredName: editName.trim() || undefined });
+      setIsEditing(false);
+      loadMemory();
+    } catch (error) {
+      console.error('[MemoryViewer] Failed to save name:', error);
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    }
   }, [editName, loadMemory]);
 
   const handleRemovePerson = useCallback(async (personName: string) => {
@@ -51,9 +60,14 @@ export function MemoryViewer({ onClose }: MemoryViewerProps): JSX.Element {
           style: 'destructive',
           onPress: async () => {
             if (!memory) return;
-            const updated = memory.keyPeople.filter(p => p.name !== personName);
-            await storageService.updateMemory({ keyPeople: updated });
-            loadMemory();
+            try {
+              const updated = memory.keyPeople.filter(p => p.name !== personName);
+              await storageService.updateMemory({ keyPeople: updated });
+              loadMemory();
+            } catch (error) {
+              console.error('[MemoryViewer] Failed to remove person:', error);
+              Alert.alert('Error', 'Failed to remove. Please try again.');
+            }
           },
         },
       ]
@@ -78,14 +92,19 @@ export function MemoryViewer({ onClose }: MemoryViewerProps): JSX.Element {
           text: 'Clear All',
           style: 'destructive',
           onPress: async () => {
-            await storageService.updateMemory({
-              preferredName: undefined,
-              keyPeople: [],
-              customInstructions: [],
-              remindersCreated: [],
-              preferences: {},
-            });
-            loadMemory();
+            try {
+              await storageService.updateMemory({
+                preferredName: undefined,
+                keyPeople: [],
+                customInstructions: [],
+                remindersCreated: [],
+                preferences: {},
+              });
+              loadMemory();
+            } catch (error) {
+              console.error('[MemoryViewer] Failed to clear memories:', error);
+              Alert.alert('Error', 'Failed to clear. Please try again.');
+            }
           },
         },
       ]

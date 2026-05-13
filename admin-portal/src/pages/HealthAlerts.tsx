@@ -67,6 +67,7 @@ export default function HealthAlerts() {
   const [topCircles, setTopCircles] = useState<TopCircle[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'alerts'>('overview');
   const [filters, setFilters] = useState({
     status: '',
@@ -85,6 +86,7 @@ export default function HealthAlerts() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await adminAPI.get('/health-alerts/overview');
       setSummary(res.data.summary);
@@ -92,8 +94,8 @@ export default function HealthAlerts() {
       setByType(res.data.byType);
       setRecentAlerts(res.data.recentAlerts);
       setTopCircles(res.data.topCircles);
-    } catch (error) {
-      console.error('Failed to load health alerts:', error);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.error || 'Failed to load health alerts');
     } finally {
       setLoading(false);
     }
@@ -107,26 +109,32 @@ export default function HealthAlerts() {
 
       const res = await adminAPI.get(`/health-alerts?${params.toString()}`);
       setAlerts(res.data.alerts);
-    } catch (error) {
-      console.error('Failed to load alerts:', error);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.error || 'Failed to load health alerts');
     }
   };
 
   const handleAcknowledge = async (alertId: string) => {
-    const result = await adminAPI.post(`/health-alerts/${alertId}/acknowledge`);
-    if (result.status >= 200 && result.status < 300) {
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged' } : a))
-      );
+    const prevAlerts = alerts;
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged' } : a))
+    );
+    try {
+      await adminAPI.post(`/health-alerts/${alertId}/acknowledge`);
+    } catch {
+      setAlerts(prevAlerts);
     }
   };
 
   const handleResolve = async (alertId: string) => {
-    const result = await adminAPI.post(`/health-alerts/${alertId}/resolve`);
-    if (result.status >= 200 && result.status < 300) {
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved' } : a))
-      );
+    const prevAlerts = alerts;
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved' } : a))
+    );
+    try {
+      await adminAPI.post(`/health-alerts/${alertId}/resolve`);
+    } catch {
+      setAlerts(prevAlerts);
     }
   };
 
@@ -150,7 +158,16 @@ export default function HealthAlerts() {
   };
 
   if (loading) {
-    return <div className="loading">Loading health alerts...</div>;
+    return <div className="loading"><div className="spinner" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={loadData} style={{ marginTop: '1rem' }}>Retry</button>
+      </div>
+    );
   }
 
   return (

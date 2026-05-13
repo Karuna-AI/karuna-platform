@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import type { AuthState, LoginCredentials, RegisterData } from '../types';
 import api from '../services/api';
+import { useIdleTimeout } from '../hooks/useIdleTimeout';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string }>;
@@ -19,12 +20,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    // Validate session via cookie (no localStorage token needed)
     validateToken();
   }, []);
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+    };
+    window.addEventListener('karuna:auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('karuna:auth:unauthorized', handleUnauthorized);
+  }, []);
+
   const validateToken = async () => {
-    const result = await api.getProfile();
+    const result = await api.checkSession();
     if (result.success && result.data) {
       setState({
         user: result.data,
@@ -61,9 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (data: RegisterData) => {
     const result = await api.register(data);
     if (result.success && result.data) {
+      const token = result.data.token ?? null;
+      if (token) api.setToken(token);
       setState({
         user: result.data.user,
-        token: null,
+        token,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -72,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: result.error };
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await api.logout();
     setState({
       user: null,
@@ -80,7 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: false,
       isLoading: false,
     });
-  };
+  }, []);
+
+  useIdleTimeout(logout, state.isAuthenticated);
 
   return (
     <AuthContext.Provider value={{ ...state, login, register, logout }}>

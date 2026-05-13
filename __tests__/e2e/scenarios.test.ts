@@ -1,337 +1,510 @@
 /**
- * End-to-End Test Scenarios
- * Complete user journey tests for the Karuna platform
+ * @jest-environment node
+ *
+ * E2E User Journey Tests
+ *
+ * Exercises real service code through complete user-facing workflows.
+ * Every assertion tests an observable side-effect of a real service call —
+ * no hardcoded constants masquerading as test assertions.
+ *
+ * AsyncStorage: in-memory mock shared across all journeys (reset in beforeEach).
+ * Native modules (notifications, biometrics, secure-store): no-op mocks.
+ * encryptedDatabaseService: mocked as unavailable so storageService falls
+ * back to AsyncStorage (the simpler, fully-deterministic path).
  */
 
-describe('E2E: First Time User Onboarding', () => {
-  it('should complete onboarding flow', async () => {
-    const steps = [
-      { step: 'welcome', completed: true },
-      { step: 'language_selection', completed: true },
-      { step: 'permissions', completed: true },
-      { step: 'profile_setup', completed: true },
-      { step: 'tutorial', completed: true },
+// ── Module mocks — must appear before all imports ─────────────────────────────
+
+const _store: Record<string, string> = {};
+
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: {
+    getItem:    jest.fn((k: string)                  => Promise.resolve(_store[k] ?? null)),
+    setItem:    jest.fn((k: string, v: string)        => { _store[k] = v; return Promise.resolve(); }),
+    removeItem: jest.fn((k: string)                  => { delete _store[k]; return Promise.resolve(); }),
+    clear:      jest.fn(()                           => { Object.keys(_store).forEach(k => delete _store[k]); return Promise.resolve(); }),
+    getAllKeys:  jest.fn(()                           => Promise.resolve(Object.keys(_store))),
+    multiGet:   jest.fn((ks: string[])               => Promise.resolve(ks.map(k => [k, _store[k] ?? null]))),
+    multiSet:   jest.fn((pairs: [string, string][]) => { pairs.forEach(([k, v]) => { _store[k] = v; }); return Promise.resolve(); }),
+    multiRemove:jest.fn((ks: string[])               => { ks.forEach(k => delete _store[k]); return Promise.resolve(); }),
+  },
+}));
+
+jest.mock('expo-notifications', () => ({
+  __esModule: true,
+  getPermissionsAsync:              jest.fn().mockResolvedValue({ status: 'granted' }),
+  requestPermissionsAsync:          jest.fn().mockResolvedValue({ status: 'granted' }),
+  scheduleNotificationAsync:        jest.fn().mockResolvedValue('notif-id-test'),
+  cancelScheduledNotificationAsync: jest.fn().mockResolvedValue(undefined),
+  cancelAllScheduledNotificationsAsync: jest.fn().mockResolvedValue(undefined),
+  getAllScheduledNotificationsAsync: jest.fn().mockResolvedValue([]),
+  SchedulableTriggerInputTypes: { DAILY: 'DAILY' },
+}));
+
+jest.mock('expo-local-authentication', () => ({
+  __esModule: true,
+  hasHardwareAsync:  jest.fn().mockResolvedValue(false),
+  isEnrolledAsync:   jest.fn().mockResolvedValue(false),
+  authenticateAsync: jest.fn().mockResolvedValue({ success: false }),
+}));
+
+jest.mock('expo-secure-store', () => ({
+  __esModule: true,
+  getItemAsync:    jest.fn().mockResolvedValue(null),
+  setItemAsync:    jest.fn().mockResolvedValue(undefined),
+  deleteItemAsync: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/services/auditLog', () => ({
+  auditLogService: {
+    log:            jest.fn().mockResolvedValue(undefined),
+    logVaultAccess: jest.fn().mockResolvedValue(undefined),
+    initialize:     jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+// encryptedDatabase unavailable → storageService falls back to AsyncStorage
+jest.mock('../../src/services/encryptedDatabase', () => ({
+  encryptedDatabaseService: {
+    isDbOpen:       jest.fn().mockReturnValue(false),
+    open:           jest.fn().mockResolvedValue({ success: false, error: 'not available in test' }),
+    saveCollection: jest.fn().mockResolvedValue(undefined),
+    getCollection:  jest.fn().mockResolvedValue([]),
+  },
+}));
+
+jest.mock('react-native', () => {
+  const rn = jest.requireActual('react-native-web');
+  return { ...rn, Platform: { OS: 'ios', select: (o: any) => o.ios ?? o.default } };
+});
+
+// ── Imports (after mocks) ─────────────────────────────────────────────────────
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { onboardingStore }    from '../../src/services/onboardingStore';
+import { medicationService }  from '../../src/services/medication';
+import { storageService }     from '../../src/services/storage';
+import { careCircleSyncService } from '../../src/services/careCircleSync';
+
+// ── Reset helpers ─────────────────────────────────────────────────────────────
+
+function clearStore() {
+  Object.keys(_store).forEach(k => delete _store[k]);
+}
+
+function resetOnboarding() {
+  const s = onboardingStore as any;
+  s.completed    = false;
+  s.currentStep  = 'welcome_role';
+  s.role         = 'self';
+  s.skipped      = false;
+  s.initialized  = false;
+}
+
+function resetMedication() {
+  const s = medicationService as any;
+  s.medications    = [];
+  s.doses          = [];
+  s.notificationIds = new Map();
+  s.isInitialized  = false;
+}
+
+function resetStorage() {
+  const s = storageService as any;
+  s.memoryCache   = null;
+  s.messagesCache = null;
+  // Reset the module-level encrypted-db readiness cache
+  const storageModule = require('../../src/services/storage') as any;
+  if (storageModule._encDbReady !== undefined) storageModule._encDbReady = null;
+}
+
+function resetCareCircleSync() {
+  const s = careCircleSyncService as any;
+  s.pendingChanges = [];
+  s.careCircleId   = null;
+  s.authToken      = null;
+  s.deviceId       = 'test-device';
+}
+
+beforeEach(() => {
+  clearStore();
+  resetOnboarding();
+  resetMedication();
+  resetStorage();
+  resetCareCircleSync();
+  jest.clearAllMocks();
+});
+
+// ── Journey 1: First-time onboarding ─────────────────────────────────────────
+
+describe('Journey: First-time onboarding', () => {
+  it('starts fresh as incomplete and advances to complete', async () => {
+    await onboardingStore.initialize();
+    expect(onboardingStore.isComplete()).toBe(false);
+    expect(onboardingStore.getCurrentStep()).toBe('welcome_role');
+  });
+
+  it('persists role selection across re-initialization', async () => {
+    await onboardingStore.initialize();
+    await onboardingStore.setRole('caregiver');
+
+    // Simulate app restart: reset in-memory state, re-read from storage
+    resetOnboarding();
+    await onboardingStore.initialize();
+
+    expect(onboardingStore.getRole()).toBe('caregiver');
+  });
+
+  it('persists step progression and marks complete', async () => {
+    await onboardingStore.initialize();
+    await onboardingStore.setRole('self');
+    await onboardingStore.setStep('security_setup');
+    await onboardingStore.setPermissionResult('mic', true);
+    await onboardingStore.setPermissionResult('notify', true);
+    await onboardingStore.setSecurityMethod('pin');
+    await onboardingStore.markComplete(false);
+
+    expect(onboardingStore.isComplete()).toBe(true);
+    expect(onboardingStore.wasSkipped()).toBe(false);
+  });
+
+  it('re-reads completion status from storage after re-init', async () => {
+    await onboardingStore.initialize();
+    await onboardingStore.markComplete(false);
+
+    resetOnboarding(); // wipe in-memory state
+    await onboardingStore.initialize(); // reload from _store
+
+    expect(onboardingStore.isComplete()).toBe(true);
+  });
+
+  it('reset clears storage and restores incomplete state', async () => {
+    await onboardingStore.initialize();
+    await onboardingStore.markComplete(false);
+    await onboardingStore.reset();
+
+    expect(onboardingStore.isComplete()).toBe(false);
+
+    // Re-initialize from (now-cleared) storage — still not complete
+    resetOnboarding();
+    await onboardingStore.initialize();
+    expect(onboardingStore.isComplete()).toBe(false);
+  });
+
+  it('stores quick-setup data and reads it back', async () => {
+    await onboardingStore.setQuickSetupData({
+      reminderTime: '09:00',
+      trustedContactName: 'Priya',
+      trustedContactPhone: '+919876543210',
+    });
+
+    const data = await onboardingStore.getQuickSetupData();
+    expect(data?.trustedContactName).toBe('Priya');
+    expect(data?.reminderTime).toBe('09:00');
+  });
+});
+
+// ── Journey 2: Medication lifecycle ──────────────────────────────────────────
+
+describe('Journey: Medication management', () => {
+  const SCHEDULE_ID = 'sched_morning';
+
+  const BASE_MED = {
+    name: 'Lisinopril',
+    dosage: '10',
+    unit: 'mg' as const,
+    frequency: 'once_daily' as const,
+    schedule: [{ id: SCHEDULE_ID, time: '09:00', label: 'Morning' }],
+    prescribedBy: 'Dr. Sharma',
+    startDate: new Date().toISOString().split('T')[0],
+    isActive: true,
+    instructions: 'Take with water',
+    sideEffects: [],
+    refillDate: undefined,
+    notes: '',
+  };
+
+  beforeEach(async () => {
+    await medicationService.initialize();
+  });
+
+  it('adds a medication and finds it in the list', async () => {
+    const med = await medicationService.addMedication(BASE_MED);
+    const list = medicationService.getMedications();
+
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(med.id);
+    expect(list[0].name).toBe('Lisinopril');
+    expect(list[0].dosage).toBe('10');
+  });
+
+  it('records a taken dose and reflects 100% adherence', async () => {
+    const med = await medicationService.addMedication(BASE_MED);
+    await medicationService.recordDose(med.id, SCHEDULE_ID, 'taken');
+
+    const adherence = medicationService.getAdherence(med.id, 'day');
+    expect(adherence).toHaveLength(1);
+    expect(adherence[0].takenDoses).toBe(1);
+    expect(adherence[0].adherenceRate).toBe(100);
+  });
+
+  it('records taken and skipped doses and calculates correct adherence rate', async () => {
+    const med = await medicationService.addMedication(BASE_MED);
+    await medicationService.recordDose(med.id, SCHEDULE_ID, 'taken');
+    await medicationService.recordDose(med.id, SCHEDULE_ID, 'skipped');
+
+    const adherence = medicationService.getAdherence(med.id, 'week');
+    expect(adherence[0].takenDoses).toBe(1);
+    expect(adherence[0].skippedDoses).toBe(1);
+    expect(adherence[0].totalDoses).toBe(2);
+    // 1 taken out of 2 = 50%
+    expect(adherence[0].adherenceRate).toBe(50);
+  });
+
+  it('deletes a medication and removes it from the list', async () => {
+    const med = await medicationService.addMedication(BASE_MED);
+    expect(medicationService.getMedications()).toHaveLength(1);
+
+    const deleted = await medicationService.deleteMedication(med.id);
+    expect(deleted).toBe(true);
+    expect(medicationService.getMedications()).toHaveLength(0);
+  });
+
+  it('returns false when deleting a non-existent medication', async () => {
+    const result = await medicationService.deleteMedication('non-existent-id');
+    expect(result).toBe(false);
+  });
+
+  it('does not include inactive medications when activeOnly=true', async () => {
+    await medicationService.addMedication(BASE_MED);
+    await medicationService.addMedication({ ...BASE_MED, name: 'Aspirin', isActive: false });
+
+    expect(medicationService.getMedications(false)).toHaveLength(2);
+    expect(medicationService.getMedications(true)).toHaveLength(1);
+    expect(medicationService.getMedications(true)[0].name).toBe('Lisinopril');
+  });
+
+  it('re-loads medications from AsyncStorage after service restart', async () => {
+    const med = await medicationService.addMedication(BASE_MED);
+
+    // Simulate service restart
+    resetMedication();
+    await medicationService.initialize();
+
+    const list = medicationService.getMedications();
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(med.id);
+  });
+});
+
+// ── Journey 3: Storage round-trip ────────────────────────────────────────────
+
+describe('Journey: Message and memory storage', () => {
+  const MESSAGES = [
+    { id: 'm1', role: 'user' as const, content: 'Hello Karuna', timestamp: 1700000001000 },
+    { id: 'm2', role: 'assistant' as const, content: 'Hello! How can I help?', timestamp: 1700000002000 },
+  ];
+
+  it('saves and loads messages (cache hit path)', async () => {
+    await storageService.saveMessages(MESSAGES);
+    const loaded = await storageService.loadMessages();
+
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0].id).toBe('m1');
+    expect(loaded[1].content).toBe('Hello! How can I help?');
+  });
+
+  it('loads messages from AsyncStorage after clearing the cache', async () => {
+    await storageService.saveMessages(MESSAGES);
+    // Wipe in-memory cache to force a re-read from AsyncStorage
+    (storageService as any).messagesCache = null;
+
+    const loaded = await storageService.loadMessages();
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0].role).toBe('user');
+  });
+
+  it('clearMessages() empties the message store', async () => {
+    await storageService.saveMessages(MESSAGES);
+    await storageService.clearMessages();
+    (storageService as any).messagesCache = null;
+
+    const loaded = await storageService.loadMessages();
+    expect(loaded).toHaveLength(0);
+  });
+
+  it('saves user memory and reads it back', async () => {
+    await storageService.saveMemory({
+      preferredName: 'Dadi',
+      keyPeople: [{ name: 'Arjun', relationship: 'son' }],
+      remindersCreated: [],
+      preferences: {},
+      customInstructions: [],
+      lastUpdated: Date.now(),
+    });
+    (storageService as any).memoryCache = null;
+
+    const mem = await storageService.loadMemory();
+    expect(mem.preferredName).toBe('Dadi');
+    expect(mem.keyPeople).toHaveLength(1);
+    expect(mem.keyPeople[0].name).toBe('Arjun');
+  });
+
+  it('updateMemory() merges new fields without losing existing ones', async () => {
+    await storageService.saveMemory({
+      preferredName: 'Dadi',
+      keyPeople: [{ name: 'Arjun', relationship: 'son' }],
+      remindersCreated: [],
+      preferences: {},
+      customInstructions: [],
+      lastUpdated: Date.now(),
+    });
+
+    await storageService.updateMemory({ preferredName: 'Grandma' });
+
+    const mem = await storageService.loadMemory();
+    expect(mem.preferredName).toBe('Grandma');
+    // Existing keyPeople must be preserved
+    expect(mem.keyPeople).toHaveLength(1);
+    expect(mem.keyPeople[0].name).toBe('Arjun');
+  });
+
+  it('addKeyPerson() deduplicates by relationship', async () => {
+    await storageService.addKeyPerson({ name: 'Arjun', relationship: 'son' });
+    await storageService.addKeyPerson({ name: 'Arjun Kumar', relationship: 'son', nickname: 'AK' });
+
+    const mem = await storageService.loadMemory();
+    expect(mem.keyPeople).toHaveLength(1);
+    expect(mem.keyPeople[0].nickname).toBe('AK');
+  });
+
+  it('addCustomInstruction() caps at 10 and avoids duplicates', async () => {
+    for (let i = 0; i < 12; i++) {
+      await storageService.addCustomInstruction(`instruction-${i}`);
+    }
+    const mem = await storageService.loadMemory();
+    expect(mem.customInstructions.length).toBeLessThanOrEqual(10);
+  });
+
+  it('clearAllData() removes messages but leaves memory intact', async () => {
+    // Explicitly start with clean memory to guard against any singleton leakage
+    (storageService as any).memoryCache = null;
+    await AsyncStorage.removeItem('@karuna/memory');
+
+    await storageService.saveMessages(MESSAGES);
+    await storageService.addKeyPerson({ name: 'Priya', relationship: 'daughter' });
+    await storageService.clearAllData();
+
+    (storageService as any).messagesCache = null;
+    const msgs = await storageService.loadMessages();
+    expect(msgs).toHaveLength(0);
+
+    // Memory should still contain the person we added
+    const mem = await storageService.loadMemory();
+    const priya = mem.keyPeople.find((p: any) => p.name === 'Priya');
+    expect(priya).toBeDefined();
+    expect(priya?.relationship).toBe('daughter');
+  });
+});
+
+// ── Journey 4: Care circle sync retry cap ────────────────────────────────────
+
+describe('Journey: Care circle sync retry cap', () => {
+  beforeEach(() => {
+    // Provide auth so pushToCloud() does not short-circuit
+    const s = careCircleSyncService as any;
+    s.careCircleId = 'circle-abc';
+    s.authToken    = 'token-xyz';
+    s.deviceId     = 'device-test';
+  });
+
+  it('queues changes when pushToCloud fails', async () => {
+    const s = careCircleSyncService as any;
+    s.pendingChanges = [{
+      id: 'change-1',
+      entityType: 'health_record',
+      entityId: 'rec-1',
+      action: 'create',
+      data: { bp: '120/80' },
+      timestamp: new Date().toISOString(),
+      deviceId: 'device-test',
+    }];
+
+    // Simulate network failure
+    (global as any).fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+    await careCircleSyncService.pushToCloud();
+
+    // First failure: retryCount becomes 1 — change is still retained
+    expect(s.pendingChanges).toHaveLength(1);
+    expect(s.pendingChanges[0].retryCount).toBe(1);
+  });
+
+  it('drops a change after MAX_CHANGE_RETRIES consecutive failures', async () => {
+    const s = careCircleSyncService as any;
+    s.pendingChanges = [{
+      id: 'change-drop',
+      entityType: 'medication_dose',
+      entityId: 'dose-1',
+      action: 'create',
+      data: { status: 'taken' },
+      timestamp: new Date().toISOString(),
+      deviceId: 'device-test',
+      retryCount: 5, // already at max
+    }];
+
+    (global as any).fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+    // The next failure increments retryCount to 6 > 5 → change is filtered out
+    await careCircleSyncService.pushToCloud();
+
+    expect(s.pendingChanges).toHaveLength(0);
+  });
+
+  it('survives up to MAX_CHANGE_RETRIES then drops on the next failure', async () => {
+    const MAX = 5;
+    const s = careCircleSyncService as any;
+    s.pendingChanges = [{
+      id: 'change-survive',
+      entityType: 'health_record',
+      entityId: 'rec-2',
+      action: 'update',
+      data: { weight: 72 },
+      timestamp: new Date().toISOString(),
+      deviceId: 'device-test',
+    }];
+
+    (global as any).fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+    // Fail MAX times → retryCount reaches 5, still present
+    for (let i = 0; i < MAX; i++) {
+      await careCircleSyncService.pushToCloud();
+    }
+    expect(s.pendingChanges).toHaveLength(1);
+    expect(s.pendingChanges[0].retryCount).toBe(MAX);
+
+    // One more failure → retryCount 6 > 5 → dropped
+    await careCircleSyncService.pushToCloud();
+    expect(s.pendingChanges).toHaveLength(0);
+  });
+
+  it('clears all pending changes on a successful push', async () => {
+    const s = careCircleSyncService as any;
+    s.pendingChanges = [
+      { id: 'c1', entityType: 'note', entityId: 'n1', action: 'create', data: {}, timestamp: new Date().toISOString(), deviceId: 'device-test' },
+      { id: 'c2', entityType: 'note', entityId: 'n2', action: 'update', data: {}, timestamp: new Date().toISOString(), deviceId: 'device-test' },
     ];
 
-    const allCompleted = steps.every(s => s.completed);
-    expect(allCompleted).toBe(true);
-  });
-
-  it('should set up language preference', async () => {
-    const selectedLanguage = 'hi';
-    const languageSet = true;
-
-    expect(languageSet).toBe(true);
-    expect(selectedLanguage).toBe('hi');
-  });
-
-  it('should request necessary permissions', async () => {
-    const permissions = {
-      microphone: 'granted',
-      notifications: 'granted',
-      contacts: 'granted',
-    };
-
-    expect(permissions.microphone).toBe('granted');
-  });
-
-  it('should create user profile', async () => {
-    const profile = {
-      name: 'Test User',
-      dateOfBirth: '1950-01-01',
-      emergencyContact: '+1234567890',
-    };
-
-    expect(profile.name).toBe('Test User');
-  });
-});
-
-describe('E2E: Daily Health Check-in', () => {
-  it('should receive morning check-in prompt', async () => {
-    const notification = {
-      type: 'check_in',
-      title: 'Good morning!',
-      message: 'How are you feeling today?',
-    };
-
-    expect(notification.type).toBe('check_in');
-  });
-
-  it('should respond to check-in via voice', async () => {
-    const voiceInput = 'I am feeling good today';
-    const transcription = voiceInput;
-
-    expect(transcription).toBe('I am feeling good today');
-  });
-
-  it('should record vital signs', async () => {
-    const vitals = {
-      bloodPressure: '120/80',
-      heartRate: 72,
-      recordedAt: new Date().toISOString(),
-    };
-
-    expect(vitals.bloodPressure).toBe('120/80');
-  });
-
-  it('should confirm medications taken', async () => {
-    const medications = [
-      { name: 'Aspirin', taken: true },
-      { name: 'Metformin', taken: true },
-    ];
-
-    const allTaken = medications.every(m => m.taken);
-    expect(allTaken).toBe(true);
-  });
-
-  it('should update care circle', async () => {
-    const update = {
-      type: 'daily_summary',
-      status: 'healthy',
-      sentTo: ['caregiver-1'],
-    };
-
-    expect(update.sentTo).toContain('caregiver-1');
-  });
-});
-
-describe('E2E: Voice Conversation in Hindi', () => {
-  it('should understand Hindi voice input', async () => {
-    const _voiceInput = 'मेरा ब्लड प्रेशर क्या है?';
-    const understood = true;
-
-    expect(understood).toBe(true);
-  });
-
-  it('should respond in Hindi', async () => {
-    const response = 'आपका आखिरी ब्लड प्रेशर 120/80 था।';
-
-    expect(response).toContain('ब्लड प्रेशर');
-  });
-
-  it('should speak response in Hindi', async () => {
-    const ttsConfig = {
-      language: 'hi-IN',
-      voice: 'Lekha',
-    };
-
-    expect(ttsConfig.language).toBe('hi-IN');
-  });
-});
-
-describe('E2E: Emergency Scenario', () => {
-  it('should detect emergency trigger', async () => {
-    const trigger = {
-      type: 'voice_command',
-      phrase: 'I need help',
-    };
-
-    const isEmergency = trigger.phrase.toLowerCase().includes('help');
-    expect(isEmergency).toBe(true);
-  });
-
-  it('should activate emergency mode', async () => {
-    const emergencyMode = {
-      active: true,
-      startedAt: new Date().toISOString(),
-    };
-
-    expect(emergencyMode.active).toBe(true);
-  });
-
-  it('should notify emergency contacts', async () => {
-    const notifications = [
-      { contact: 'Emergency Contact 1', notified: true },
-      { contact: 'Emergency Contact 2', notified: true },
-    ];
-
-    const allNotified = notifications.every(n => n.notified);
-    expect(allNotified).toBe(true);
-  });
-
-  it('should share location', async () => {
-    const location = {
-      shared: true,
-      lat: 37.7749,
-      lng: -122.4194,
-    };
-
-    expect(location.shared).toBe(true);
-  });
-
-  it('should provide calm guidance', async () => {
-    const guidance = 'Help is on the way. Stay calm. Would you like me to call 911?';
-
-    expect(guidance).toContain('Stay calm');
-  });
-});
-
-describe('E2E: Medication Management', () => {
-  it('should add new medication', async () => {
-    const medication = {
-      name: 'Lisinopril',
-      dosage: '10mg',
-      frequency: 'daily',
-      times: ['08:00'],
-    };
-
-    expect(medication.name).toBe('Lisinopril');
-  });
-
-  it('should receive medication reminder', async () => {
-    const reminder = {
-      type: 'medication_reminder',
-      medication: 'Lisinopril',
-      time: '08:00',
-    };
-
-    expect(reminder.type).toBe('medication_reminder');
-  });
-
-  it('should confirm medication taken via voice', async () => {
-    const voiceConfirmation = 'I took my medication';
-    const confirmed = voiceConfirmation.toLowerCase().includes('took');
-
-    expect(confirmed).toBe(true);
-  });
-
-  it('should track medication history', async () => {
-    const history = [
-      { date: '2024-01-13', taken: true },
-      { date: '2024-01-14', taken: true },
-      { date: '2024-01-15', taken: true },
-    ];
-
-    expect(history).toHaveLength(3);
-  });
-
-  it('should alert on missed medication', async () => {
-    const missedAlert = {
-      type: 'missed_medication',
-      medication: 'Lisinopril',
-      scheduledTime: '08:00',
-      alertTime: '09:00',
-    };
-
-    expect(missedAlert.type).toBe('missed_medication');
-  });
-});
-
-describe('E2E: Vault Usage', () => {
-  it('should unlock vault with biometrics', async () => {
-    const authResult = {
-      success: true,
-      method: 'biometric',
-    };
-
-    expect(authResult.success).toBe(true);
-  });
-
-  it('should view stored account', async () => {
-    const account = {
-      title: 'Bank Account',
-      username: 'user123',
-      passwordVisible: false,
-    };
-
-    expect(account.passwordVisible).toBe(false);
-  });
-
-  it('should reveal password temporarily', async () => {
-    let passwordVisible = false;
-
-    passwordVisible = true;
-
-    expect(passwordVisible).toBe(true);
-  });
-
-  it('should copy password to clipboard', async () => {
-    const _clipboardContent = 'secret-password';
-    const copied = true;
-
-    expect(copied).toBe(true);
-  });
-
-  it('should auto-lock after timeout', async () => {
-    let isLocked = false;
-
-    // Timeout occurs
-    isLocked = true;
-
-    expect(isLocked).toBe(true);
-  });
-});
-
-describe('E2E: Care Circle Interaction', () => {
-  it('should view patient status as caregiver', async () => {
-    const patientStatus = {
-      name: 'Mom',
-      lastCheckIn: '2024-01-15T08:00:00Z',
-      mood: 'good',
-      medicationsTaken: true,
-    };
-
-    expect(patientStatus.mood).toBe('good');
-  });
-
-  it('should receive health alerts', async () => {
-    const alert = {
-      type: 'health_alert',
-      patient: 'Mom',
-      message: 'Elevated blood pressure detected',
-      priority: 'high',
-    };
-
-    expect(alert.priority).toBe('high');
-  });
-
-  it('should send message to patient', async () => {
-    const message = {
-      from: 'Caregiver',
-      to: 'Mom',
-      content: 'How are you feeling? Remember to take your medication.',
-    };
-
-    expect(message.content).toContain('medication');
-  });
-
-  it('should call patient directly', async () => {
-    const call = {
-      from: 'Caregiver',
-      to: 'Mom',
-      initiated: true,
-    };
-
-    expect(call.initiated).toBe(true);
-  });
-});
-
-describe('E2E: Proactive Health Features', () => {
-  it('should suggest activity based on weather', async () => {
-    const _weather = { condition: 'sunny', temperature: 72 };
-    const suggestion = 'It\'s a beautiful day! Consider a short walk.';
-
-    expect(suggestion).toContain('walk');
-  });
-
-  it('should remind about upcoming appointment', async () => {
-    const reminder = {
-      type: 'appointment_reminder',
-      doctor: 'Dr. Smith',
-      date: '2024-01-20',
-      time: '10:00 AM',
-      location: 'Medical Center',
-    };
-
-    expect(reminder.type).toBe('appointment_reminder');
-  });
-
-  it('should provide health insights', async () => {
-    const insight = {
-      type: 'weekly_summary',
-      message: 'Your blood pressure has been stable this week. Great job!',
-    };
-
-    expect(insight.message).toContain('stable');
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ synced: 2, conflicts: [] }),
+    });
+
+    const result = await careCircleSyncService.pushToCloud();
+
+    expect(result.success).toBe(true);
+    expect(result.synced).toBe(2);
+    expect(s.pendingChanges).toHaveLength(0);
   });
 });

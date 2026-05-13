@@ -7,25 +7,27 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-const DATABASE_URL = process.env.DATABASE_URL || process.argv[2];
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL && process.argv[2]) {
+  console.warn('Warning: passing DATABASE_URL as a CLI argument exposes credentials in process listings. Use the DATABASE_URL environment variable instead.');
+}
 
 if (!DATABASE_URL) {
-  console.error('Error: DATABASE_URL environment variable or argument required');
-  console.error('Usage: node init-db.js <postgresql://...>');
+  console.error('Error: DATABASE_URL environment variable is required');
+  console.error('Usage: DATABASE_URL=postgresql://... node scripts/init-db.js');
   process.exit(1);
 }
 
 async function initDatabase() {
   const pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: {
-      rejectUnauthorized: false
-    }
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   });
 
+  let client;
   try {
     console.log('Connecting to database...');
-    const client = await pool.connect();
+    client = await pool.connect();
     console.log('Connected successfully!');
 
     // Read and execute init.sql
@@ -42,6 +44,13 @@ async function initDatabase() {
     await client.query(adminSql);
     console.log('Admin tables created successfully!');
 
+    // Read and execute archival.sql (archive tables + archive_old_data stored procedure)
+    const archivalSqlPath = path.join(__dirname, '..', 'db', 'archival.sql');
+    console.log(`\nExecuting ${archivalSqlPath}...`);
+    const archivalSql = fs.readFileSync(archivalSqlPath, 'utf8');
+    await client.query(archivalSql);
+    console.log('Archival schema created successfully!');
+
     // Verify tables were created
     const tablesResult = await client.query(`
       SELECT table_name
@@ -55,7 +64,6 @@ async function initDatabase() {
       console.log(`  - ${row.table_name}`);
     });
 
-    client.release();
     console.log('\nDatabase initialization complete!');
   } catch (error) {
     console.error('Database initialization failed:', error.message);
@@ -64,6 +72,7 @@ async function initDatabase() {
     }
     process.exit(1);
   } finally {
+    if (client) client.release();
     await pool.end();
   }
 }
