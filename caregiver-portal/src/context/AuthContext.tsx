@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const validateToken = async () => {
-    const result = await api.getProfile();
+    const result = await api.checkSession();
     if (result.success && result.data) {
       setState({
         user: result.data,

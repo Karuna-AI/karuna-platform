@@ -54,6 +54,23 @@ class AdminApiService {
     }
   }
 
+  // Silent session check on startup — treats 401 as non-error so the
+  // karuna:auth:unauthorized event is not dispatched when there is simply
+  // no session yet (e.g. first visit to the login page).
+  async checkSession(): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.get('/auth/me', {
+        validateStatus: (status) => status < 500,
+      });
+      if (response.status === 200) {
+        return { success: true, data: response.data };
+      }
+      return { success: false };
+    } catch {
+      return { success: false };
+    }
+  }
+
   // Dashboard
   async getDashboardMetrics(): Promise<ApiResponse<any>> {
     try {
