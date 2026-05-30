@@ -3450,31 +3450,72 @@ function broadcastToCircle(circleId, event) {
   }
 }
 
+// Short-lived single-use tickets for WebSocket auth. Clients that cannot set
+// cookies or headers on the WS upgrade (mobile / React Native) POST to
+// /ws-ticket with a valid Bearer token and receive a ticket they can put in
+// the WS URL. The ticket is consumed on first use and expires in 30 seconds,
+// so even if the URL is captured in HTTP access logs it cannot be replayed.
+const WS_TICKET_TTL_MS = 30 * 1000;
+const wsTickets = new Map();
+
+function issueWsTicket(userId) {
+  const ticket = crypto.randomBytes(32).toString('hex');
+  wsTickets.set(ticket, { userId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  return ticket;
+}
+
+function consumeWsTicket(ticket) {
+  if (!ticket) return null;
+  const entry = wsTickets.get(ticket);
+  if (!entry) return null;
+  wsTickets.delete(ticket);
+  if (entry.expiresAt < Date.now()) return null;
+  return entry.userId;
+}
+
+// Opportunistic cleanup so an attacker spamming /ws-ticket can't grow memory.
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, e] of wsTickets.entries()) {
+    if (e.expiresAt < now) wsTickets.delete(t);
+  }
+}, 60 * 1000).unref();
+
 // WebSocket connection handler
 async function handleWebSocket(ws, req) {
   const url = new URL(req.url, 'http://localhost');
   const circleId = url.searchParams.get('circleId');
 
-  // Auth via httpOnly cookie (browser sends it automatically on upgrade).
-  // Fall back to Authorization header for non-browser clients / mobile.
-  let token = getCookie(req, AUTH_COOKIE_NAME);
-  if (!token) {
-    const authHeader = req.headers['authorization'];
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
+  // Prefer a single-use ticket (mobile clients). Fall back to cookie /
+  // Authorization header for browser/portal clients on the same origin.
+  let userId = consumeWsTicket(url.searchParams.get('ticket'));
+
+  if (!userId) {
+    let token = getCookie(req, AUTH_COOKIE_NAME);
+    if (!token) {
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
     }
+    if (!token || !circleId) {
+      ws.close(4001, 'Missing authentication or circleId');
+      return;
+    }
+    const decoded = verifyJWT(token);
+    if (!decoded) {
+      ws.close(4002, 'Invalid token');
+      return;
+    }
+    userId = decoded.id;
   }
 
-  if (!token || !circleId) {
-    ws.close(4001, 'Missing authentication or circleId');
+  if (!circleId) {
+    ws.close(4001, 'Missing circleId');
     return;
   }
 
-  const decoded = verifyJWT(token);
-  if (!decoded) {
-    ws.close(4002, 'Invalid token');
-    return;
-  }
+  const decoded = { id: userId };
 
   // Verify membership
   try {
@@ -3526,6 +3567,13 @@ async function handleWebSocket(ws, req) {
     }
   });
 }
+
+// Issue a short-lived single-use ticket for the WebSocket. Mobile clients
+// call this with their Bearer token, then put the ticket in the WS URL.
+router.post('/ws-ticket', authMiddleware, (req, res) => {
+  const ticket = issueWsTicket(req.user.id);
+  res.json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
+});
 
 // ============================================================================
 // System Notifications Route (for mobile app)

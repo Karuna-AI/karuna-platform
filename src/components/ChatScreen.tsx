@@ -11,6 +11,8 @@ import {
   Platform,
   Alert,
   Modal,
+  BackHandler,
+  ToastAndroid,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useChatContext } from '../context/ChatContext';
@@ -36,6 +38,25 @@ interface ChatScreenProps {
 export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
+
+  // "Press back again to exit" — elderly users frequently double-tap back by
+  // accident; one press would otherwise quit the app from the root route.
+  // First press: show a toast, arm the exit flag for 2 seconds. Second press
+  // within that window: allow default behavior (exit). After the window, reset.
+  const backPressedRecentlyRef = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (backPressedRecentlyRef.current) {
+        return false; // second press within window → let the system exit
+      }
+      backPressedRecentlyRef.current = true;
+      ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
+      setTimeout(() => { backPressedRecentlyRef.current = false; }, 2000);
+      return true; // block the first press
+    });
+    return () => handler.remove();
+  }, []);
 
   const {
     messages,
@@ -430,9 +451,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open Settings"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: colors.text }]}>
-                Settings
-              </Text>
+              <Text style={styles.headerButtonIcon}>⚙️</Text>
+              <Text style={[styles.headerButtonLabel, { color: colors.text }]}>Settings</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -557,23 +577,33 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    // The header has a small "Karuna" title plus 5-6 action buttons. On a
+    // ~390 dp phone they don't fit on one row, so the row wraps to a second
+    // line rather than clipping (which previously hid Settings off-screen).
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
+    gap: SPACING.xs,
   },
   headerTitle: {
     fontWeight: '700',
+    marginRight: 'auto', // push action buttons to the right when there's room
   },
   headerActions: {
     flexDirection: 'row',
-    gap: SPACING.sm,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    justifyContent: 'flex-end',
   },
   headerButton: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    // Compact padding so 5-6 buttons fit on one row when possible. Touch
+    // target is still ≥48 dp because minWidth/minHeight enforce it.
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
     borderRadius: 20,
     minWidth: TOUCH_TARGETS.minimum,
     minHeight: TOUCH_TARGETS.minimum,

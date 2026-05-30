@@ -90,8 +90,23 @@ class CareCircleSyncService {
         return { success: false, error: error.error || 'Failed to join circle' };
       }
 
-      const circle = await response.json();
+      // The accept endpoint returns { success, token, user, circle } — NOT a
+      // bare circle. Earlier code read circle.id from the top level which is
+      // undefined, then AsyncStorage.setItem(KEY, undefined) threw → catch
+      // returned 'Network error' even though the server had accepted the
+      // invitation. Extract the right fields and persist the auth token too.
+      const data = await response.json();
+      const circle = data.circle;
+      const authToken = data.token;
+      if (!circle || !circle.id) {
+        console.error('[CareCircleSync] Join: unexpected accept response shape', data);
+        return { success: false, error: 'Unexpected server response' };
+      }
       this.careCircleId = circle.id;
+      if (authToken) {
+        this.authToken = authToken;
+        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken);
+      }
       await AsyncStorage.setItem(STORAGE_KEYS.CARE_CIRCLE_ID, circle.id);
 
       // Connect WebSocket
@@ -137,11 +152,34 @@ class CareCircleSyncService {
   }
 
   // Connect to WebSocket for real-time updates
-  private connectWebSocket() {
+  private async fetchWsTicket(): Promise<string | null> {
+    if (!this.authToken) return null;
+    try {
+      const r = await fetch(`${this.baseUrl}/api/care/ws-ticket`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.authToken}` },
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return data.ticket || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async connectWebSocket() {
     if (!this.careCircleId || !this.authToken) return;
 
     this.isShuttingDown = false;
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + '/ws';
+    const ticket = await this.fetchWsTicket();
+    if (!ticket || this.isShuttingDown) {
+      // Couldn't obtain a ticket — schedule a retry via the standard reconnect path.
+      this.attemptReconnect();
+      return;
+    }
+    const wsUrl =
+      this.baseUrl.replace(/^http/, 'ws') +
+      `/ws?circleId=${encodeURIComponent(this.careCircleId)}&ticket=${encodeURIComponent(ticket)}`;
 
     try {
       // Null out handlers on any existing ws before replacing, so onclose won't re-trigger reconnect
@@ -158,13 +196,8 @@ class CareCircleSyncService {
         console.debug('[CareCircleSync] WebSocket connected');
         this.reconnectAttempts = 0;
 
-        // Authenticate
-        this.ws?.send(JSON.stringify({
-          type: 'auth',
-          token: this.authToken,
-        }));
-
-        // Subscribe to care circle updates
+        // Auth happens via the upgrade-time ticket — no in-band auth message
+        // needed. Subscribe to care circle updates.
         this.ws?.send(JSON.stringify({
           type: 'subscribe',
           circleId: this.careCircleId,

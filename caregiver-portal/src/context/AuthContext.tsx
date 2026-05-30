@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // shape login() / register() use. Without this, state.user is the wrapper
       // and `state.user.name` is undefined on every page reload.
       setState({
-        user: result.data.user ?? result.data,
+        user: result.data.user,
         token: null,
         isAuthenticated: true,
         isLoading: false,

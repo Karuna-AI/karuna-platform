@@ -9,7 +9,7 @@ import { telemetryService } from './telemetry';
  * In production, set GATEWAY_URL to your server URL
  * For local development, it uses the local gateway or falls back to direct OpenAI
  */
-const GATEWAY_URL = Constants.expoConfig?.extra?.apiUrl || 'https://karuna-api-production.up.railway.app';
+const GATEWAY_URL = Constants.expoConfig?.extra?.apiUrl || 'https://karuna-gateway-production.up.railway.app';
 
 interface ChatResponse {
   message: string;
