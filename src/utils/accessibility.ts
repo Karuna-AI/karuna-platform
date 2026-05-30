@@ -40,6 +40,8 @@ export const COLORS = {
     assistantBubble: '#F5F5F5',
     error: '#D32F2F',
     success: '#388E3C',
+    warning: '#F57C00',
+    border: '#E5E7EB',
   },
   highContrast: {
     primary: '#1565C0',
@@ -52,6 +54,8 @@ export const COLORS = {
     assistantBubble: '#E0E0E0',
     error: '#B71C1C',
     success: '#1B5E20',
+    warning: '#E65100',
+    border: '#BDBDBD',
   },
 };
 

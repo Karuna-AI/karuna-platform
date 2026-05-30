@@ -13,6 +13,9 @@ import { healthDataService } from '../services/healthData';
 import { medicationService } from '../services/medication';
 import { VitalType, VITAL_TYPE_INFO, VitalSummary } from '../types/health';
 
+import { getColors } from '../utils/accessibility';
+
+const c = getColors();
 const { width } = Dimensions.get('window');
 
 interface HealthDashboardProps {
@@ -92,13 +95,13 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'exceeded':
-        return '#22c55e';
+        return c.success;
       case 'met':
-        return '#3b82f6';
+        return c.primary;
       case 'near':
-        return '#f59e0b';
+        return c.warning;
       default:
-        return '#6b7280';
+        return c.textSecondary;
     }
   };
 
@@ -296,7 +299,7 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: c.surface,
   },
   header: {
     flexDirection: 'row',
@@ -305,21 +308,21 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: c.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
+    borderBottomColor: c.border,
   },
   backButton: {
     padding: 8,
   },
   backText: {
     fontSize: 16,
-    color: '#3b82f6',
+    color: c.primary,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: c.text,
   },
   placeholder: {
     width: 50,
@@ -335,10 +338,10 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: c.textSecondary,
   },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: c.background,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -366,11 +369,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: c.text,
   },
   cardAction: {
     fontSize: 14,
-    color: '#3b82f6',
+    color: c.primary,
   },
   stepsContent: {
     alignItems: 'center',
@@ -381,13 +384,13 @@ const styles = StyleSheet.create({
   },
   stepsGoal: {
     fontSize: 16,
-    color: '#6b7280',
+    color: c.textSecondary,
     marginBottom: 16,
   },
   progressBar: {
     width: '100%',
     height: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: c.border,
     borderRadius: 6,
     overflow: 'hidden',
   },
@@ -397,12 +400,12 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: c.textSecondary,
     marginTop: 8,
   },
   stepsMessage: {
     fontSize: 14,
-    color: '#6b7280',
+    color: c.textSecondary,
     textAlign: 'center',
     marginTop: 8,
   },
@@ -421,16 +424,16 @@ const styles = StyleSheet.create({
   medStatValue: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#1f2937',
+    color: c.text,
   },
   medStatLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: c.textSecondary,
   },
   medStatDivider: {
     width: 1,
     height: 40,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: c.border,
   },
   nextDose: {
     backgroundColor: '#eff6ff',
@@ -440,34 +443,34 @@ const styles = StyleSheet.create({
   },
   nextDoseLabel: {
     fontSize: 14,
-    color: '#3b82f6',
+    color: c.primary,
     marginBottom: 4,
   },
   nextDoseText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#1e40af',
+    color: c.primaryDark,
   },
   allDoneText: {
     fontSize: 16,
-    color: '#22c55e',
+    color: c.success,
     fontWeight: '500',
   },
   noDataText: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: c.textSecondary,
     textAlign: 'center',
   },
   noDataHint: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: c.textSecondary,
     textAlign: 'center',
     marginTop: 4,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: c.text,
     marginBottom: 12,
     marginTop: 8,
   },
@@ -479,7 +482,7 @@ const styles = StyleSheet.create({
   },
   vitalCard: {
     width: (width - 48) / 2,
-    backgroundColor: '#ffffff',
+    backgroundColor: c.background,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -501,32 +504,32 @@ const styles = StyleSheet.create({
   },
   vitalName: {
     fontSize: 14,
-    color: '#6b7280',
+    color: c.textSecondary,
     marginBottom: 4,
   },
   vitalValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1f2937',
+    color: c.text,
   },
   vitalValueWarning: {
-    color: '#f59e0b',
+    color: c.warning,
   },
   vitalValueGood: {
-    color: '#22c55e',
+    color: c.success,
   },
   vitalUnit: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: c.textSecondary,
   },
   vitalTrend: {
     fontSize: 16,
-    color: '#6b7280',
+    color: c.textSecondary,
     marginTop: 4,
   },
   noVitalsContainer: {
     width: '100%',
-    backgroundColor: '#ffffff',
+    backgroundColor: c.background,
     borderRadius: 12,
     padding: 24,
     alignItems: 'center',
@@ -538,7 +541,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: c.background,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -559,7 +562,7 @@ const styles = StyleSheet.create({
   },
   actionText: {
     fontSize: 14,
-    color: '#1f2937',
+    color: c.text,
     fontWeight: '500',
   },
   bottomPadding: {
