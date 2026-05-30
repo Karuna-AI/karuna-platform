@@ -3,7 +3,6 @@ import {
   View,
   FlatList,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Text,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useChatContext } from '../context/ChatContext';
 import { Message } from '../types';
 import { VoiceButton } from './VoiceButton';

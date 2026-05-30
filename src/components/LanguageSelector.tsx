@@ -12,8 +12,8 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   LanguageCode,
   LANGUAGE_GROUPS,
