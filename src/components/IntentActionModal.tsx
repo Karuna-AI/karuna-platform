@@ -11,12 +11,10 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import {
-  getColors,
   getFontSizes,
   SPACING,
   TOUCH_TARGETS,
-  announceForAccessibility,
-} from '../utils/accessibility';
+  announceForAccessibility} from '../utils/accessibility';
 import { Contact, ContactSearchResult } from '../services/contacts';
 import { ConfirmationData, intentActionsService } from '../services/intentActions';
 import { ActionConfirmation } from '../types/actions';
@@ -44,7 +42,7 @@ export function IntentActionModal({
   _onModify,
   isLoading = false,
 }: IntentActionModalProps): JSX.Element | null {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const [messageText, setMessageText] = useState('');

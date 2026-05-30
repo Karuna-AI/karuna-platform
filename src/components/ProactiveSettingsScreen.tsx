@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sectionSubtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#6b7280',
     marginBottom: 16,
   },
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     color: '#1f2937',
   },
   settingDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#6b7280',
     marginTop: 2,
   },
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   sliderMark: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#9ca3af',
   },
   categoryList: {

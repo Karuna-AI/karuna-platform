@@ -40,6 +40,8 @@ export const COLORS = {
     assistantBubble: '#F5F5F5',
     error: '#D32F2F',
     success: '#388E3C',
+    warning: '#F57C00',
+    border: '#E5E7EB',
   },
   highContrast: {
     primary: '#1565C0',
@@ -52,10 +54,48 @@ export const COLORS = {
     assistantBubble: '#E0E0E0',
     error: '#B71C1C',
     success: '#1B5E20',
+    warning: '#E65100',
+    border: '#BDBDBD',
+  },
+  // Dark-mode palettes. Backgrounds are deep gray (not pure black) for less
+  // eye strain on OLED phones at night; primary and accent hues are shifted
+  // brighter to maintain ≥4.5:1 contrast on dark backgrounds.
+  darkStandard: {
+    primary: '#64B5F6',
+    primaryDark: '#42A5F5',
+    background: '#121212',
+    surface: '#1E1E1E',
+    text: '#FAFAFA',
+    textSecondary: '#B0B0B0',
+    userBubble: '#1565C0',
+    assistantBubble: '#262626',
+    error: '#EF5350',
+    success: '#66BB6A',
+    warning: '#FFB74D',
+    border: '#2C2C2C',
+  },
+  darkHighContrast: {
+    primary: '#90CAF9',
+    primaryDark: '#64B5F6',
+    background: '#000000',
+    surface: '#121212',
+    text: '#FFFFFF',
+    textSecondary: '#E0E0E0',
+    userBubble: '#1976D2',
+    assistantBubble: '#1E1E1E',
+    error: '#FF8A80',
+    success: '#A5D6A7',
+    warning: '#FFCC80',
+    border: '#424242',
   },
 };
 
-export function getColors(highContrast: boolean = true) {
+export type ColorScheme = 'light' | 'dark';
+
+export function getColors(highContrast: boolean = true, colorScheme: ColorScheme = 'light') {
+  if (colorScheme === 'dark') {
+    return highContrast ? COLORS.darkHighContrast : COLORS.darkStandard;
+  }
   return highContrast ? COLORS.highContrast : COLORS.standard;
 }
 

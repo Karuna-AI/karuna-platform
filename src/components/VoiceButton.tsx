@@ -12,14 +12,12 @@ import {
   Platform,
 } from 'react-native';
 import {
-  getColors,
   getFontSizes,
   TOUCH_TARGETS,
   SPACING,
   getAccessibilityHint,
   formatDurationForAccessibility,
-  announceForAccessibility,
-} from '../utils/accessibility';
+  announceForAccessibility} from '../utils/accessibility';
 
 export type VoiceButtonState = 'idle' | 'recording' | 'processing';
 
@@ -44,7 +42,7 @@ export function VoiceButton({
   onPressOut,
   onCancel,
 }: VoiceButtonProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const pulseAnim = useRef(new Animated.Value(1)).current;

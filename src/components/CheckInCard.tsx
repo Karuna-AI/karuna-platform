@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     color: '#1f2937',
   },
   priorityBadge: {
-    fontSize: 10,
+    fontSize: 14,
     color: '#ffffff',
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   snoozeText: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#9ca3af',
   },
   overlay: {
@@ -462,7 +462,7 @@ const styles = StyleSheet.create({
     color: '#1f2937',
   },
   bannerMessage: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#6b7280',
   },
   bannerBadge: {
@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   bannerBadgeText: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
   },

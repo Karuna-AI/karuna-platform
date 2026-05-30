@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   globalToggleDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#666',
   },
   categoriesSection: {
@@ -508,7 +508,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   categoryDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#666',
   },
   categoryStatus: {
@@ -522,11 +522,11 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   sensitivityText: {
-    fontSize: 10,
+    fontSize: 14,
     fontWeight: '700',
   },
   expandIcon: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#999',
   },
   categoryDetails: {
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   granteeDescription: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
   },
   examplesContainer: {
@@ -571,13 +571,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   examplesLabel: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
     color: '#666',
     marginBottom: 8,
   },
   exampleItem: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     marginBottom: 4,
   },
@@ -588,7 +588,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   reviewWarningText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#E65100',
   },
   actionsSection: {

@@ -14,18 +14,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useChatContext } from '../context/ChatContext';
+import { useTheme } from '../context/ThemeContext';
 import { Message } from '../types';
 import { VoiceButton } from './VoiceButton';
 import { ChatBubble } from './ChatBubble';
 import { LoadingIndicator } from './LoadingIndicator';
 import { WeatherWidget } from './WeatherWidget';
 import {
-  getColors,
   getFontSizes,
   SPACING,
   TOUCH_TARGETS,
-  announceForAccessibility,
-} from '../utils/accessibility';
+  announceForAccessibility} from '../utils/accessibility';
 
 interface ChatScreenProps {
   onOpenSettings?: () => void;
@@ -35,7 +34,7 @@ interface ChatScreenProps {
 }
 
 export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const {
@@ -395,9 +394,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open health dashboard"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#2E7D32' }]}>
-                ❤️
-              </Text>
+              <Text style={styles.headerButtonIcon}>❤️</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#2E7D32' }]}>Health</Text>
             </TouchableOpacity>
           )}
           {onOpenVault && (
@@ -408,9 +406,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open your secure vault"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#E65100' }]}>
-                🔐 Vault
-              </Text>
+              <Text style={styles.headerButtonIcon}>🔐</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#E65100' }]}>Vault</Text>
             </TouchableOpacity>
           )}
           {onOpenCareCircle && (
@@ -421,9 +418,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open Care Circle settings"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#1976D2' }]}>
-                👨‍👩‍👧
-              </Text>
+              <Text style={styles.headerButtonIcon}>👨‍👩‍👧</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#1976D2' }]}>Family</Text>
             </TouchableOpacity>
           )}
           {onOpenSettings && (
@@ -588,6 +584,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  // Icon (emoji) + label (14px text) stacked vertically. Per the audit,
+  // emoji-only nav was unreadable for elderly users — the label confirms
+  // what each button does at-a-glance.
+  headerButtonIcon: {
+    fontSize: 22,
+    lineHeight: 26,
+  },
+  headerButtonLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   vaultButton: {
     borderWidth: 1,
     borderColor: '#FFB74D',
@@ -650,7 +658,7 @@ const styles = StyleSheet.create({
   },
   errorDismiss: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
+    fontSize: 14,
     textAlign: 'center',
     marginTop: 4,
   },

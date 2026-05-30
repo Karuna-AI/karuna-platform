@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   summaryLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     marginTop: 4,
   },
@@ -330,16 +330,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logAction: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '500',
     textTransform: 'capitalize',
   },
   logTime: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#999',
   },
   logUser: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     marginTop: 4,
     fontStyle: 'italic',
@@ -373,7 +373,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#E0E0E0',
   },
   lastEventText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     textAlign: 'center',
   },

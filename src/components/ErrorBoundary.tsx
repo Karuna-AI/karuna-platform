@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   errorDetail: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#9CA3AF',
     textAlign: 'center',
     marginBottom: 24,

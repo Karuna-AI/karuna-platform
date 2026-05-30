@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   inactiveBadgeText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     fontWeight: '600',
   },
