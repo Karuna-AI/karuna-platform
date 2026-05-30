@@ -430,9 +430,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open Settings"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: colors.text }]}>
-                Settings
-              </Text>
+              <Text style={styles.headerButtonIcon}>⚙️</Text>
+              <Text style={[styles.headerButtonLabel, { color: colors.text }]}>Settings</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -557,23 +556,33 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    // The header has a small "Karuna" title plus 5-6 action buttons. On a
+    // ~390 dp phone they don't fit on one row, so the row wraps to a second
+    // line rather than clipping (which previously hid Settings off-screen).
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
+    gap: SPACING.xs,
   },
   headerTitle: {
     fontWeight: '700',
+    marginRight: 'auto', // push action buttons to the right when there's room
   },
   headerActions: {
     flexDirection: 'row',
-    gap: SPACING.sm,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    justifyContent: 'flex-end',
   },
   headerButton: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    // Compact padding so 5-6 buttons fit on one row when possible. Touch
+    // target is still ≥48 dp because minWidth/minHeight enforce it.
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
     borderRadius: 20,
     minWidth: TOUCH_TARGETS.minimum,
     minHeight: TOUCH_TARGETS.minimum,
