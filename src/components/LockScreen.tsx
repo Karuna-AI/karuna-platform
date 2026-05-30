@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   keypadSubtext: {
-    fontSize: 10,
+    fontSize: 14,
     color: '#999',
     marginTop: 2,
   },

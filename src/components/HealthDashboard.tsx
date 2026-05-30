@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   nextDoseLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#3b82f6',
     marginBottom: 4,
   },
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   noDataHint: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#9ca3af',
     textAlign: 'center',
     marginTop: 4,
@@ -516,7 +516,7 @@ const styles = StyleSheet.create({
     color: '#22c55e',
   },
   vitalUnit: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#9ca3af',
   },
   vitalTrend: {

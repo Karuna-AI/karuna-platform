@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
   cardRelationship: { fontSize: 15, color: '#666', marginTop: 2 },
   cardDetail: { fontSize: 15, color: '#666', marginBottom: 4 },
   caregiverBadge: { backgroundColor: '#E3F2FD', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  caregiverBadgeText: { fontSize: 12, color: '#2196F3', fontWeight: '600' },
+  caregiverBadgeText: { fontSize: 14, color: '#2196F3', fontWeight: '600' },
   cardActions: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: 1, borderTopColor: '#E0E0E0', paddingTop: 12, marginTop: 8 },
   cardEditButton: { paddingHorizontal: 16, paddingVertical: 8, marginRight: 12 },
   cardEditText: { fontSize: 16, color: '#2196F3', fontWeight: '600' },

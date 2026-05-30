@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
   },
   errorDismiss: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
+    fontSize: 14,
     textAlign: 'center',
     marginTop: 4,
   },

@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   cardType: { fontSize: 15, color: '#666', marginTop: 2 },
   statusBadge: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  statusText: { fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
+  statusText: { fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
   cardDateTime: { fontSize: 16, color: '#2196F3', fontWeight: '500', marginBottom: 4 },
   cardDetail: { fontSize: 15, color: '#666', marginBottom: 4 },
   cardPrep: { fontSize: 14, color: '#FF9800', fontWeight: '500', marginTop: 4 },

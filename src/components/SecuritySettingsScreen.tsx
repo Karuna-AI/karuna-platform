@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   settingDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#666',
   },
   checkmark: {
@@ -580,7 +580,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   setupPinDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#666',
   },
   setupPinArrow: {
@@ -588,7 +588,7 @@ const styles = StyleSheet.create({
     color: '#4A90A4',
   },
   warningText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#FF9800',
     marginTop: 12,
   },
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   linkDescription: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#666',
   },
   linkArrow: {
