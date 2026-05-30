@@ -6,6 +6,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 const STORAGE_KEY = '@karuna:feature_flags';
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
@@ -113,7 +114,9 @@ class FeatureFlagsService {
     }
 
     try {
-      const API_URL = process.env.API_URL || 'https://karuna-api-production.up.railway.app';
+      const API_URL =
+        (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
+        'https://karuna-gateway-production.up.railway.app';
       const response = await fetch(`${API_URL}/api/admin/feature-flags`);
 
       if (!response.ok) {

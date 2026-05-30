@@ -41,7 +41,11 @@ import { onboardingStore } from '../services/onboardingStore';
 import { parseKarunaUrl } from '../services/incomingLinks';
 import { CheckIn } from '../types/proactive';
 
-const GATEWAY_URL = process.env.GATEWAY_URL || 'https://karuna-api-production.up.railway.app';
+import Constants from 'expo-constants';
+
+const GATEWAY_URL =
+  (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
+  'https://karuna-gateway-production.up.railway.app';
 
 interface AppStateContextValue {
   // Security
