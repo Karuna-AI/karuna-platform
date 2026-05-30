@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { weatherService, WeatherData } from '../services/weather';
 import { getFontSizes, SPACING } from '../utils/accessibility';
 import { WeatherCondition } from '../types/proactive';
+import { useTheme } from '../context/ThemeContext';
 
 const CONDITION_EMOJI: Record<WeatherCondition, string> = {
   clear: '☀️',

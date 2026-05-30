@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Message } from '../types';
 import { getFontSizes, SPACING } from '../utils/accessibility';
+import { useTheme } from '../context/ThemeContext';
 
 interface ChatBubbleProps {
   message: Message;

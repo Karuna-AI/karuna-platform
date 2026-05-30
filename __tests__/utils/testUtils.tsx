@@ -7,8 +7,11 @@ import React, { ReactElement, ReactNode } from 'react';
 import { render, RenderOptions } from '@testing-library/react';
 import { SettingsProvider } from '../../src/context/SettingsContext';
 import { ChatProvider } from '../../src/context/ChatContext';
+import { ThemeProvider } from '../../src/context/ThemeContext';
 
-// All providers wrapper
+// All providers wrapper. Order matters: ThemeProvider reads
+// settings.highContrast from SettingsContext, so it must be nested inside
+// SettingsProvider.
 interface AllProvidersProps {
   children: ReactNode;
 }
@@ -16,9 +19,11 @@ interface AllProvidersProps {
 const AllProviders: React.FC<AllProvidersProps> = ({ children }) => {
   return (
     <SettingsProvider>
-      <ChatProvider>
-        {children}
-      </ChatProvider>
+      <ThemeProvider>
+        <ChatProvider>
+          {children}
+        </ChatProvider>
+      </ThemeProvider>
     </SettingsProvider>
   );
 };
