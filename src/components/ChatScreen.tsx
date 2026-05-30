@@ -394,9 +394,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open health dashboard"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#2E7D32' }]}>
-                ❤️
-              </Text>
+              <Text style={styles.headerButtonIcon}>❤️</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#2E7D32' }]}>Health</Text>
             </TouchableOpacity>
           )}
           {onOpenVault && (
@@ -407,9 +406,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open your secure vault"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#E65100' }]}>
-                🔐 Vault
-              </Text>
+              <Text style={styles.headerButtonIcon}>🔐</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#E65100' }]}>Vault</Text>
             </TouchableOpacity>
           )}
           {onOpenCareCircle && (
@@ -420,9 +418,8 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               accessibilityLabel="Open Care Circle settings"
               accessibilityRole="button"
             >
-              <Text style={[styles.headerButtonText, { color: '#1976D2' }]}>
-                👨‍👩‍👧
-              </Text>
+              <Text style={styles.headerButtonIcon}>👨‍👩‍👧</Text>
+              <Text style={[styles.headerButtonLabel, { color: '#1976D2' }]}>Family</Text>
             </TouchableOpacity>
           )}
           {onOpenSettings && (
@@ -586,6 +583,18 @@ const styles = StyleSheet.create({
   headerButtonText: {
     fontWeight: '600',
     fontSize: 14,
+  },
+  // Icon (emoji) + label (14px text) stacked vertically. Per the audit,
+  // emoji-only nav was unreadable for elderly users — the label confirms
+  // what each button does at-a-glance.
+  headerButtonIcon: {
+    fontSize: 22,
+    lineHeight: 26,
+  },
+  headerButtonLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 2,
   },
   vaultButton: {
     borderWidth: 1,
