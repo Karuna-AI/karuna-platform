@@ -5,13 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   Switch,
   Alert,
   TextInput,
   Modal,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   biometricAuthService,
   BiometricCapabilities,

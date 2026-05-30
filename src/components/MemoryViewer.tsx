@@ -5,10 +5,10 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   TextInput,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { storageService, UserMemory } from '../services/storage';
 import { getColors, getFontSizes, SPACING, TOUCH_TARGETS } from '../utils/accessibility';
 

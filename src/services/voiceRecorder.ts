@@ -1,20 +1,27 @@
 import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
+import { AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 
-// Use expo-audio (not expo-av) to avoid iOS 26 AVAudioSession crash
-// expo-av's native module triggers AVInputDeviceDiscoverySession.initialize
-// during app launch which causes SIGABRT on iOS 26+
-let audioModule: any = null;
-let AudioRecorderClass: any = null;
-let RecordingPresetsRef: any = null;
+// Use expo-audio (not expo-av) to avoid the iOS 26 AVAudioSession crash —
+// expo-av's native module triggers AVInputDeviceDiscoverySession.initialize on
+// import which SIGABRTs during launch. expo-audio defers all native init until
+// you actually construct/play, so a static import is safe.
+//
+// IMPORTANT: the recorder class is at `AudioModule.AudioRecorder` — NOT a
+// top-level named export. An earlier version reached for the nonexistent
+// `audioModule.AudioRecorder` (undefined), and `new undefined(preset)` plus
+// expo-audio's top-level prototype monkey-patch produced the user-facing
+// "Cannot read property 'prototype' of undefined" crash on first record.
+const AudioRecorderClass: any = (AudioModule as any)?.AudioRecorder;
+const RecordingPresetsRef: any = RecordingPresets;
 
 async function loadExpoAudio() {
-  if (!audioModule) {
-    audioModule = await import('expo-audio');
-    AudioRecorderClass = audioModule.AudioRecorder;
-    RecordingPresetsRef = audioModule.RecordingPresets;
-  }
-  return audioModule;
+  // Kept for call-site compatibility; module is now loaded statically.
+  return {
+    AudioRecorder: AudioRecorderClass,
+    RecordingPresets: RecordingPresetsRef,
+    setAudioModeAsync,
+  };
 }
 
 export type RecordingError =

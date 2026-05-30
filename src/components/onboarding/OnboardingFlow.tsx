@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { SafeAreaView, View, Alert } from 'react-native';
+import { View, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { onboardingStore, OnboardingStep, OnboardingRole } from '../../services/onboardingStore';
 import { telemetryService } from '../../services/telemetry';
 import { ttsService } from '../../services/tts';

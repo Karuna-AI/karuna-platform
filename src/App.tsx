@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { Alert } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import { AppStateProvider, useAppState } from './context/AppStateContext';
@@ -70,12 +72,20 @@ function AppShell(): JSX.Element | null {
 }
 
 export default function App(): JSX.Element {
+  // GestureHandlerRootView is required by @react-navigation/native-stack and
+  // react-native-screens for touch propagation. SafeAreaProvider is required
+  // by react-native-safe-area-context's SafeAreaView / useSafeAreaInsets() to
+  // expose system insets to every screen (status bar, gesture pill, notch).
   return (
-    <SettingsProvider>
-      <AppStateProvider>
-        <SettingsErrorAlert />
-        <AppShell />
-      </AppStateProvider>
-    </SettingsProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <SettingsProvider>
+          <AppStateProvider>
+            <SettingsErrorAlert />
+            <AppShell />
+          </AppStateProvider>
+        </SettingsProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

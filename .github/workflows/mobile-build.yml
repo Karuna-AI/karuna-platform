@@ -98,6 +98,7 @@ jobs:
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
           API_URL: ${{ secrets.API_URL }}
+          PREVIEW_API_URL: ${{ secrets.PREVIEW_API_URL }}
           EXPO_OWNER: ${{ secrets.EXPO_OWNER }}
 
       - name: Build iOS
@@ -106,6 +107,7 @@ jobs:
         env:
           APP_ENV: ${{ github.event.inputs.profile || 'preview' }}
           API_URL: ${{ secrets.API_URL }}
+          PREVIEW_API_URL: ${{ secrets.PREVIEW_API_URL }}
           EXPO_OWNER: ${{ secrets.EXPO_OWNER }}
 
   submit-android:
