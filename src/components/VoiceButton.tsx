@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useEffect, useState } from 'react';
+import { useTheme } from '../context/ThemeContext';
 import {
   TouchableOpacity,
   View,

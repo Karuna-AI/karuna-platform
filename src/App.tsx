@@ -81,6 +81,15 @@ function AppShell(): JSX.Element | null {
   );
 }
 
+// Small connector that pipes the user's highContrast preference from
+// SettingsContext into ThemeProvider's prop. Kept separate so ThemeContext
+// doesn't have to import SettingsContext directly (that coupling caused a
+// jest.mock'd AsyncStorage recursion in component tests).
+function ThemedProviders({ children }: { children: React.ReactNode }) {
+  const { settings } = useSettings();
+  return <ThemeProvider highContrast={settings.highContrast}>{children}</ThemeProvider>;
+}
+
 export default function App(): JSX.Element {
   // GestureHandlerRootView is required by @react-navigation/native-stack and
   // react-native-screens for touch propagation. SafeAreaProvider is required
@@ -90,12 +99,12 @@ export default function App(): JSX.Element {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <SettingsProvider>
-          <ThemeProvider>
+          <ThemedProviders>
             <AppStateProvider>
               <SettingsErrorAlert />
               <AppShell />
             </AppStateProvider>
-          </ThemeProvider>
+          </ThemedProviders>
         </SettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
