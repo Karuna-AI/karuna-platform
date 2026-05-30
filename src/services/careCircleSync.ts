@@ -156,7 +156,9 @@ class CareCircleSyncService {
     if (!this.careCircleId || !this.authToken) return;
 
     this.isShuttingDown = false;
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + '/ws';
+    const wsUrl =
+      this.baseUrl.replace(/^http/, 'ws') +
+      `/ws?circleId=${encodeURIComponent(this.careCircleId)}&token=${encodeURIComponent(this.authToken)}`;
 
     try {
       // Null out handlers on any existing ws before replacing, so onclose won't re-trigger reconnect

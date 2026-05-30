@@ -3456,13 +3456,17 @@ async function handleWebSocket(ws, req) {
   const circleId = url.searchParams.get('circleId');
 
   // Auth via httpOnly cookie (browser sends it automatically on upgrade).
-  // Fall back to Authorization header for non-browser clients / mobile.
+  // Fall back to Authorization header, then ?token= query param for clients
+  // (e.g. React Native WebSocket) that can set neither cookies nor headers.
   let token = getCookie(req, AUTH_COOKIE_NAME);
   if (!token) {
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7);
     }
+  }
+  if (!token) {
+    token = url.searchParams.get('token');
   }
 
   if (!token || !circleId) {
