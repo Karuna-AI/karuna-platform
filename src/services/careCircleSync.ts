@@ -152,13 +152,34 @@ class CareCircleSyncService {
   }
 
   // Connect to WebSocket for real-time updates
-  private connectWebSocket() {
+  private async fetchWsTicket(): Promise<string | null> {
+    if (!this.authToken) return null;
+    try {
+      const r = await fetch(`${this.baseUrl}/api/care/ws-ticket`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.authToken}` },
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return data.ticket || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async connectWebSocket() {
     if (!this.careCircleId || !this.authToken) return;
 
     this.isShuttingDown = false;
+    const ticket = await this.fetchWsTicket();
+    if (!ticket || this.isShuttingDown) {
+      // Couldn't obtain a ticket — schedule a retry via the standard reconnect path.
+      this.attemptReconnect();
+      return;
+    }
     const wsUrl =
       this.baseUrl.replace(/^http/, 'ws') +
-      `/ws?circleId=${encodeURIComponent(this.careCircleId)}&token=${encodeURIComponent(this.authToken)}`;
+      `/ws?circleId=${encodeURIComponent(this.careCircleId)}&ticket=${encodeURIComponent(ticket)}`;
 
     try {
       // Null out handlers on any existing ws before replacing, so onclose won't re-trigger reconnect
@@ -175,13 +196,8 @@ class CareCircleSyncService {
         console.debug('[CareCircleSync] WebSocket connected');
         this.reconnectAttempts = 0;
 
-        // Authenticate
-        this.ws?.send(JSON.stringify({
-          type: 'auth',
-          token: this.authToken,
-        }));
-
-        // Subscribe to care circle updates
+        // Auth happens via the upgrade-time ticket — no in-band auth message
+        // needed. Subscribe to care circle updates.
         this.ws?.send(JSON.stringify({
           type: 'subscribe',
           circleId: this.careCircleId,
