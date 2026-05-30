@@ -14,18 +14,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useChatContext } from '../context/ChatContext';
+import { useTheme } from '../context/ThemeContext';
 import { Message } from '../types';
 import { VoiceButton } from './VoiceButton';
 import { ChatBubble } from './ChatBubble';
 import { LoadingIndicator } from './LoadingIndicator';
 import { WeatherWidget } from './WeatherWidget';
 import {
-  getColors,
   getFontSizes,
   SPACING,
   TOUCH_TARGETS,
-  announceForAccessibility,
-} from '../utils/accessibility';
+  announceForAccessibility} from '../utils/accessibility';
 
 interface ChatScreenProps {
   onOpenSettings?: () => void;
@@ -35,7 +34,7 @@ interface ChatScreenProps {
 }
 
 export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const {

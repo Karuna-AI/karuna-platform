@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { weatherService, WeatherData } from '../services/weather';
-import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
+import { getFontSizes, SPACING } from '../utils/accessibility';
 import { WeatherCondition } from '../types/proactive';
 
 const CONDITION_EMOJI: Record<WeatherCondition, string> = {
@@ -17,7 +17,7 @@ const CONDITION_EMOJI: Record<WeatherCondition, string> = {
 };
 
 export function WeatherWidget(): JSX.Element | null {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [expanded, setExpanded] = useState(false);

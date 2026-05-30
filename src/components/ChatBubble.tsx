@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Message } from '../types';
-import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
+import { getFontSizes, SPACING } from '../utils/accessibility';
 
 interface ChatBubbleProps {
   message: Message;
@@ -12,7 +12,7 @@ export function ChatBubble({
   message,
   _isLatest = false,
 }: ChatBubbleProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const isUser = message.role === 'user';

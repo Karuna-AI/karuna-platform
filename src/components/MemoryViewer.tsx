@@ -9,15 +9,16 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../context/ThemeContext';
 import { storageService, UserMemory } from '../services/storage';
-import { getColors, getFontSizes, SPACING, TOUCH_TARGETS } from '../utils/accessibility';
+import { getFontSizes, SPACING, TOUCH_TARGETS } from '../utils/accessibility';
 
 interface MemoryViewerProps {
   onClose: () => void;
 }
 
 export function MemoryViewer({ onClose }: MemoryViewerProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const [memory, setMemory] = useState<UserMemory | null>(null);

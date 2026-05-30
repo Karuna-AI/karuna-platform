@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, Platform } from 'react-native';
-import { getColors, getFontSizes, SPACING } from '../utils/accessibility';
+import { getFontSizes, SPACING } from '../utils/accessibility';
+import { useTheme } from '../context/ThemeContext';
 
 interface LoadingIndicatorProps {
   message?: string;
@@ -11,7 +12,7 @@ export function LoadingIndicator({
   message = 'Thinking...',
   size = 'medium',
 }: LoadingIndicatorProps): JSX.Element {
-  const colors = getColors(true);
+  const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const dot1Anim = useRef(new Animated.Value(0)).current;

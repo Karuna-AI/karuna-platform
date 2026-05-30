@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { SettingsProvider, useSettings } from './context/SettingsContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { AppStateProvider, useAppState } from './context/AppStateContext';
 import { RootNavigator } from './navigation/RootNavigator';
 import LockScreen from './components/LockScreen';
@@ -80,10 +81,12 @@ export default function App(): JSX.Element {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <SettingsProvider>
-          <AppStateProvider>
-            <SettingsErrorAlert />
-            <AppShell />
-          </AppStateProvider>
+          <ThemeProvider>
+            <AppStateProvider>
+              <SettingsErrorAlert />
+              <AppShell />
+            </AppStateProvider>
+          </ThemeProvider>
         </SettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
