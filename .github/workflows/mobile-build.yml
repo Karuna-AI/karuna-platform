@@ -11,6 +11,9 @@ on:
       - 'app.config.js'
       - 'package.json'
       - 'eas.json'
+      - 'metro.config.js'
+      - 'babel.config.js'
+      - 'patches/**'
   workflow_dispatch:
     inputs:
       platform:
