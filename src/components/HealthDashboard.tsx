@@ -232,8 +232,10 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
               <Text style={styles.allDoneText}>All medications taken for today!</Text>
             )}
             {medicationSchedule.total === 0 && (
-              <Text style={styles.noDataText}>No medications yet</Text>
-              <Text style={styles.noDataHint}>Tap here to add your medications.</Text>
+              <>
+                <Text style={styles.noDataText}>No medications yet</Text>
+                <Text style={styles.noDataHint}>Tap here to add your medications.</Text>
+              </>
             )}
           </View>
         </TouchableOpacity>
