@@ -29,7 +29,9 @@
         "withoutCredentials": true
       },
       "env": {
-        "APP_ENV": "preview"
+        "APP_ENV": "preview",
+        "API_URL": "https://karuna-gateway-production.up.railway.app",
+        "PREVIEW_API_URL": "https://karuna-gateway-production.up.railway.app"
       }
     },
     "production": {
@@ -42,7 +44,8 @@
         "credentialsSource": "remote"
       },
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "API_URL": "https://karuna-gateway-production.up.railway.app"
       }
     }
   },
