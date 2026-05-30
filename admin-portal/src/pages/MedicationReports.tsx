@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { adminAPI } from '../services/api';
+import { useState, useEffect, useRef } from 'react';
+import { adminAPI, api } from '../services/api';
 
 interface MedicationSummary {
   total_doses: string;
@@ -63,31 +63,79 @@ export default function MedicationReports() {
   const [hourlyPattern, setHourlyPattern] = useState<HourlyPattern[]>([]);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'trends' | 'missed'>('overview');
+  const [circleId, setCircleId] = useState('');
+  const [circles, setCircles] = useState<{ id: string; name: string; care_recipient_name: string }[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    api.getCircles({ limit: 200 }).then((r) => {
+      if (r.success) setCircles(r.data.circles || []);
+    });
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, [days]);
+    return () => { abortRef.current?.abort(); };
+  }, [days, circleId]);
 
   const loadData = async () => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
     setLoading(true);
-    try {
-      const [overviewRes, trendsRes] = await Promise.all([
-        adminAPI.get(`/medications/overview?days=${days}`),
-        adminAPI.get(`/medications/trends?days=${days}`),
-      ]);
+    const queryParams = new URLSearchParams({ days: String(days) });
+    if (circleId) queryParams.append('circleId', circleId);
 
+    try {
+      const overviewRes = await adminAPI.get(`/medications/overview?${queryParams}`);
+      if (signal.aborted) return;
       setSummary(overviewRes.data.summary);
       setAdherenceByCircle(overviewRes.data.adherenceByCircle);
       setTopMedications(overviewRes.data.topMedications);
       setMissedDoses(overviewRes.data.missedDoses);
+    } catch (error: any) {
+      if (signal.aborted) return;
+      setLoadError(error?.response?.data?.error || 'Failed to load medication overview');
+    }
+
+    try {
+      const trendsRes = await adminAPI.get(`/medications/trends?${queryParams}`);
+      if (signal.aborted) return;
       setDailyAdherence(trendsRes.data.dailyAdherence);
       setHourlyPattern(trendsRes.data.hourlyPattern);
-    } catch (error) {
-      console.error('Failed to load medication data:', error);
-    } finally {
-      setLoading(false);
+    } catch (error: any) {
+      if (signal.aborted) return;
+      if (!loadError) setLoadError(error?.response?.data?.error || 'Failed to load medication trends');
     }
+
+    if (!signal.aborted) setLoading(false);
+  };
+
+  const exportCsv = () => {
+    let headers: string[];
+    let rows: string[][];
+    if (activeTab === 'overview') {
+      headers = ['Care Recipient', 'Circle', 'Total Doses', 'Taken', 'Missed', 'Adherence %'];
+      rows = adherenceByCircle.map((c) => [c.care_recipient_name, c.name, c.total_doses, c.taken, c.missed, c.adherence_rate]);
+    } else if (activeTab === 'trends') {
+      headers = ['Date', 'Total', 'Taken', 'Missed', 'Adherence %'];
+      rows = dailyAdherence.map((d) => [d.date, d.total, d.taken, d.missed, d.adherence_rate]);
+    } else {
+      headers = ['Scheduled Time', 'Medication', 'Dosage', 'Care Recipient', 'Circle'];
+      rows = missedDoses.map((d) => [new Date(d.scheduled_time).toLocaleString(), d.medication_name, d.dosage, d.care_recipient_name, d.circle_name]);
+    }
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `medications-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const getAdherenceClass = (rate: string | null) => {
@@ -110,16 +158,40 @@ export default function MedicationReports() {
     return <div className="loading">Loading medication reports...</div>;
   }
 
+  if (loadError) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+        <p>{loadError}</p>
+        <button className="btn btn-secondary" onClick={() => { setLoadError(''); setLoading(true); }}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="page-header">
         <h1>Medication Reports</h1>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <select
+            value={circleId}
+            onChange={(e) => setCircleId(e.target.value)}
+            style={{ minWidth: '180px' }}
+          >
+            <option value="">All circles</option>
+            {circles.map((c) => (
+              <option key={c.id} value={c.id}>{c.care_recipient_name} ({c.name})</option>
+            ))}
+          </select>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
           </select>
+          <button className="btn btn-secondary" onClick={exportCsv}>
+            Export CSV
+          </button>
         </div>
       </div>
 

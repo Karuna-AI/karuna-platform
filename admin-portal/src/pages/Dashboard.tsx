@@ -1,19 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
+
+interface DashboardMetrics {
+  users: { total: number; active: number; new_last_month: number; active_last_week: number };
+  circles: { total: number; avg_members: number };
+  alerts: { active: number; critical: number; high: number };
+  activity: { total_activities: number; active_circles: number };
+  timestamp: string;
+}
 
 const REFRESH_INTERVAL_MS = 30_000;
 
 export default function Dashboard() {
-  const [metrics, setMetrics] = useState<any>(null);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const loadMetrics = async () => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
     setError(null);
     const result = await api.getDashboardMetrics();
+    if (abortRef.current?.signal.aborted) return;
     if (result.success) {
       setMetrics(result.data);
     } else {
@@ -42,6 +55,7 @@ export default function Dashboard() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
+      if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 
@@ -142,10 +156,10 @@ export default function Dashboard() {
               <h3 className="card-title">Quick Actions</h3>
             </div>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <a href="/users" className="btn btn-secondary">Manage Users</a>
-              <a href="/circles" className="btn btn-secondary">View Circles</a>
-              <a href="/feature-flags" className="btn btn-secondary">Feature Flags</a>
-              <a href="/audit-logs" className="btn btn-secondary">Audit Logs</a>
+              <Link to="/users" className="btn btn-secondary">Manage Users</Link>
+              <Link to="/circles" className="btn btn-secondary">View Circles</Link>
+              <Link to="/feature-flags" className="btn btn-secondary">Feature Flags</Link>
+              <Link to="/audit-logs" className="btn btn-secondary">Audit Logs</Link>
             </div>
           </div>
 

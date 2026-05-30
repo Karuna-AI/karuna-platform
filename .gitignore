@@ -30,6 +30,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Local test artifacts
+scripts/screenshots/
+
 # React Native / Expo
 .expo/
 .expo-shared/

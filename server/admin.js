@@ -10,8 +10,113 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
+const { z } = require('zod');
 const db = require('./db');
 const router = express.Router();
+
+let resend = null;
+try {
+  const { Resend } = require('resend');
+  if (process.env.RESEND_API_KEY) resend = new Resend(process.env.RESEND_API_KEY);
+} catch (_) {}
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
+
+async function sendAdminWelcomeEmail(email, name, password) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Admin Account',
+      html: `<p>Hi ${name},</p>
+<p>Your Karuna admin account has been created.</p>
+<p><strong>Email:</strong> ${email}<br>
+<strong>Temporary password:</strong> ${password}</p>
+<p>Please log in and change your password immediately.</p>`,
+    });
+  } catch (err) {
+    console.error('Admin welcome email failed:', err.message);
+  }
+}
+
+async function sendUserTempPasswordEmail(email, name, tempPassword) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Account',
+      html: `<p>Hi ${name},</p>
+<p>An account has been created for you on Karuna.</p>
+<p><strong>Email:</strong> ${email}<br>
+<strong>Temporary password:</strong> ${tempPassword}</p>
+<p>Please log in and change your password on first sign-in.</p>`,
+    });
+  } catch (err) {
+    console.error('User temp password email failed:', err.message);
+  }
+}
+
+async function sendPasswordResetEmail(email, name, newPassword) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: 'Your Karuna Password Has Been Reset',
+      html: `<p>Hi ${name},</p>
+<p>An admin has reset your Karuna account password.</p>
+<p><strong>New password:</strong> ${newPassword}</p>
+<p>Please log in and change your password immediately.</p>`,
+    });
+  } catch (err) {
+    console.error('Password reset email failed:', err.message);
+  }
+}
+
+function validate(schema) {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: 'Validation failed', details: result.error.issues.map(i => i.message) });
+    }
+    req.body = result.data;
+    next();
+  };
+}
+
+const createUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1),
+  phone: z.string().optional(),
+});
+
+const suspendUserSchema = z.object({
+  reason: z.string().min(1),
+});
+
+const resetPasswordSchema = z.object({
+  newPassword: z.string().min(12),
+});
+
+const createFeatureFlagSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  is_enabled: z.boolean().optional(),
+  enabled_for_all: z.boolean().optional(),
+});
+
+const updateFeatureFlagSchema = z.object({
+  is_enabled: z.boolean().optional(),
+  enabled_for_all: z.boolean().optional(),
+  rollout_percentage: z.number().int().min(0).max(100).optional(),
+  enabled_user_ids: z.array(z.string()).optional(),
+  enabled_circle_ids: z.array(z.string()).optional(),
+});
+
+const updateSettingSchema = z.object({
+  value: z.unknown(),
+});
 
 // Defense-in-depth: Verify custom header on mutating requests
 // Browsers won't send X-Requested-With cross-origin without CORS preflight
@@ -41,6 +146,17 @@ const adminLoginRateLimiter = rateLimit({
     console.warn(`[RateLimit] Admin login rate limit exceeded for IP: ${req.ip}`);
     res.status(429).json(options.message);
   },
+});
+
+// Destructive admin actions: 10 per minute per admin ID
+const adminActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.admin?.id || (req.ip || '').replace(/^::ffff:/, ''),
+  message: { error: 'Too many admin actions. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { keyGeneratorIpFallback: false },
 });
 
 // ============================================================================
@@ -382,11 +498,25 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
     );
 
     await logAdminAction(req.admin.id, req.admin.email, 'create_admin', 'admin', result.rows[0].id, null, { email, name, role }, req);
+    await sendAdminWelcomeEmail(email, name, password);
 
     res.json({ success: true, admin: result.rows[0] });
   } catch (error) {
     console.error('Create admin error:', error);
     res.status(500).json({ error: 'Failed to create admin' });
+  }
+});
+
+// List all admins (super_admin only)
+router.get('/admins', adminAuthMiddleware, requirePermission('canManageAdmins'), async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, email, name, role, created_at FROM admin_users ORDER BY created_at DESC`
+    );
+    res.json({ admins: result.rows });
+  } catch (error) {
+    console.error('List admins error:', error);
+    res.status(500).json({ error: 'Failed to list admins' });
   }
 });
 
@@ -398,7 +528,8 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
 router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search, status } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT u.id, u.email, u.name, u.phone, u.is_active, u.is_verified,
@@ -429,7 +560,7 @@ router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), a
 
     query += ' GROUP BY u.id ORDER BY u.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -445,9 +576,9 @@ router.get('/users', adminAuthMiddleware, requirePermission('canManageUsers'), a
       users: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -502,7 +633,7 @@ router.get('/users/:userId', adminAuthMiddleware, requirePermission('canManageUs
 });
 
 // Suspend user
-router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(suspendUserSchema), async (req, res) => {
   try {
     const { userId } = req.params;
     const { reason } = req.body;
@@ -517,7 +648,7 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
     }
 
     await db.query(
-      `UPDATE users SET suspended_at = CURRENT_TIMESTAMP, suspended_reason = $1, suspended_by = $2
+      `UPDATE users SET is_active = false, suspended_at = CURRENT_TIMESTAMP, suspended_reason = $1, suspended_by = $2
        WHERE id = $3`,
       [reason, req.admin.id, userId]
     );
@@ -532,7 +663,7 @@ router.post('/users/:userId/suspend', adminAuthMiddleware, requirePermission('ca
 });
 
 // Unsuspend user
-router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -542,7 +673,7 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
     }
 
     await db.query(
-      'UPDATE users SET suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL WHERE id = $1',
+      'UPDATE users SET is_active = true, suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL WHERE id = $1',
       [userId]
     );
 
@@ -556,7 +687,7 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
 });
 
 // Reset user password
-router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), async (req, res) => {
+router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(resetPasswordSchema), async (req, res) => {
   try {
     const { userId } = req.params;
     const { newPassword } = req.body;
@@ -571,14 +702,65 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
     // Use bcrypt for password hashing (same as careCircle.js)
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
-    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
+    const userResult = await db.query('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING email, name', [passwordHash, userId]);
 
     await logAdminAction(req.admin.id, req.admin.email, 'reset_password', 'user', userId, null, { passwordReset: true }, req);
+
+    if (userResult.rows.length > 0) {
+      const { email: userEmail, name: userName } = userResult.rows[0];
+      await sendPasswordResetEmail(userEmail, userName, newPassword);
+    }
 
     res.json({ success: true });
   } catch (error) {
     console.error('Reset password error:', error);
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// Create user account (admin-provisioned; sets is_verified=true, returns temp password)
+router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(createUserSchema), async (req, res) => {
+  try {
+    const { email, name, phone } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({ error: 'Email and name are required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    const existing = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'A user with this email already exists' });
+    }
+
+    // Generate a secure temporary password (16 chars: upper + lower + digits + special)
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$';
+    let tempPassword = '';
+    const randBytes = require('crypto').randomBytes(16);
+    for (let i = 0; i < 16; i++) {
+      tempPassword += chars[randBytes[i] % chars.length];
+    }
+
+    const passwordHash = await hashPassword(tempPassword);
+
+    const result = await db.query(
+      `INSERT INTO users (email, password_hash, name, phone, is_verified)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id, email, name, phone, is_verified, is_active, created_at`,
+      [email.toLowerCase(), passwordHash, name.trim(), phone || null]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'create_user', 'user', result.rows[0].id, null, { email, name }, req);
+    await sendUserTempPasswordEmail(email, name.trim(), tempPassword);
+
+    res.status(201).json({ success: true, user: result.rows[0], tempPassword });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
   }
 });
 
@@ -590,7 +772,8 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
 router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT cc.*,
@@ -608,7 +791,7 @@ router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'
 
     query += ' ORDER BY cc.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -624,9 +807,9 @@ router.get('/circles', adminAuthMiddleware, requirePermission('canManageCircles'
       circles: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -674,6 +857,82 @@ router.get('/circles/:circleId', adminAuthMiddleware, requirePermission('canMana
   } catch (error) {
     console.error('Get circle details error:', error);
     res.status(500).json({ error: 'Failed to get circle details' });
+  }
+});
+
+// Update circle (rename / care recipient name)
+router.put('/circles/:circleId', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const { name, care_recipient_name } = req.body;
+    if (!name && !care_recipient_name) return res.status(400).json({ error: 'Nothing to update' });
+
+    const fields = [];
+    const params = [];
+    if (name) { fields.push(`name = $${params.length + 1}`); params.push(name.trim()); }
+    if (care_recipient_name) { fields.push(`care_recipient_name = $${params.length + 1}`); params.push(care_recipient_name.trim()); }
+    params.push(circleId);
+
+    const result = await db.query(
+      `UPDATE care_circles SET ${fields.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Update circle error:', error);
+    res.status(500).json({ error: 'Failed to update circle' });
+  }
+});
+
+// Deactivate circle
+router.post('/circles/:circleId/deactivate', adminAuthMiddleware, requirePermission('canManageCircles'), adminActionLimiter, async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const result = await db.query(
+      'UPDATE care_circles SET is_active = false WHERE id = $1 RETURNING *',
+      [circleId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Deactivate circle error:', error);
+    res.status(500).json({ error: 'Failed to deactivate circle' });
+  }
+});
+
+// Activate circle
+router.post('/circles/:circleId/activate', adminAuthMiddleware, requirePermission('canManageCircles'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const result = await db.query(
+      'UPDATE care_circles SET is_active = true WHERE id = $1 RETURNING *',
+      [circleId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Circle not found' });
+    res.json({ circle: result.rows[0] });
+  } catch (error) {
+    console.error('Activate circle error:', error);
+    res.status(500).json({ error: 'Failed to activate circle' });
+  }
+});
+
+// Remove circle member (admin)
+router.delete('/circles/:circleId/members/:memberId', adminAuthMiddleware, requirePermission('canManageCircles'), adminActionLimiter, async (req, res) => {
+  try {
+    const { circleId, memberId } = req.params;
+    const existing = await db.query(
+      'SELECT role FROM circle_members WHERE id = $1 AND circle_id = $2',
+      [memberId, circleId]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Member not found' });
+    if (existing.rows[0].role === 'owner') return res.status(400).json({ error: 'Cannot remove the circle owner' });
+
+    await db.query('DELETE FROM circle_members WHERE id = $1 AND circle_id = $2', [memberId, circleId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove circle member error:', error);
+    res.status(500).json({ error: 'Failed to remove member' });
   }
 });
 
@@ -825,7 +1084,8 @@ setInterval(cleanupOldAuditLogs, 24 * 60 * 60 * 1000);
 router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
     const { page = 1, limit = 100, action, userId, circleId } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = 'SELECT * FROM audit_logs WHERE 1=1';
     const params = [];
@@ -847,7 +1107,7 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
 
     query += ' ORDER BY created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -855,7 +1115,7 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -868,7 +1128,8 @@ router.get('/audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLo
 router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewAuditLogs'), async (req, res) => {
   try {
     const { page = 1, limit = 100, action, adminId } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = 'SELECT * FROM admin_audit_logs WHERE 1=1';
     const params = [];
@@ -885,7 +1146,7 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
 
     query += ' ORDER BY created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -893,7 +1154,7 @@ router.get('/admin-audit-logs', adminAuthMiddleware, requirePermission('canViewA
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -967,7 +1228,7 @@ router.post('/feature-flags/evaluate', adminAuthMiddleware, async (req, res) => 
 });
 
 // Update feature flag
-router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), async (req, res) => {
+router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), validate(updateFeatureFlagSchema), async (req, res) => {
   try {
     const { flagId } = req.params;
     const { is_enabled, enabled_for_all, rollout_percentage, enabled_user_ids, enabled_circle_ids } = req.body;
@@ -998,7 +1259,7 @@ router.put('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('can
 });
 
 // Create feature flag
-router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), async (req, res) => {
+router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), validate(createFeatureFlagSchema), async (req, res) => {
   try {
     const { name, description, is_enabled, enabled_for_all } = req.body;
 
@@ -1018,6 +1279,27 @@ router.post('/feature-flags', adminAuthMiddleware, requirePermission('canManageF
   } catch (error) {
     console.error('Create feature flag error:', error);
     res.status(500).json({ error: 'Failed to create feature flag' });
+  }
+});
+
+// Delete feature flag
+router.delete('/feature-flags/:flagId', adminAuthMiddleware, requirePermission('canManageFeatureFlags'), adminActionLimiter, async (req, res) => {
+  try {
+    const { flagId } = req.params;
+
+    const existing = await db.query('SELECT * FROM feature_flags WHERE id = $1', [flagId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Feature flag not found' });
+    }
+
+    await db.query('DELETE FROM feature_flags WHERE id = $1', [flagId]);
+
+    await logAdminAction(req.admin.id, req.admin.email, 'delete_feature_flag', 'feature_flag', flagId, existing.rows[0], null, req);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete feature flag error:', error);
+    res.status(500).json({ error: 'Failed to delete feature flag' });
   }
 });
 
@@ -1047,7 +1329,7 @@ router.get('/settings', adminAuthMiddleware, async (req, res) => {
 });
 
 // Update setting
-router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSettings'), async (req, res) => {
+router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSettings'), validate(updateSettingSchema), async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
@@ -1095,7 +1377,7 @@ router.put('/settings/:key', adminAuthMiddleware, requirePermission('canManageSe
 // ============================================================================
 
 // Send notification to users
-router.post('/notifications/send', adminAuthMiddleware, requirePermission('canSendNotifications'), async (req, res) => {
+router.post('/notifications/send', adminAuthMiddleware, requirePermission('canSendNotifications'), adminActionLimiter, async (req, res) => {
   try {
     const { recipient_type, recipient_id, notification_type, title, message, priority, scheduled_at } = req.body;
 
@@ -1212,7 +1494,8 @@ router.get('/ai-usage/summary', adminAuthMiddleware, requirePermission('canViewM
 router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 100, request_type, model, success } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT aul.*, u.name as user_name, cc.name as circle_name
@@ -1240,7 +1523,7 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
 
     query += ' ORDER BY aul.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1248,7 +1531,7 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
       logs: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -1260,6 +1543,66 @@ router.get('/ai-usage/logs', adminAuthMiddleware, requirePermission('canViewMetr
 // ============================================================================
 // Health Alerts Dashboard Routes
 // ============================================================================
+
+// Acknowledge a health alert (admin panel action)
+router.post('/health-alerts/:alertId/acknowledge', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    const existing = await db.query('SELECT id, status FROM caregiver_alerts WHERE id = $1', [alertId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+    if (existing.rows[0].status !== 'active') {
+      return res.status(400).json({ error: `Alert is already ${existing.rows[0].status}` });
+    }
+
+    const result = await db.query(
+      `UPDATE caregiver_alerts
+       SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [alertId]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'acknowledge_alert', 'alert', alertId, { status: 'active' }, { status: 'acknowledged' }, req);
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Acknowledge alert error:', error);
+    res.status(500).json({ error: 'Failed to acknowledge alert' });
+  }
+});
+
+// Resolve a health alert (admin panel action)
+router.post('/health-alerts/:alertId/resolve', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    const existing = await db.query('SELECT id, status FROM caregiver_alerts WHERE id = $1', [alertId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+    if (existing.rows[0].status === 'resolved') {
+      return res.status(400).json({ error: 'Alert is already resolved' });
+    }
+
+    const result = await db.query(
+      `UPDATE caregiver_alerts
+       SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [alertId]
+    );
+
+    await logAdminAction(req.admin.id, req.admin.email, 'resolve_alert', 'alert', alertId, { status: existing.rows[0].status }, { status: 'resolved' }, req);
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Resolve alert error:', error);
+    res.status(500).json({ error: 'Failed to resolve alert' });
+  }
+});
 
 // Get health alerts overview
 router.get('/health-alerts/overview', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
@@ -1350,7 +1693,8 @@ router.get('/health-alerts/overview', adminAuthMiddleware, requirePermission('ca
 router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 50, status, severity, alert_type, circle_id } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT ca.*, cc.name as circle_name, cc.care_recipient_name,
@@ -1384,7 +1728,7 @@ router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetr
 
     query += ' ORDER BY ca.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1414,9 +1758,9 @@ router.get('/health-alerts', adminAuthMiddleware, requirePermission('canViewMetr
       alerts: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
@@ -1480,9 +1824,14 @@ router.get('/health-alerts/trends', adminAuthMiddleware, requirePermission('canV
 // Get medication overview
 router.get('/medications/overview', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
-    const { days = 30 } = req.query;
+    const { days = 30, circleId } = req.query;
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - parseInt(days));
+
+    const summaryParams = [sinceDate];
+    const summaryFilter = circleId ? ` AND circle_id = $${summaryParams.push(circleId)}` : '';
+    const joinParams = [sinceDate];
+    const joinFilter = circleId ? ` AND md.circle_id = $${joinParams.push(circleId)}` : '';
 
     const [summary, adherenceByCircle, topMedications, missedDoses] = await Promise.all([
       // Overall adherence summary
@@ -1496,8 +1845,8 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
           COUNT(DISTINCT medication_id) as unique_medications,
           COUNT(DISTINCT circle_id) as circles_with_medications
         FROM medication_doses
-        WHERE scheduled_time >= $1
-      `, [sinceDate]),
+        WHERE scheduled_time >= $1${summaryFilter}
+      `, summaryParams),
 
       // Adherence by circle
       db.query(`
@@ -1514,11 +1863,11 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
           ) as adherence_rate
         FROM care_circles cc
         JOIN medication_doses md ON cc.id = md.circle_id
-        WHERE md.scheduled_time >= $1
+        WHERE md.scheduled_time >= $1${joinFilter}
         GROUP BY cc.id
         ORDER BY adherence_rate ASC NULLS LAST
         LIMIT 20
-      `, [sinceDate]),
+      `, joinParams),
 
       // Most prescribed medications
       db.query(`
@@ -1532,11 +1881,11 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
              NULLIF(COUNT(*) FILTER (WHERE md.status != 'pending'), 0) * 100), 1
           ) as adherence_rate
         FROM vault_medications vm
-        LEFT JOIN medication_doses md ON vm.id = md.medication_id AND md.scheduled_time >= $1
+        LEFT JOIN medication_doses md ON vm.id = md.medication_id AND md.scheduled_time >= $1${joinFilter}
         GROUP BY vm.name, vm.dosage
         ORDER BY circles_using DESC
         LIMIT 15
-      `, [sinceDate]),
+      `, joinParams),
 
       // Recent missed doses with details
       db.query(`
@@ -1549,10 +1898,10 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
         FROM medication_doses md
         JOIN vault_medications vm ON md.medication_id = vm.id
         JOIN care_circles cc ON md.circle_id = cc.id
-        WHERE md.status = 'missed' AND md.scheduled_time >= $1
+        WHERE md.status = 'missed' AND md.scheduled_time >= $1${joinFilter}
         ORDER BY md.scheduled_time DESC
         LIMIT 50
-      `, [sinceDate]),
+      `, joinParams),
     ]);
 
     const summaryData = summary.rows[0];
@@ -1580,9 +1929,12 @@ router.get('/medications/overview', adminAuthMiddleware, requirePermission('canV
 // Get medication adherence trends
 router.get('/medications/trends', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
-    const { days = 30 } = req.query;
+    const { days = 30, circleId } = req.query;
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - parseInt(days));
+
+    const trendParams = [sinceDate];
+    const trendFilter = circleId ? ` AND circle_id = $${trendParams.push(circleId)}` : '';
 
     const [dailyAdherence, hourlyPattern] = await Promise.all([
       // Daily adherence trend
@@ -1597,10 +1949,10 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
              NULLIF(COUNT(*) FILTER (WHERE status != 'pending'), 0) * 100), 1
           ) as adherence_rate
         FROM medication_doses
-        WHERE scheduled_time >= $1
+        WHERE scheduled_time >= $1${trendFilter}
         GROUP BY DATE(scheduled_time)
         ORDER BY date
-      `, [sinceDate]),
+      `, trendParams),
 
       // Hourly pattern (which hours have most missed doses)
       db.query(`
@@ -1610,10 +1962,10 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
           COUNT(*) FILTER (WHERE status = 'taken') as taken,
           COUNT(*) FILTER (WHERE status = 'missed') as missed
         FROM medication_doses
-        WHERE scheduled_time >= $1
+        WHERE scheduled_time >= $1${trendFilter}
         GROUP BY EXTRACT(HOUR FROM scheduled_time)
         ORDER BY hour
-      `, [sinceDate]),
+      `, trendParams),
     ]);
 
     res.json({
@@ -1631,7 +1983,8 @@ router.get('/medications/trends', adminAuthMiddleware, requirePermission('canVie
 router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetrics'), async (req, res) => {
   try {
     const { page = 1, limit = 50, circle_id, search } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const offset = (parseInt(page) - 1) * safeLimit;
 
     let query = `
       SELECT
@@ -1658,7 +2011,7 @@ router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetric
 
     query += ' ORDER BY vm.created_at DESC';
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
+    params.push(safeLimit, offset);
 
     const result = await db.query(query, params);
 
@@ -1666,7 +2019,7 @@ router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetric
       medications: result.rows,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: safeLimit,
       },
     });
   } catch (error) {

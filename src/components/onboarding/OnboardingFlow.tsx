@@ -93,7 +93,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps): JSX.Element
 
   const handleComplete = useCallback(async () => {
     telemetryService.track('onboarding_completed');
-    await onboardingStore.markComplete(false);
+    await onboardingStore.markComplete(true);
     onComplete();
   }, [onComplete]);
 

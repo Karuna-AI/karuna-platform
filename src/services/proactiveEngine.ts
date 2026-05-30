@@ -6,6 +6,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { signalsService } from './signals';
 import { proactiveRulesEngine } from './proactiveRules';
@@ -157,6 +158,11 @@ class ProactiveEngineService {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
+    }
+
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
     }
 
     console.debug('[ProactiveEngine] Stopped');
@@ -381,7 +387,7 @@ class ProactiveEngineService {
     const checkIn = this.pendingCheckIns.find((c) => c.id === checkInId);
     if (checkIn) {
       // Update expiry time
-      checkIn.expiresAt = new Date(Date.now() + minutes * 60 * 1000 + 60 * 60 * 1000).toISOString();
+      checkIn.expiresAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
 
       // Schedule a reminder notification (native only)
       if (Platform.OS !== 'web') {

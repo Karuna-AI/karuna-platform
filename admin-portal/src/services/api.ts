@@ -8,7 +8,6 @@ interface ApiResponse<T> {
 
 class AdminApiService {
   private client: AxiosInstance;
-  private token: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -20,41 +19,19 @@ class AdminApiService {
       withCredentials: true,
     });
 
-    // In-memory Bearer token for API clients; cookie is the primary browser auth mechanism
-    this.client.interceptors.request.use((config) => {
-      if (this.token) {
-        config.headers.Authorization = `Bearer ${this.token}`;
-      }
-      return config;
-    });
-
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
-          this.clearToken();
-          window.location.href = '/login';
+          window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
         }
         return Promise.reject(error);
       }
     );
   }
 
-  setToken(token: string) {
-    // In-memory only — httpOnly cookie is the primary auth for browser sessions
-    this.token = token;
-  }
-
-  clearToken() {
-    this.token = null;
-  }
-
   async logout(): Promise<void> {
-    try {
-      await this.client.post('/auth/logout');
-    } finally {
-      this.clearToken();
-    }
+    await this.client.post('/auth/logout');
   }
 
   // Auth
@@ -74,6 +51,23 @@ class AdminApiService {
       return { success: true, data: response.data };
     } catch (error) {
       return { success: false, error: 'Failed to get profile' };
+    }
+  }
+
+  // Silent session check on startup — treats 401 as non-error so the
+  // karuna:auth:unauthorized event is not dispatched when there is simply
+  // no session yet (e.g. first visit to the login page).
+  async checkSession(): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.get('/auth/me', {
+        validateStatus: (status) => status < 500,
+      });
+      if (response.status === 200) {
+        return { success: true, data: response.data };
+      }
+      return { success: false };
+    } catch {
+      return { success: false };
     }
   }
 
@@ -200,6 +194,46 @@ class AdminApiService {
     }
   }
 
+  async updateCircle(circleId: string, data: { name?: string; care_recipient_name?: string }): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.put(`/circles/${circleId}`, data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to update circle' };
+    }
+  }
+
+  async deactivateCircle(circleId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/circles/${circleId}/deactivate`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to deactivate circle' };
+    }
+  }
+
+  async activateCircle(circleId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post(`/circles/${circleId}/activate`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to activate circle' };
+    }
+  }
+
+  async removeCircleMember(circleId: string, memberId: string): Promise<ApiResponse<void>> {
+    try {
+      await this.client.delete(`/circles/${circleId}/members/${memberId}`);
+      return { success: true };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to remove member' };
+    }
+  }
+
   // Feature Flags
   async getFeatureFlags(): Promise<ApiResponse<any>> {
     try {
@@ -237,6 +271,15 @@ class AdminApiService {
     }
   }
 
+  async deleteFeatureFlag(flagId: string): Promise<ApiResponse<void>> {
+    try {
+      await this.client.delete(`/feature-flags/${flagId}`);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Failed to delete feature flag' };
+    }
+  }
+
   // Audit Logs
   async getAuditLogs(params: { page?: number; limit?: number; action?: string } = {}): Promise<ApiResponse<any>> {
     try {
@@ -251,15 +294,37 @@ class AdminApiService {
     }
   }
 
-  async getAdminAuditLogs(params: { page?: number; limit?: number } = {}): Promise<ApiResponse<any>> {
+  async getAdminAuditLogs(params: { page?: number; limit?: number; action?: string } = {}): Promise<ApiResponse<any>> {
     try {
       const queryParams = new URLSearchParams();
       if (params.page) queryParams.append('page', params.page.toString());
       if (params.limit) queryParams.append('limit', params.limit.toString());
+      if (params.action) queryParams.append('action', params.action);
       const response = await this.client.get(`/admin-audit-logs?${queryParams}`);
       return { success: true, data: response.data };
     } catch (error) {
       return { success: false, error: 'Failed to get admin audit logs' };
+    }
+  }
+
+  // Admin Management
+  async getAdmins(): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.get('/admins');
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to get admins' };
+    }
+  }
+
+  async createAdmin(data: { name: string; email: string; password: string; role: string }): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.client.post('/auth/create', data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to create admin' };
     }
   }
 
@@ -286,21 +351,25 @@ class AdminApiService {
 export const api = new AdminApiService();
 
 // Direct axios client for dashboard pages — uses httpOnly cookie automatically
+// Shares the same 401→logout behaviour as AdminApiService
+const _adminAxios = axios.create({
+  baseURL: `${import.meta.env.VITE_API_URL || ''}/api/admin`,
+  headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  withCredentials: true,
+});
+_adminAxios.interceptors.response.use(
+  (r) => r,
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const adminAPI = {
-  get: async (url: string) => {
-    const response = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      withCredentials: true,
-    });
-    return response;
-  },
-  post: async (url: string, data?: any) => {
-    const response = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/admin${url}`, data, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      withCredentials: true,
-    });
-    return response;
-  },
+  get: (url: string) => _adminAxios.get(url),
+  post: (url: string, data?: any) => _adminAxios.post(url, data),
 };
 
 export default api;

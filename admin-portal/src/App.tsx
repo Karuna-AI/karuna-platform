@@ -1,6 +1,9 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { useIdleTimeout } from './hooks/useIdleTimeout';
+import { useEffect } from 'react';
+import api from './services/api';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -14,11 +17,19 @@ import Settings from './pages/Settings';
 import AIUsageAnalytics from './pages/AIUsageAnalytics';
 import HealthAlerts from './pages/HealthAlerts';
 import MedicationReports from './pages/MedicationReports';
+import AdminManagement from './pages/AdminManagement';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { admin, isLoading, logout } = useAuth();
-  const { showWarning, remainingSeconds, resetTimer } = useIdleTimeout(logout);
+  const navigate = useNavigate();
+  const { showWarning, remainingSeconds, resetTimer } = useIdleTimeout(logout, () => { api.getProfile(); });
+
+  useEffect(() => {
+    const handler = () => { logout(); navigate('/login', { replace: true }); };
+    window.addEventListener('karuna:auth:unauthorized', handler);
+    return () => window.removeEventListener('karuna:auth:unauthorized', handler);
+  }, [logout, navigate]);
 
   if (isLoading) {
     return (
@@ -48,6 +59,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <ToastProvider>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
@@ -65,13 +77,25 @@ export default function App() {
                 <Route path="/ai-usage" element={<AIUsageAnalytics />} />
                 <Route path="/health-alerts" element={<HealthAlerts />} />
                 <Route path="/medications" element={<MedicationReports />} />
+                <Route path="/admins" element={<AdminManagement />} />
                 <Route path="/audit-logs" element={<AuditLogs />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={
+                  <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                    <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>404</div>
+                    <h2 style={{ marginBottom: '0.5rem' }}>Page Not Found</h2>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
+                      The page you're looking for doesn't exist.
+                    </p>
+                    <a href="/" className="btn btn-primary">Go to Dashboard</a>
+                  </div>
+                } />
               </Routes>
             </Layout>
           </PrivateRoute>
         }
       />
     </Routes>
+    </ToastProvider>
   );
 }

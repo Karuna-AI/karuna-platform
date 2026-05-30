@@ -26,6 +26,20 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     return { type: 'empty' };
   }
 
+  // Force @babel/runtime helpers to their CommonJS build on every platform.
+  // Their package exports map only node/import/default conditions; because the
+  // 'import' condition is enabled above (needed for the EAS/Android build), a
+  // bare `@babel/runtime/helpers/<name>` otherwise resolves to the ESM build
+  // (helpers/esm/*). Metro transpiles consumers to CommonJS, so they do
+  // `require('...helpers/interopRequireDefault')()` — but the ESM build's
+  // module.exports is a namespace object, not the function, which crashes at
+  // runtime ("_interopRequireDefault is not a function"). Resolving via Node's
+  // require() conditions pins these to the CJS files, which are correct
+  // everywhere, without changing resolution for any other package.
+  if (/^@babel\/runtime\/helpers\/(?!esm\/)[^/]+$/.test(moduleName)) {
+    return { type: 'sourceFile', filePath: require.resolve(moduleName, { paths: [__dirname] }) };
+  }
+
   // Force axios to use browser build
   if (moduleName === 'axios') {
     return context.resolveRequest(context, 'axios/dist/browser/axios.cjs', platform);

@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
+import { useToast } from '../context/ToastContext';
+import type { AdminUser, Pagination } from '../types';
 
 type SortDir = 'asc' | 'desc';
 
@@ -17,19 +19,38 @@ interface SortConfig {
 }
 
 export default function Users() {
-  const [users, setUsers] = useState<any[]>([]);
-  const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 1 });
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [status, setStatus] = useState(searchParams.get('status') || '');
   const [isLoading, setIsLoading] = useState(true);
-  const [sort, setSort] = useState<SortConfig>({ sortBy: '', sortDir: 'asc' });
+  const [loadError, setLoadError] = useState('');
+  const [sort, setSort] = useState<SortConfig>({
+    sortBy: searchParams.get('sortBy') || '',
+    sortDir: (searchParams.get('sortDir') as SortDir) || 'asc',
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({ name: '', email: '', phone: '' });
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const abortRef = useRef<AbortController | null>(null);
 
   const debouncedSearch = useDebounce(search, 300);
+
+  // Cancel in-flight request on unmount
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
+
+  // Sync filter state to URL whenever it changes
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (status) params.status = status;
+    if (sort.sortBy) { params.sortBy = sort.sortBy; params.sortDir = sort.sortDir; }
+    setSearchParams(params, { replace: true });
+  }, [debouncedSearch, status, sort]);
 
   const loadUsers = useCallback(async (
     page = 1,
@@ -37,7 +58,10 @@ export default function Users() {
     statusFilter = status,
     sortConfig = sort,
   ) => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
     setIsLoading(true);
+    setLoadError('');
     const result = await api.getUsers({
       page,
       limit: 50,
@@ -46,9 +70,12 @@ export default function Users() {
       sortBy: sortConfig.sortBy || undefined,
       sortDir: sortConfig.sortBy ? sortConfig.sortDir : undefined,
     });
+    if (abortRef.current?.signal.aborted) return;
     if (result.success) {
       setUsers(result.data.users);
       setPagination(result.data.pagination);
+    } else {
+      setLoadError(result.error || 'Failed to load users');
     }
     setIsLoading(false);
   }, [debouncedSearch, status, sort]);
@@ -56,12 +83,6 @@ export default function Users() {
   useEffect(() => {
     loadUsers(1, debouncedSearch, status, sort);
   }, [debouncedSearch, status, sort]);
-
-  useEffect(() => {
-    if (pagination.page > 1) {
-      loadUsers(pagination.page, debouncedSearch, status, sort);
-    }
-  }, [pagination.page]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,12 +139,13 @@ export default function Users() {
       setShowCreateModal(false);
       setCreateForm({ name: '', email: '', phone: '' });
       loadUsers(1);
+      showToast('User created successfully', 'success');
     } else {
       setCreateError(result.error || 'Failed to create user.');
     }
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString();
   };
@@ -184,6 +206,13 @@ export default function Users() {
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadUsers(1, debouncedSearch, status, sort)} style={{ marginTop: '1rem' }}>
+              Retry
+            </button>
+          </div>
         ) : users.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">👥</div>
@@ -244,14 +273,14 @@ export default function Users() {
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page <= 1}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  onClick={() => loadUsers(pagination.page - 1, debouncedSearch, status, sort)}
                 >
                   Previous
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page >= pagination.pages}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  onClick={() => loadUsers(pagination.page + 1, debouncedSearch, status, sort)}
                 >
                   Next
                 </button>

@@ -116,7 +116,7 @@ export function SecuritySetupScreen({
       await biometricAuthService.setVaultLockEnabled(true);
       const method = biometricCaps?.isAvailable && biometricCaps?.isEnrolled ? 'biometric' : 'pin';
       await onboardingStore.setSecurityMethod(method);
-      telemetryService.track('onboarding_security_setup', { errorType: method });
+      telemetryService.track('onboarding_security_setup', { method });
       setPhase('done');
       if (Platform.OS !== 'web') { try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { /* intentionally empty */ } }
       setTimeout(() => onNext(), 600);

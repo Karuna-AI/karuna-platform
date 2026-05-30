@@ -357,4 +357,78 @@ KARUNA AI COMPANION PLATFORM — Complete System Analysis
   request.
                                                                                                                      ● Agent "Analyze caregiver and admin portals" completed
 
+  ---
+  11. SESSION LOG — 2026-05-13 (Branch: fix/security-audit-21-issues)
+
+  ISSUES INVESTIGATED & FIXED
+  ════════════════════════════
+
+  A. Startup 401 noise on login pages (both portals)
+  ───────────────────────────────────────────────────
+  Symptom : Browser console showed `GET /api/care/auth/me 401 (Unauthorized)` on
+            portal.karunaapp.in/login and `GET /api/admin/auth/me 401 (Unauthorized)`
+            on admin.karunaapp.in/login.
+
+  Root cause : Both portals' AuthContext call getProfile() on every mount to restore
+               an existing session. On the login page (no cookie yet) the gateway
+               correctly returns 401, but the axios error interceptor was treating
+               that 401 as a mid-session unauthorised event and dispatching
+               karuna:auth:unauthorized unnecessarily — causing redundant state resets
+               and console noise.
+
+  Fix (commit e04c6ea) :
+    • Added checkSession() to caregiver-portal/src/services/api.ts and
+      admin-portal/src/services/api.ts. Uses axios validateStatus: (s) => s < 500
+      so a 401 is a resolved response, not an error → error interceptor never runs.
+    • AuthContext.validateToken() (caregiver) and loadProfile() (admin) now call
+      checkSession() for the startup probe.
+    • getProfile() unchanged — still used for mid-session calls where a 401 is a
+      genuine auth failure that should trigger logout.
+
+  Files changed :
+    caregiver-portal/src/services/api.ts        — added checkSession()
+    caregiver-portal/src/context/AuthContext.tsx — validateToken → checkSession()
+    admin-portal/src/services/api.ts            — added checkSession()
+    admin-portal/src/context/AuthContext.tsx    — loadProfile → checkSession()
+    admin-portal/.gitignore                     — added .env*.local
+
+  B. admin.karunaapp.in unreachable (Chrome error page)
+  ──────────────────────────────────────────────────────
+  Symptom : `(index):1 Unsafe attempt to load URL https://admin.karunaapp.in/ from
+            frame with URL chrome-error://chromewebdata/`.
+
+  Root cause : Virgin Media ISP DNS server (194.168.4.100) was returning NXDOMAIN
+               for admin.karunaapp.in even though the CNAME record exists in
+               Cloudflare and resolves correctly via Google DNS (8.8.8.8). DNS
+               propagation lag on the ISP resolver. The Vercel deployment itself
+               was healthy (HTTP 200, valid SSL confirmed via --resolve curl flag).
+
+  Fix : Switched system DNS on Ethernet 2 adapter to 8.8.8.8 / 8.8.4.4 via
+        Set-DnsClientServerAddress. Flushed Windows DNS cache (ipconfig /flushdns).
+        No code changes required.
+
+  DEPLOYMENT TOPOLOGY (confirmed)
+  ────────────────────────────────
+  ┌─────────────────────────┬──────────────────────────────┬────────────────────────────┐
+  │  Vercel Project         │  Production URL              │  Notes                     │
+  ├─────────────────────────┼──────────────────────────────┼────────────────────────────┤
+  │ caregiver-portal-new    │ portal.karunaapp.in          │ Caregiver portal           │
+  ├─────────────────────────┼──────────────────────────────┼────────────────────────────┤
+  │ admin-portal            │ admin.karunaapp.in           │ Admin portal               │
+  ├─────────────────────────┼──────────────────────────────┼────────────────────────────┤
+  │ privacy-policy          │ privacy.karunaapp.in         │ Static privacy policy      │
+  ├─────────────────────────┼──────────────────────────────┼────────────────────────────┤
+  │ karuna-website          │ karunaapp.in                 │ Marketing site             │
+  └─────────────────────────┴──────────────────────────────┴────────────────────────────┘
+  Backend  : karuna-gateway-production.up.railway.app (Railway)
+  Database : karuna-postgres Docker container, port 5437
+
+  ARCHITECTURE NOTE — checkSession() pattern
+  ───────────────────────────────────────────
+  karuna:auth:unauthorized custom event should ONLY fire for genuine mid-session
+  401s (authenticated user's session expired or revoked). It must NOT fire during
+  the initial page-load session probe, where a 401 simply means "no cookie yet"
+  (expected on first visit / login page). The checkSession() method enforces this
+  distinction via validateStatus. Any future portal should follow the same pattern.
+
 ● All 5 agents have completed. The full system analysis was delivered earlier. What would you like to work on next?

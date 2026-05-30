@@ -19,6 +19,19 @@ import type {
   DashboardData,
 } from '../types';
 
+const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || 'csrf-token';
+
+// Maps raw snake_case DB row to the camelCase CareCircle shape the UI expects.
+// The list endpoint returns raw rows; the detail endpoint adds elderlyName manually.
+function normalizeCareCircle(row: any): CareCircle {
+  return {
+    ...row,
+    elderlyName: row.elderlyName ?? row.care_recipient_name,
+    createdAt:   row.createdAt   ?? row.created_at,
+    updatedAt:   row.updatedAt   ?? row.updated_at,
+  };
+}
+
 class ApiService {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -44,7 +57,7 @@ class ApiService {
       if (['post', 'put', 'patch', 'delete'].includes(method)) {
         const csrfToken = document.cookie
           .split('; ')
-          .find(row => row.startsWith('csrf-token='))
+          .find(row => row.startsWith(`${CSRF_COOKIE_NAME}=`))
           ?.split('=')[1];
         if (csrfToken) {
           config.headers['X-CSRF-Token'] = decodeURIComponent(csrfToken);
@@ -63,7 +76,13 @@ class ApiService {
         }
         if (error.response?.status === 401) {
           this.clearToken();
-          window.location.href = '/login';
+          window.dispatchEvent(new CustomEvent('karuna:auth:unauthorized'));
+        }
+        if (error.response?.status === 403) {
+          const msg = (error.response.data as { error?: string })?.error ?? '';
+          if (msg.toLowerCase().includes('consent')) {
+            window.dispatchEvent(new CustomEvent('karuna:consent:denied', { detail: msg }));
+          }
         }
         return Promise.reject(error);
       }
@@ -118,6 +137,26 @@ class ApiService {
     }
   }
 
+  async forgotPassword(email: string): Promise<ApiResponse<{ message: string; resetToken?: string; resetUrl?: string }>> {
+    try {
+      const response = await this.client.post('/care/auth/forgot-password', { email });
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to send reset email' };
+    }
+  }
+
+  async resetPassword(token: string, password: string): Promise<ApiResponse<{ message: string }>> {
+    try {
+      const response = await this.client.post('/care/auth/reset-password', { token, password });
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to reset password' };
+    }
+  }
+
   async getProfile(): Promise<ApiResponse<User>> {
     try {
       const response = await this.client.get('/care/auth/me');
@@ -131,6 +170,23 @@ class ApiService {
     }
   }
 
+  // Silent session check used on startup — treats 401 as a non-error so the
+  // karuna:auth:unauthorized event is not dispatched when there is simply no
+  // session yet (e.g. first visit to the login page).
+  async checkSession(): Promise<ApiResponse<User>> {
+    try {
+      const response = await this.client.get('/care/auth/me', {
+        validateStatus: (status) => status < 500,
+      });
+      if (response.status === 200) {
+        return { success: true, data: response.data };
+      }
+      return { success: false };
+    } catch {
+      return { success: false };
+    }
+  }
+
   // Care Circle endpoints
   async createCareCircle(data: {
     name: string;
@@ -138,7 +194,8 @@ class ApiService {
   }): Promise<ApiResponse<CareCircle>> {
     try {
       const response = await this.client.post('/care/circles', data);
-      return { success: true, data: response.data };
+      // Server returns { success: true, circle: {...} } — unwrap the nested object
+      return { success: true, data: normalizeCareCircle(response.data.circle) };
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
       return {
@@ -151,7 +208,8 @@ class ApiService {
   async getCareCircles(): Promise<ApiResponse<CareCircle[]>> {
     try {
       const response = await this.client.get('/care/circles');
-      return { success: true, data: response.data };
+      // Server returns raw snake_case rows — normalize to camelCase
+      return { success: true, data: response.data.map(normalizeCareCircle) };
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
       return {

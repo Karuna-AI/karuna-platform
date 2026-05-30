@@ -4,24 +4,36 @@ const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 const WARNING_BEFORE = 2 * 60 * 1000; // 2 minutes before timeout
 const CHECK_INTERVAL = 30 * 1000; // Check every 30 seconds
 
-export function useIdleTimeout(onTimeout: () => void) {
+export function useIdleTimeout(onTimeout: () => void, onRefreshSession?: () => void) {
   const [showWarning, setShowWarning] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const lastActivityRef = useRef(Date.now());
   const warningShownRef = useRef(false);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timedOutRef = useRef(false);
 
-  const resetTimer = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    warningShownRef.current = false;
-    setShowWarning(false);
-    setRemainingSeconds(0);
-    // Clear any active countdown
+  const triggerTimeout = useCallback(() => {
+    if (timedOutRef.current) return;
+    timedOutRef.current = true;
     if (countdownRef.current) {
       clearInterval(countdownRef.current);
       countdownRef.current = null;
     }
-  }, []);
+    onTimeout();
+  }, [onTimeout]);
+
+  const resetTimer = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    warningShownRef.current = false;
+    timedOutRef.current = false;
+    setShowWarning(false);
+    setRemainingSeconds(0);
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    onRefreshSession?.();
+  }, [onRefreshSession]);
 
   // Track user activity — always update, even during warning
   useEffect(() => {
@@ -53,7 +65,7 @@ export function useIdleTimeout(onTimeout: () => void) {
       const timeUntilTimeout = IDLE_TIMEOUT - idleTime;
 
       if (timeUntilTimeout <= 0) {
-        onTimeout();
+        triggerTimeout();
         return;
       }
 
@@ -65,7 +77,7 @@ export function useIdleTimeout(onTimeout: () => void) {
     }, CHECK_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [onTimeout]);
+  }, [triggerTimeout]);
 
   // Countdown when warning is shown
   useEffect(() => {
@@ -82,7 +94,7 @@ export function useIdleTimeout(onTimeout: () => void) {
       const timeUntilTimeout = IDLE_TIMEOUT - idleTime;
 
       if (timeUntilTimeout <= 0) {
-        onTimeout();
+        triggerTimeout();
         return;
       }
 
@@ -95,7 +107,7 @@ export function useIdleTimeout(onTimeout: () => void) {
         countdownRef.current = null;
       }
     };
-  }, [showWarning, onTimeout]);
+  }, [showWarning, triggerTimeout]);
 
   return { showWarning, remainingSeconds, resetTimer };
 }

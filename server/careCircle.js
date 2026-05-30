@@ -12,8 +12,12 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
+const { Resend } = require('resend');
 const db = require('./db');
 const router = express.Router();
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -26,6 +30,9 @@ const VAULT_KEY = process.env.VAULT_ENCRYPTION_KEY
   : null;
 
 if (!VAULT_KEY || VAULT_KEY.length !== 32) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[Vault] VAULT_ENCRYPTION_KEY must be set to a 32-byte hex string in production');
+  }
   console.warn('[Vault] VAULT_ENCRYPTION_KEY not set or invalid — account numbers stored unencrypted');
 }
 
@@ -279,12 +286,102 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Placeholder — replace with real transactional email (Resend, Postmark, SES, etc.)
-async function sendVerificationEmail(email, name, verificationUrl) {
-  console.log(`[EmailVerification] To: ${email} | Name: ${name} | URL: ${verificationUrl}`);
-  // TODO: integrate email provider — example with nodemailer / Resend:
-  // await emailClient.send({ to: email, subject: 'Verify your Karuna account', html: `...${verificationUrl}...` });
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
 }
+
+async function sendVerificationEmail(email, name, verificationUrl) {
+  if (!resend) {
+    console.warn('[Email] RESEND_API_KEY not set — skipping verification email to:', email);
+    return;
+  }
+  const firstName = name.split(' ')[0];
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: 'Verify your Karuna account',
+    html: `<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:40px">
+    <h1 style="color:#2563eb;margin-top:0">Welcome to Karuna, ${firstName}!</h1>
+    <p style="color:#374151;line-height:1.6">
+      Thank you for joining Karuna — your personal AI care companion. Please verify
+      your email address to activate your account.
+    </p>
+    <a href="${verificationUrl}"
+       style="display:inline-block;margin:24px 0;padding:14px 28px;background:#2563eb;
+              color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+      Verify Email Address
+    </a>
+    <p style="color:#6b7280;font-size:14px">
+      This link expires in 24 hours. If you didn't create a Karuna account, you can
+      safely ignore this email.
+    </p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+    <p style="color:#9ca3af;font-size:12px">
+      Karuna Care &bull; <a href="https://karunaapp.in" style="color:#9ca3af">karunaapp.in</a>
+    </p>
+  </div>
+</body>
+</html>`,
+  });
+}
+
+async function sendPasswordResetEmail(email, name, resetUrl) {
+  if (!resend) {
+    console.warn('[Email] RESEND_API_KEY not set — skipping password reset email to:', email);
+    return;
+  }
+  const firstName = name.split(' ')[0];
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: 'Reset your Karuna password',
+    html: `<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:40px">
+    <h1 style="color:#2563eb;margin-top:0">Password Reset</h1>
+    <p style="color:#374151;line-height:1.6">
+      Hi ${firstName}, we received a request to reset your Karuna account password.
+      Click the button below to choose a new password.
+    </p>
+    <a href="${resetUrl}"
+       style="display:inline-block;margin:24px 0;padding:14px 28px;background:#dc2626;
+              color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+      Reset Password
+    </a>
+    <p style="color:#6b7280;font-size:14px">
+      This link expires in 1 hour. If you didn't request a password reset, please
+      ignore this email — your password will not change.
+    </p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+    <p style="color:#9ca3af;font-size:12px">
+      Karuna Care &bull; <a href="https://karunaapp.in" style="color:#9ca3af">karunaapp.in</a>
+    </p>
+  </div>
+</body>
+</html>`,
+  });
+}
+
+// Ensure password_reset_tokens table exists (idempotent)
+(async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.error('[DB] Failed to create password_reset_tokens table:', err.message);
+  }
+})();
 
 async function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
@@ -447,6 +544,111 @@ function requirePermission(permission) {
 }
 
 // ============================================================================
+// Consent Enforcement
+// ============================================================================
+
+// Maps vault entity types and API route identifiers to consent categories.
+// Owners (patients) are never blocked by consent — they control their own data.
+const VAULT_CONSENT_CATEGORY = {
+  vault_medications:   'health_data',
+  vault_doctors:       'health_data',
+  vault_appointments:  'health_data',
+  vault_contacts:      'contact_info',
+  vault_accounts:      'financial_data',
+  vault_documents:     'personal_documents',
+  health_data:         'health_data',
+};
+
+// Role → grantee name as stored in consent records
+const ROLE_TO_GRANTEE = {
+  owner:     'caregiver_owner',
+  caregiver: 'caregiver_member',
+  viewer:    'caregiver_member',
+};
+
+/**
+ * Checks whether the member's role has been granted access to `category`
+ * according to the patient's stored consent preferences.
+ * Returns true (allow) when:
+ *  - The member is the owner (patient controls their own data)
+ *  - patient_consent is empty / not yet synced (fail-open for backward compat)
+ *  - globalDataSharing is true AND the category has no explicit denial
+ *  - An explicit ConsentRecord grants read (or higher) access to the grantee
+ */
+function checkConsent(consentData, role, category) {
+  if (role === 'owner') return true;
+  if (!consentData || Object.keys(consentData).length === 0) return true; // not yet synced
+
+  const grantee = ROLE_TO_GRANTEE[role] || 'caregiver_member';
+
+  // Global sharing off means deny everything unless explicitly granted
+  const globalDataSharing = consentData.globalDataSharing === true;
+
+  const consents = Array.isArray(consentData.consents) ? consentData.consents : [];
+
+  // Find an active, non-expired grant for this category+grantee
+  const now = new Date();
+  const activeGrant = consents.find(c =>
+    c.category === category &&
+    c.grantee === grantee &&
+    c.accessLevel !== 'none' &&
+    (!c.revokedAt) &&
+    (!c.expiresAt || new Date(c.expiresAt) > now)
+  );
+
+  if (activeGrant) return true;
+  if (globalDataSharing) {
+    // Global sharing on: allow unless this category is explicitly revoked
+    const explicitRevoke = consents.find(c =>
+      c.category === category && c.grantee === grantee && c.accessLevel === 'none'
+    );
+    return !explicitRevoke;
+  }
+
+  return false;
+}
+
+/**
+ * Express middleware: reads patient_consent from care_circles and blocks
+ * non-owner members whose access to `category` has been denied by the patient.
+ */
+function requireConsent(category) {
+  return async (req, res, next) => {
+    try {
+      const { circleId } = req.params;
+
+      const memberResult = await db.query(
+        'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+        [circleId, req.user.id]
+      );
+      if (memberResult.rows.length === 0) {
+        return res.status(403).json({ error: 'Not a member of this circle' });
+      }
+
+      const { role } = memberResult.rows[0];
+
+      // Owners always pass — they control the data
+      if (role === 'owner') return next();
+
+      const circleResult = await db.query(
+        'SELECT patient_consent FROM care_circles WHERE id = $1',
+        [circleId]
+      );
+      const consentData = circleResult.rows[0]?.patient_consent || {};
+
+      if (!checkConsent(consentData, role, category)) {
+        return res.status(403).json({ error: 'Access denied: patient has not granted consent for this data category' });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Consent check error:', error);
+      next(); // fail-open: don't block on DB errors
+    }
+  };
+}
+
+// ============================================================================
 // Global CSRF enforcement for all mutating routes
 // ============================================================================
 
@@ -488,16 +690,16 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // Create user with email_verification_token
+    // Create user with email_verification_token_hash
     const passwordHash = await hashPassword(password);
     const verificationToken = generateToken();
     const verificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     const result = await db.query(
-      `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token, email_verification_expires_at)
+      `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token_hash, email_verification_expires_at)
        VALUES ($1, $2, $3, $4, false, $5, $6)
        RETURNING id, email, name`,
-      [email.toLowerCase(), passwordHash, name, phone, verificationToken, verificationExpiresAt]
+      [email.toLowerCase(), passwordHash, name, phone, hashToken(verificationToken), verificationExpiresAt]
     );
 
     const user = result.rows[0];
@@ -537,7 +739,7 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, name, password_hash, is_verified FROM users WHERE email = $1',
+      'SELECT id, email, name, password_hash, is_verified, is_active FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -546,6 +748,10 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    if (user.is_active === false) {
+      return res.status(401).json({ error: 'Account is suspended. Contact support.' });
+    }
 
     const passwordValid = await verifyPassword(password, user.password_hash, user.id);
     if (!passwordValid) {
@@ -622,9 +828,9 @@ router.post('/auth/verify-email/:token', async (req, res) => {
     const result = await db.query(
       `SELECT id, email, name, is_verified
        FROM users
-       WHERE email_verification_token = $1
+       WHERE email_verification_token_hash = $1
          AND email_verification_expires_at > CURRENT_TIMESTAMP`,
-      [token]
+      [hashToken(token)]
     );
 
     if (result.rows.length === 0) {
@@ -639,7 +845,7 @@ router.post('/auth/verify-email/:token', async (req, res) => {
 
     await db.query(
       `UPDATE users
-       SET is_verified = true, email_verification_token = NULL, email_verification_expires_at = NULL
+       SET is_verified = true, email_verification_token_hash = NULL, email_verification_expires_at = NULL
        WHERE id = $1`,
       [user.id]
     );
@@ -672,8 +878,8 @@ router.post('/auth/resend-verification', authMiddleware, async (req, res) => {
     const verificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     await db.query(
-      'UPDATE users SET email_verification_token = $1, email_verification_expires_at = $2 WHERE id = $3',
-      [verificationToken, verificationExpiresAt, user.id]
+      'UPDATE users SET email_verification_token_hash = $1, email_verification_expires_at = $2 WHERE id = $3',
+      [hashToken(verificationToken), verificationExpiresAt, user.id]
     );
 
     const verificationUrl = `${APP_BASE_URL}/verify-email/${verificationToken}`;
@@ -683,6 +889,78 @@ router.post('/auth/resend-verification', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Resend verification error:', error);
     res.status(500).json({ error: 'Failed to resend verification email' });
+  }
+});
+
+// Forgot password — generate and store a reset token
+router.post('/auth/forgot-password', passwordResetRateLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const result = await db.query('SELECT id, email, name FROM users WHERE email = $1', [email.toLowerCase()]);
+
+    // Always respond the same way to prevent user enumeration
+    if (result.rows.length === 0) {
+      return res.json({ success: true, message: 'If that email is registered, you will receive a reset link.' });
+    }
+
+    const user = result.rows[0];
+    const resetToken = generateToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, hashToken(resetToken), expiresAt]
+    );
+
+    const resetUrl = `${APP_BASE_URL}/reset-password?token=${resetToken}`;
+    await sendPasswordResetEmail(user.email, user.name, resetUrl);
+
+    const response = { success: true, message: 'If that email is registered, you will receive a reset link.' };
+    // Expose token in non-production so it can be used without email
+    if (process.env.NODE_ENV !== 'production') {
+      response.resetToken = resetToken;
+      response.resetUrl = resetUrl;
+    }
+    res.json(response);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// Reset password — validate token and update password
+router.post('/auth/reset-password', passwordResetRateLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const result = await db.query(
+      `SELECT prt.user_id, u.email
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token = $1 AND prt.expires_at > CURRENT_TIMESTAMP`,
+      [hashToken(token)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+    }
+
+    const { user_id, email } = result.rows[0];
+    const passwordHash = await hashPassword(password);
+
+    await db.query('UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [passwordHash, user_id]);
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user_id]);
+
+    console.log(`[Security] Password reset completed for: ${email}`);
+    res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
@@ -967,10 +1245,10 @@ router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canI
     const expiresAt = new Date(Date.now() + INVITATION_EXPIRES_HOURS * 60 * 60 * 1000);
 
     const result = await db.query(
-      `INSERT INTO invitations (circle_id, invited_by, email, name, role, token, expires_at)
+      `INSERT INTO invitations (circle_id, invited_by, email, name, role, token_hash, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [circleId, req.user.id, email.toLowerCase(), email.split('@')[0], role, token, expiresAt]
+      [circleId, req.user.id, email.toLowerCase(), email.split('@')[0], role, hashToken(token), expiresAt]
     );
 
     const invitation = result.rows[0];
@@ -1004,8 +1282,8 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
       `SELECT i.*, cc.name as circle_name
        FROM invitations i
        JOIN care_circles cc ON i.circle_id = cc.id
-       WHERE i.token = $1 AND i.status = 'pending'`,
-      [token]
+       WHERE i.token_hash = $1 AND i.status = 'pending'`,
+      [hashToken(token)]
     );
 
     if (inviteResult.rows.length === 0) {
@@ -1082,7 +1360,7 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
 });
 
 // Get invitation info (for accept page)
-router.get('/invitations/:token', async (req, res) => {
+router.get('/invitations/:token', invitationRateLimiter, async (req, res) => {
   try {
     const { token } = req.params;
 
@@ -1092,8 +1370,8 @@ router.get('/invitations/:token', async (req, res) => {
        FROM invitations i
        JOIN care_circles cc ON i.circle_id = cc.id
        JOIN users u ON i.invited_by = u.id
-       WHERE i.token = $1 AND i.status = 'pending'`,
-      [token]
+       WHERE i.token_hash = $1 AND i.status = 'pending'`,
+      [hashToken(token)]
     );
 
     if (result.rows.length === 0) {
@@ -1208,6 +1486,65 @@ function parsePagination(query, defaultLimit = 100) {
   return { limit, offset };
 }
 
+// ============================================================================
+// Consent Sync Routes (patient device → server)
+// ============================================================================
+
+// Sync patient consent preferences from device to server (owner only)
+router.put('/circles/:circleId/consent', authMiddleware, requirePermission('canEditCircle'), async (req, res) => {
+  try {
+    const { circleId } = req.params;
+    const { consent } = req.body;
+
+    if (!consent || typeof consent !== 'object') {
+      return res.status(400).json({ error: 'consent object is required' });
+    }
+
+    // Only the owner (patient) may update consent
+    if (req.member.role !== 'owner') {
+      return res.status(403).json({ error: 'Only the circle owner can update consent settings' });
+    }
+
+    await db.query(
+      'UPDATE care_circles SET patient_consent = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [JSON.stringify(consent), circleId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Update consent error:', error);
+    res.status(500).json({ error: 'Failed to update consent' });
+  }
+});
+
+// Get stored consent preferences (owner only)
+router.get('/circles/:circleId/consent', authMiddleware, async (req, res) => {
+  try {
+    const { circleId } = req.params;
+
+    const memberResult = await db.query(
+      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+      [circleId, req.user.id]
+    );
+    if (memberResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Not a member of this circle' });
+    }
+    if (memberResult.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only the circle owner can view consent settings' });
+    }
+
+    const result = await db.query(
+      'SELECT patient_consent FROM care_circles WHERE id = $1',
+      [circleId]
+    );
+
+    res.json({ consent: result.rows[0]?.patient_consent || {} });
+  } catch (error) {
+    console.error('Get consent error:', error);
+    res.status(500).json({ error: 'Failed to get consent' });
+  }
+});
+
 // Get sync data for a circle — supports optional ?limit=&offset= for large vaults
 router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
   try {
@@ -1228,26 +1565,39 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
     const role = memberResult.rows[0].role;
     const permissions = ROLE_PERMISSIONS[role];
 
+    // Load patient consent prefs — used to gate each data category below
+    const circleResult = await db.query(
+      'SELECT patient_consent FROM care_circles WHERE id = $1',
+      [circleId]
+    );
+    const consentData = circleResult.rows[0]?.patient_consent || {};
+
     const paginationSuffix = paginated ? ` LIMIT ${limit} OFFSET ${offset}` : '';
 
-    // Get vault data based on permissions
+    // Get vault data based on permissions AND patient consent
+    const canSeeHealth    = permissions.canViewMedications && checkConsent(consentData, role, 'health_data');
+    const canSeeDoctors   = permissions.canViewDoctors     && checkConsent(consentData, role, 'health_data');
+    const canSeeAppts     = permissions.canViewAppointments && checkConsent(consentData, role, 'health_data');
+    const canSeeContacts  = permissions.canViewContacts    && checkConsent(consentData, role, 'contact_info');
+    const canSeeAccounts  = permissions.canViewAccounts    && checkConsent(consentData, role, 'financial_data');
+
     const [medications, doctors, appointments, contacts, notes, accounts] = await Promise.all([
-      permissions.canViewMedications
+      canSeeHealth
         ? db.query(`SELECT * FROM vault_medications WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewDoctors
+      canSeeDoctors
         ? db.query(`SELECT * FROM vault_doctors WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewAppointments
+      canSeeAppts
         ? db.query(`SELECT * FROM vault_appointments WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
-      permissions.canViewContacts
+      canSeeContacts
         ? db.query(`SELECT * FROM vault_contacts WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
       permissions.canViewAllNotes
         ? db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 ORDER BY created_at DESC${paginationSuffix}`, [circleId])
         : db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 AND author_id = $2 ORDER BY created_at DESC${paginationSuffix}`, [circleId, req.user.id]),
-      permissions.canViewAccounts
+      canSeeAccounts
         ? db.query(`SELECT * FROM vault_accounts WHERE circle_id = $1${paginationSuffix}`, [circleId])
         : { rows: [] },
     ]);
@@ -1278,12 +1628,13 @@ function vaultListRoute(table, permissionKey, transform) {
       const { limit, offset } = parsePagination(req.query, 50);
 
       const memberResult = await db.query(
-        'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+        'SELECT cm.role, u.name as accessor_name FROM circle_members cm JOIN users u ON cm.user_id = u.id WHERE cm.circle_id = $1 AND cm.user_id = $2',
         [circleId, req.user.id]
       );
       if (memberResult.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
 
-      const permissions = ROLE_PERMISSIONS[memberResult.rows[0].role];
+      const { role, accessor_name } = memberResult.rows[0];
+      const permissions = ROLE_PERMISSIONS[role];
       if (!permissions[permissionKey]) return res.status(403).json({ error: 'Permission denied' });
 
       const countResult = await db.query(`SELECT COUNT(*) FROM ${table} WHERE circle_id = $1`, [circleId]);
@@ -1294,6 +1645,21 @@ function vaultListRoute(table, permissionKey, transform) {
         [circleId, limit, offset]
       );
 
+      // Log caregiver data access so the patient can see who viewed their data
+      if (role !== 'owner') {
+        db.query(
+          `INSERT INTO audit_logs (user_id, circle_id, action, category, description, metadata, ip_address, user_agent)
+           VALUES ($1, $2, $3, 'vault', $4, $5, $6, $7)`,
+          [
+            req.user.id, circleId,
+            'caregiver_data_viewed',
+            `${accessor_name} (${role}) viewed ${table.replace('vault_', '')}`,
+            JSON.stringify({ table, role, accessorName: accessor_name, count: total }),
+            req.ip, req.headers['user-agent'],
+          ]
+        ).catch(err => console.error('[Audit] Failed to log caregiver access:', err));
+      }
+
       const rows = transform ? result.rows.map(transform) : result.rows;
       res.json({ data: rows, pagination: { total, limit, offset, pages: Math.ceil(total / limit) } });
     } catch (error) {
@@ -1303,12 +1669,12 @@ function vaultListRoute(table, permissionKey, transform) {
   };
 }
 
-router.get('/circles/:circleId/vault/medications', authMiddleware, vaultListRoute('vault_medications', 'canViewMedications', null));
-router.get('/circles/:circleId/vault/doctors', authMiddleware, vaultListRoute('vault_doctors', 'canViewDoctors', null));
-router.get('/circles/:circleId/vault/appointments', authMiddleware, vaultListRoute('vault_appointments', 'canViewAppointments', null));
-router.get('/circles/:circleId/vault/contacts', authMiddleware, vaultListRoute('vault_contacts', 'canViewContacts', null));
-router.get('/circles/:circleId/vault/accounts', authMiddleware, vaultListRoute('vault_accounts', 'canViewAccounts', decryptAccount));
-router.get('/circles/:circleId/vault/documents', authMiddleware, vaultListRoute('vault_documents', 'canViewDocuments', stripDocumentFileData));
+router.get('/circles/:circleId/vault/medications',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_medications',  'canViewMedications', null));
+router.get('/circles/:circleId/vault/doctors',        authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_doctors',       'canViewDoctors',    null));
+router.get('/circles/:circleId/vault/appointments',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_appointments',  'canViewAppointments', null));
+router.get('/circles/:circleId/vault/contacts',       authMiddleware, requireConsent('contact_info'),       vaultListRoute('vault_contacts',      'canViewContacts',   null));
+router.get('/circles/:circleId/vault/accounts',       authMiddleware, requireConsent('financial_data'),     vaultListRoute('vault_accounts',      'canViewAccounts',   decryptAccount));
+router.get('/circles/:circleId/vault/documents',      authMiddleware, requireConsent('personal_documents'), vaultListRoute('vault_documents',     'canViewDocuments',  stripDocumentFileData));
 
 // Sync changes from device (bidirectional sync)
 router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
@@ -2180,7 +2546,7 @@ router.delete('/circles/:circleId/notes/:noteId', authMiddleware, async (req, re
 // ============================================================================
 
 // Get health data for a circle
-router.get('/circles/:circleId/health', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { type, days = 7 } = req.query;
@@ -2240,7 +2606,7 @@ router.get('/circles/:circleId/health', authMiddleware, async (req, res) => {
 });
 
 // Sync health data from device
-router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { readings } = req.body;
@@ -2295,6 +2661,12 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
         [circleId, reading.dataType, JSON.stringify(reading.value), reading.unit, reading.measuredAt, reading.source || 'device', reading.notes]
       );
       inserted++;
+
+      try {
+        await checkVitalThreshold(circleId, reading.dataType, numValue, reading.unit);
+      } catch (thresholdErr) {
+        console.error('Vital threshold check failed:', thresholdErr);
+      }
     }
 
     // Broadcast to caregivers
@@ -2312,7 +2684,7 @@ router.post('/circles/:circleId/health', authMiddleware, async (req, res) => {
 // ============================================================================
 
 // Get medication adherence data
-router.get('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { days = 7 } = req.query;
@@ -2406,7 +2778,7 @@ router.get('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
 });
 
 // Sync medication doses from device
-router.post('/circles/:circleId/adherence', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { doses } = req.body;
@@ -2716,7 +3088,7 @@ router.post('/circles/:circleId/alerts/:alertId/dismiss', authMiddleware, async 
 // ============================================================================
 
 // Get check-in logs
-router.get('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { days = 7 } = req.query;
@@ -2776,7 +3148,7 @@ router.get('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
 });
 
 // Sync check-ins from device
-router.post('/circles/:circleId/checkins', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { checkins } = req.body;
@@ -2953,6 +3325,56 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
 // ============================================================================
 
 const wsClients = new Map(); // circleId -> Set of WebSocket connections
+
+const VITAL_THRESHOLDS = {
+  heart_rate:               { low: 50, high: 110, unit: 'bpm',    lowSeverity: 'high', highSeverity: 'high' },
+  blood_pressure_systolic:  { low: 85, high: 140, unit: 'mmHg',   lowSeverity: 'high', highSeverity: 'high' },
+  blood_pressure_diastolic: { low: 55, high: 95,  unit: 'mmHg',   lowSeverity: 'medium', highSeverity: 'medium' },
+  temperature:              { low: 35.5, high: 38.5, unit: '°C',  lowSeverity: 'medium', highSeverity: 'high' },
+  glucose:                  { low: 60, high: 180, unit: 'mg/dL',  lowSeverity: 'high', highSeverity: 'medium' },
+  spo2:                     { low: 90, high: null, unit: '%',     lowSeverity: 'critical', highSeverity: null },
+  weight:                   { low: null, high: null, unit: 'kg',  lowSeverity: null, highSeverity: null },
+};
+
+async function checkVitalThreshold(circleId, dataType, numValue, unit) {
+  const threshold = VITAL_THRESHOLDS[dataType];
+  if (!threshold || typeof numValue !== 'number') return;
+
+  let severity = null;
+  let direction = null;
+
+  if (threshold.low !== null && numValue < threshold.low) {
+    severity = threshold.lowSeverity;
+    direction = 'low';
+  } else if (threshold.high !== null && numValue > threshold.high) {
+    severity = threshold.highSeverity;
+    direction = 'high';
+  }
+
+  if (!severity) return;
+
+  const label = dataType.replace(/_/g, ' ');
+  const title = `Abnormal ${label} detected`;
+  const message = direction === 'low'
+    ? `${label} of ${numValue} ${threshold.unit} is below the safe threshold of ${threshold.low} ${threshold.unit}.`
+    : `${label} of ${numValue} ${threshold.unit} is above the safe threshold of ${threshold.high} ${threshold.unit}.`;
+
+  const result = await db.query(
+    `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [circleId, 'abnormal_vital', severity, title, message,
+     JSON.stringify({ data_type: dataType, value: numValue, unit: unit || threshold.unit, threshold })]
+  );
+
+  broadcastToCircle(circleId, {
+    type: 'alert',
+    alertType: 'abnormal_vital',
+    alertId: result.rows[0].id,
+    severity,
+    dataType,
+  });
+}
 
 function broadcastToCircle(circleId, event) {
   const clients = wsClients.get(circleId);

@@ -6,9 +6,6 @@
 // Define React Native globals
 (global as any).__DEV__ = true;
 
-// Mock timers
-jest.useFakeTimers();
-
 // Mock console methods to reduce noise
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
@@ -185,8 +182,7 @@ const mockIndexedDB = {
 
 (global as any).indexedDB = mockIndexedDB;
 
-// Clean up between tests
+// Clean up between tests — clearMocks: true in jest.config.js handles mock history reset.
 afterEach(() => {
   jest.clearAllMocks();
-  jest.clearAllTimers();
 });

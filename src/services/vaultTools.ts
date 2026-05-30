@@ -217,7 +217,8 @@ async function lookupAccount(keywords: string[]): Promise<VaultToolResult> {
   let response = `Here's your ${data.name} information:\n`;
 
   if (data.accountNumber) {
-    response += `Account Number: ${data.accountNumber}\n`;
+    const masked = '****' + String(data.accountNumber).slice(-4);
+    response += `Account Number: ${masked}\n`;
   }
   if (data.ifscCode) {
     response += `IFSC Code: ${data.ifscCode}\n`;

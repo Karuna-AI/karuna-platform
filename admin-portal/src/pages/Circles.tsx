@@ -1,19 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
+import type { AdminCircle, Pagination } from '../types';
 
 export default function Circles() {
-  const [circles, setCircles] = useState<any[]>([]);
-  const [pagination, setPagination] = useState<any>({ page: 1, limit: 50, total: 0 });
-  const [search, setSearch] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [circles, setCircles] = useState<AdminCircle[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 1 });
+  const [search, setSearch] = useState(searchParams.get('search') || '');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const navigate = useNavigate();
 
   const debouncedSearch = useDebounce(search, 300);
 
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (debouncedSearch) params.search = debouncedSearch;
+    setSearchParams(params, { replace: true });
+  }, [debouncedSearch]);
+
   const loadCircles = useCallback(async (page = 1, searchTerm = debouncedSearch) => {
     setIsLoading(true);
+    setLoadError('');
     const result = await api.getCircles({
       page,
       limit: 50,
@@ -22,6 +32,8 @@ export default function Circles() {
     if (result.success) {
       setCircles(result.data.circles);
       setPagination(result.data.pagination);
+    } else {
+      setLoadError(result.error || 'Failed to load circles');
     }
     setIsLoading(false);
   }, [debouncedSearch]);
@@ -30,13 +42,6 @@ export default function Circles() {
   useEffect(() => {
     loadCircles(1, debouncedSearch);
   }, [debouncedSearch]);
-
-  // Reload when page changes
-  useEffect(() => {
-    if (pagination.page > 1) {
-      loadCircles(pagination.page, debouncedSearch);
-    }
-  }, [pagination.page, debouncedSearch]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +78,11 @@ export default function Circles() {
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadCircles(1)} style={{ marginTop: '1rem' }}>Retry</button>
+          </div>
         ) : circles.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🔵</div>
@@ -131,14 +141,14 @@ export default function Circles() {
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page <= 1}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  onClick={() => loadCircles(pagination.page - 1, debouncedSearch)}
                 >
                   Previous
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
                   disabled={pagination.page >= pagination.pages}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  onClick={() => loadCircles(pagination.page + 1, debouncedSearch)}
                 >
                   Next
                 </button>

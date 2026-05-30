@@ -25,7 +25,7 @@ export function OnboardingCompleteScreen({
   const [summary, setSummary] = useState<string[]>([]);
 
   useEffect(() => {
-    buildSummary();
+    buildSummary().catch(() => {});
     if (Platform.OS !== 'web') { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }
   }, []);
 

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { vaultService } from './vault';
+import { secureStorageService } from './secureStorage';
 
 const STORAGE_KEYS = {
   CARE_CIRCLE_ID: '@karuna_care_circle_id',
@@ -9,6 +10,8 @@ const STORAGE_KEYS = {
   AUTH_TOKEN: '@karuna_care_auth_token',
 };
 
+const MAX_CHANGE_RETRIES = 5;
+
 interface SyncChange {
   id: string;
   entityType: string;
@@ -17,6 +20,7 @@ interface SyncChange {
   data: Record<string, unknown>;
   timestamp: string;
   deviceId: string;
+  retryCount?: number;
 }
 
 interface SyncResult {
@@ -52,7 +56,8 @@ class CareCircleSyncService {
 
     // Load saved state
     const savedCircleId = await AsyncStorage.getItem(STORAGE_KEYS.CARE_CIRCLE_ID);
-    const savedToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    const savedTokenResult = await secureStorageService.getCaregiverToken();
+    const savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
     const savedChanges = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_CHANGES);
 
     if (savedCircleId) this.careCircleId = savedCircleId;
@@ -106,7 +111,12 @@ class CareCircleSyncService {
   async leaveCircle(): Promise<void> {
     this.disconnectWebSocket();
     this.careCircleId = null;
-    await AsyncStorage.removeItem(STORAGE_KEYS.CARE_CIRCLE_ID);
+    this.pendingChanges = [];
+    await AsyncStorage.multiRemove([
+      STORAGE_KEYS.CARE_CIRCLE_ID,
+      STORAGE_KEYS.PENDING_CHANGES,
+      STORAGE_KEYS.LAST_SYNC,
+    ]);
     this.notifyListeners('left_circle');
   }
 
@@ -123,7 +133,7 @@ class CareCircleSyncService {
   // Set authentication token (from caregiver login)
   async setAuthToken(token: string): Promise<void> {
     this.authToken = token;
-    await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+    await secureStorageService.storeCaregiverToken(token);
   }
 
   // Connect to WebSocket for real-time updates
@@ -294,21 +304,33 @@ class CareCircleSyncService {
       }
 
       const result = await response.json();
+      const syncedCount = result.synced ?? this.pendingChanges.length;
 
       // Clear synced changes
       this.pendingChanges = [];
       await this.savePendingChanges();
       await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
 
-      this.notifyListeners('push_complete', { synced: result.synced });
+      this.notifyListeners('push_complete', { synced: syncedCount });
 
       return {
         success: true,
-        synced: result.synced || this.pendingChanges.length,
+        synced: syncedCount,
         conflicts: result.conflicts || [],
       };
     } catch (error) {
       console.error('[CareCircleSync] Push error:', error);
+      // Increment retry counts; drop changes that have exceeded the cap
+      this.pendingChanges = this.pendingChanges
+        .map((c) => ({ ...c, retryCount: (c.retryCount ?? 0) + 1 }))
+        .filter((c) => {
+          if ((c.retryCount ?? 0) > MAX_CHANGE_RETRIES) {
+            console.warn('[CareCircleSync] Dropping change after max retries:', c.id, c.entityType, c.action);
+            return false;
+          }
+          return true;
+        });
+      await this.savePendingChanges();
       return { success: false, synced: 0, conflicts: [], error: 'Network error' };
     }
   }

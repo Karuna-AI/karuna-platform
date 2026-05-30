@@ -1,59 +1,168 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 
 type TabType = 'user' | 'admin';
 
+interface UserLog {
+  id: string;
+  action: string;
+  category?: string;
+  description?: string;
+  created_at: string;
+}
+
+interface AdminLog {
+  id: string;
+  action: string;
+  admin_email?: string;
+  resource_type?: string;
+  ip_address?: string;
+  created_at: string;
+}
+
+type AuditLog = UserLog | AdminLog;
+
+const PAGE_LIMIT = 50;
+
 export default function AuditLogs() {
   const [activeTab, setActiveTab] = useState<TabType>('user');
-  const [logs, setLogs] = useState<any[]>([]);
-  const [pagination, setPagination] = useState({ page: 1, limit: 100 });
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [actionFilter, setActionFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => {
-    loadLogs();
-  }, [activeTab, pagination.page]);
-
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async (currentPage: number, tab: TabType, action: string) => {
     setIsLoading(true);
-    const result = activeTab === 'user'
-      ? await api.getAuditLogs({ page: pagination.page, limit: pagination.limit })
-      : await api.getAdminAuditLogs({ page: pagination.page, limit: pagination.limit });
+    setLoadError('');
+    const params = { page: currentPage, limit: PAGE_LIMIT, action: action || undefined };
+    const result = tab === 'user'
+      ? await api.getAuditLogs(params)
+      : await api.getAdminAuditLogs(params);
 
     if (result.success) {
       setLogs(result.data.logs);
+      const p = result.data.pagination;
+      if (p) {
+        setTotalPages(p.pages ?? Math.ceil(p.total / PAGE_LIMIT));
+        setTotal(p.total ?? 0);
+      } else {
+        setTotalPages(result.data.logs.length < PAGE_LIMIT ? currentPage : currentPage + 1);
+        setTotal(0);
+      }
+    } else {
+      setLoadError(result.error || 'Failed to load audit logs');
     }
     setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadLogs(page, activeTab, actionFilter);
+  }, [page, activeTab, actionFilter, loadLogs]);
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+    setPage(1);
+    setActionFilter('');
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
+  const handleFilterChange = (action: string) => {
+    setActionFilter(action);
+    setPage(1);
   };
+
+  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleString();
+
+  const exportCsv = () => {
+    const headers = activeTab === 'admin'
+      ? ['Timestamp', 'Admin', 'Action', 'Resource Type', 'IP Address']
+      : ['Timestamp', 'Action', 'Category', 'Description'];
+    const rows = logs.map((log) => {
+      if (activeTab === 'admin') {
+        const al = log as AdminLog;
+        return [formatDate(al.created_at), al.admin_email || '', al.action, al.resource_type || '', al.ip_address || ''];
+      }
+      const ul = log as UserLog;
+      return [formatDate(ul.created_at), ul.action, ul.category || '', ul.description || ''];
+    });
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-logs-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const paginationStart = (page - 1) * PAGE_LIMIT + 1;
+  const paginationEnd = Math.min(page * PAGE_LIMIT, total || page * PAGE_LIMIT);
 
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Audit Logs</h1>
-        <button onClick={loadLogs} className="btn btn-secondary">Refresh</button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button onClick={exportCsv} className="btn btn-secondary" disabled={logs.length === 0}>
+            Export CSV
+          </button>
+          <button onClick={() => loadLogs(page, activeTab, actionFilter)} className="btn btn-secondary">
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="tabs">
         <button
           className={`tab ${activeTab === 'user' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('user'); setPagination({ ...pagination, page: 1 }); }}
+          onClick={() => handleTabChange('user')}
         >
           User Activity
         </button>
         <button
           className={`tab ${activeTab === 'admin' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('admin'); setPagination({ ...pagination, page: 1 }); }}
+          onClick={() => handleTabChange('admin')}
         >
           Admin Actions
         </button>
       </div>
 
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ marginBottom: 0, minWidth: '200px' }}>
+            <label className="form-label">Filter by Action</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g. login, update_setting..."
+              value={actionFilter}
+              onChange={(e) => handleFilterChange(e.target.value)}
+            />
+          </div>
+          {actionFilter && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleFilterChange('')}
+              style={{ marginBottom: '0' }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="card">
         {isLoading ? (
           <div className="loading"><div className="spinner" /></div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--error, #e53e3e)' }}>
+            <p>{loadError}</p>
+            <button className="btn btn-secondary" onClick={() => loadLogs(page, activeTab, actionFilter)} style={{ marginTop: '1rem' }}>Retry</button>
+          </div>
         ) : logs.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📜</div>
@@ -83,57 +192,57 @@ export default function AuditLogs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log) => (
+                  {logs.map((log) => {
+                    const al = log as AdminLog;
+                    const ul = log as UserLog;
+                    return (
                     <tr key={log.id}>
                       <td style={{ whiteSpace: 'nowrap' }}>{formatDate(log.created_at)}</td>
                       {activeTab === 'admin' ? (
                         <>
-                          <td>{log.admin_email}</td>
+                          <td>{al.admin_email}</td>
+                          <td><span className="badge">{al.action}</span></td>
                           <td>
-                            <span className="badge">{log.action}</span>
-                          </td>
-                          <td>
-                            {log.resource_type && (
-                              <span style={{ color: 'var(--text-muted)' }}>
-                                {log.resource_type}
-                              </span>
+                            {al.resource_type && (
+                              <span style={{ color: 'var(--text-muted)' }}>{al.resource_type}</span>
                             )}
                           </td>
-                          <td style={{ color: 'var(--text-muted)' }}>{log.ip_address || '-'}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{al.ip_address || '-'}</td>
                         </>
                       ) : (
                         <>
-                          <td>
-                            <span className="badge">{log.action}</span>
-                          </td>
-                          <td>{log.category}</td>
+                          <td><span className="badge">{ul.action}</span></td>
+                          <td>{ul.category}</td>
                           <td style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {log.description || '-'}
+                            {ul.description || '-'}
                           </td>
                         </>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="pagination">
               <div className="pagination-info">
-                Page {pagination.page}
+                {total > 0
+                  ? `Showing ${paginationStart}–${paginationEnd} of ${total}`
+                  : `Page ${page}`}
               </div>
               <div className="pagination-buttons">
                 <button
                   className="btn btn-sm btn-secondary"
-                  disabled={pagination.page <= 1}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
                 >
                   Previous
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
-                  disabled={logs.length < pagination.limit}
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(page + 1)}
                 >
                   Next
                 </button>

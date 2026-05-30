@@ -48,7 +48,7 @@ export function LanguageVoiceScreen({
   const handleLanguageSelect = useCallback(async (code: LanguageCode) => {
     await setLanguage(code);
     setShowLanguagePicker(false);
-    telemetryService.track('onboarding_language_selected', { errorType: code });
+    telemetryService.track('onboarding_language_selected', { language: code });
   }, [setLanguage]);
 
   const handleTestVoice = useCallback(async () => {

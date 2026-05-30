@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import type { CareCircle, CareCircleMember, SyncData, CareCircleRole, VaultNote, DashboardData } from '../types';
 import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor } from '../components/dashboard';
@@ -46,7 +47,35 @@ export default function CareCircleDetail() {
   const [noteContent, setNoteContent] = useState('');
   const [noteCategory, setNoteCategory] = useState<VaultNote['category']>('general');
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const [noteError, setNoteError] = useState('');
 
+  // Note edit state
+  const [editingNote, setEditingNote] = useState<VaultNote | null>(null);
+  const [editNoteTitle, setEditNoteTitle] = useState('');
+  const [editNoteContent, setEditNoteContent] = useState('');
+  const [editNoteCategory, setEditNoteCategory] = useState<VaultNote['category']>('general');
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [editNoteError, setEditNoteError] = useState('');
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+
+  // Member action state
+  const [removeError, setRemoveError] = useState('');
+  const [isRemovingId, setIsRemovingId] = useState<string | null>(null);
+  const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
+
+  // Alert action state
+  const [alertActionError, setAlertActionError] = useState('');
+
+  // Circle settings state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsElderlyName, setSettingsElderlyName] = useState('');
+  const [isRenamingCircle, setIsRenamingCircle] = useState(false);
+  const [renameError, setRenameError] = useState('');
+  const [isDeletingCircle, setIsDeletingCircle] = useState(false);
+  const [deleteCircleError, setDeleteCircleError] = useState('');
+
+  const { showToast } = useToast();
   const currentMember = members.find((m) => m.userId === user?.id);
   const canInvite = currentMember?.permissions.canInviteMembers;
   const canAddNotes = currentMember?.permissions.canAddNotes;
@@ -125,28 +154,41 @@ export default function CareCircleDetail() {
       setCircle(result.data);
       setMembers(result.data.members || []);
 
-      // Load dashboard data
-      const dashResult = await api.getDashboard(id!);
+      // Load dashboard and vault data in parallel
+      const [dashResult, syncResult] = await Promise.all([
+        api.getDashboard(id!),
+        api.getSyncData(id!),
+      ]);
       if (dashResult.success && dashResult.data) {
         setDashboardData(dashResult.data);
+      }
+      if (syncResult.success && syncResult.data) {
+        setVaultData(syncResult.data);
       }
     } else {
       setError(result.error || 'Failed to load care circle');
     }
     setIsLoading(false);
+    setIsVaultLoading(false);
   };
 
   const handleAcknowledgeAlert = async (alertId: string) => {
+    setAlertActionError('');
     const result = await api.acknowledgeAlert(id!, alertId);
     if (result.success) {
       loadDashboardData();
+    } else {
+      setAlertActionError(result.error || 'Failed to acknowledge alert');
     }
   };
 
   const handleDismissAlert = async (alertId: string) => {
+    setAlertActionError('');
     const result = await api.dismissAlert(id!, alertId);
     if (result.success) {
       loadDashboardData();
+    } else {
+      setAlertActionError(result.error || 'Failed to dismiss alert');
     }
   };
 
@@ -163,6 +205,7 @@ export default function CareCircleDetail() {
 
     if (result.success) {
       setInviteSuccess(`Invitation sent to ${inviteEmail}`);
+      showToast(`Invitation sent to ${inviteEmail}`, 'success');
       setInviteEmail('');
       setInviteRole('viewer');
     } else {
@@ -172,17 +215,34 @@ export default function CareCircleDetail() {
     setIsInviting(false);
   };
 
+  const handleChangeRole = async (memberId: string, newRole: CareCircleRole) => {
+    setChangingRoleId(memberId);
+    const result = await api.updateMemberRole(id!, memberId, newRole);
+    setChangingRoleId(null);
+    if (result.success) {
+      setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role: newRole } : m));
+    } else {
+      showToast(result.error || 'Failed to update member role', 'error');
+    }
+  };
+
   const handleRemoveMember = async (memberId: string) => {
     if (!confirm('Are you sure you want to remove this member?')) return;
 
+    setRemoveError('');
+    setIsRemovingId(memberId);
     const result = await api.removeMember(id!, memberId);
+    setIsRemovingId(null);
     if (result.success) {
       setMembers(members.filter((m) => m.id !== memberId));
+    } else {
+      setRemoveError(result.error || 'Failed to remove member');
     }
   };
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
+    setNoteError('');
     setIsAddingNote(true);
 
     const result = await api.addNote(id!, {
@@ -190,6 +250,8 @@ export default function CareCircleDetail() {
       content: noteContent,
       category: noteCategory,
     });
+
+    setIsAddingNote(false);
 
     if (result.success && result.data) {
       if (vaultData) {
@@ -202,9 +264,78 @@ export default function CareCircleDetail() {
       setNoteTitle('');
       setNoteContent('');
       setNoteCategory('general');
+      setNoteError('');
+      showToast('Note added', 'success');
+    } else {
+      setNoteError(result.error || 'Failed to add note');
     }
+  };
 
-    setIsAddingNote(false);
+  const handleEditNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNote) return;
+    setEditNoteError('');
+    setIsEditingNote(true);
+    const result = await api.updateNote(id!, editingNote.id, {
+      title: editNoteTitle,
+      content: editNoteContent,
+      category: editNoteCategory,
+    });
+    setIsEditingNote(false);
+    if (result.success && result.data) {
+      if (vaultData) {
+        setVaultData({
+          ...vaultData,
+          notes: vaultData.notes.map((n) => n.id === editingNote.id ? result.data! : n),
+        });
+      }
+      setEditingNote(null);
+    } else {
+      setEditNoteError(result.error || 'Failed to update note');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    setDeletingNoteId(noteId);
+    const result = await api.deleteNote(id!, noteId);
+    setDeletingNoteId(null);
+    if (result.success && vaultData) {
+      setVaultData({
+        ...vaultData,
+        notes: vaultData.notes.filter((n) => n.id !== noteId),
+      });
+    } else if (!result.success) {
+      showToast(result.error || 'Failed to delete note', 'error');
+    }
+  };
+
+  const handleRenameCircle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRenameError('');
+    setIsRenamingCircle(true);
+    const result = await api.updateCareCircle(id!, { name: settingsName, elderlyName: settingsElderlyName });
+    setIsRenamingCircle(false);
+    if (result.success && result.data) {
+      setCircle(result.data);
+      setShowSettingsModal(false);
+      showToast('Circle settings saved', 'success');
+    } else {
+      setRenameError(result.error || 'Failed to update circle');
+    }
+  };
+
+  const handleDeleteCircle = async () => {
+    if (!confirm(`Delete "${circle?.name}"? This will permanently remove all circle data and cannot be undone.`)) return;
+    setDeleteCircleError('');
+    setIsDeletingCircle(true);
+    const result = await api.deleteCareCircle(id!);
+    setIsDeletingCircle(false);
+    if (result.success) {
+      navigate('/');
+    } else {
+      setDeleteCircleError(result.error || 'Failed to delete circle');
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -268,11 +399,27 @@ export default function CareCircleDetail() {
               </span>
             </div>
           </div>
-          {currentMember && (
-            <span className={`badge badge-${currentMember.role}`}>
-              {currentMember.role}
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {currentMember?.role === 'owner' && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => {
+                  setSettingsName(circle.name);
+                  setSettingsElderlyName(circle.elderlyName);
+                  setRenameError('');
+                  setDeleteCircleError('');
+                  setShowSettingsModal(true);
+                }}
+              >
+                Settings
+              </button>
+            )}
+            {currentMember && (
+              <span className={`badge badge-${currentMember.role}`}>
+                {currentMember.role}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -310,6 +457,9 @@ export default function CareCircleDetail() {
       {/* Dashboard Tab */}
       {activeTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {alertActionError && (
+            <div className="alert alert-error">{alertActionError}</div>
+          )}
           {isDashboardLoading && !dashboardData && (
             <div className="loading">
               <div className="spinner" />
@@ -512,6 +662,9 @@ export default function CareCircleDetail() {
             )}
           </div>
 
+          {removeError && (
+            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{removeError}</div>
+          )}
           <table className="table">
             <thead>
               <tr>
@@ -528,7 +681,22 @@ export default function CareCircleDetail() {
                   <td>{member.name}</td>
                   <td>{member.email}</td>
                   <td>
-                    <span className={`badge badge-${member.role}`}>{member.role}</span>
+                    {currentMember?.permissions.canRemoveMembers &&
+                      member.userId !== user?.id &&
+                      member.role !== 'owner' ? (
+                        <select
+                          className="form-select"
+                          value={member.role}
+                          onChange={(e) => handleChangeRole(member.id, e.target.value as CareCircleRole)}
+                          disabled={changingRoleId === member.id}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+                        >
+                          <option value="viewer">viewer</option>
+                          <option value="caregiver">caregiver</option>
+                        </select>
+                    ) : (
+                      <span className={`badge badge-${member.role}`}>{member.role}</span>
+                    )}
                   </td>
                   <td>{formatDate(member.joinedAt)}</td>
                   <td style={{ textAlign: 'right' }}>
@@ -538,8 +706,9 @@ export default function CareCircleDetail() {
                         <button
                           className="btn btn-danger btn-sm"
                           onClick={() => handleRemoveMember(member.id)}
+                          disabled={isRemovingId === member.id}
                         >
-                          Remove
+                          {isRemovingId === member.id ? 'Removing...' : 'Remove'}
                         </button>
                       )}
                   </td>
@@ -749,9 +918,34 @@ export default function CareCircleDetail() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <h4>{note.title}</h4>
-                      <span className="badge" style={{ background: 'var(--bg-tertiary)' }}>
-                        {note.category}
-                      </span>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <span className="badge" style={{ background: 'var(--bg-tertiary)' }}>
+                          {note.category}
+                        </span>
+                        {(canAddNotes && note.authorId === user?.id) && (
+                          <>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => {
+                                setEditingNote(note);
+                                setEditNoteTitle(note.title);
+                                setEditNoteContent(note.content);
+                                setEditNoteCategory(note.category);
+                                setEditNoteError('');
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleDeleteNote(note.id)}
+                              disabled={deletingNoteId === note.id}
+                            >
+                              {deletingNoteId === note.id ? '...' : 'Delete'}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                     <p style={{ marginBottom: '0.5rem' }}>{note.content}</p>
                     <p className="text-muted" style={{ fontSize: '0.875rem' }}>
@@ -878,17 +1072,150 @@ export default function CareCircleDetail() {
                 />
               </div>
 
+              {noteError && (
+                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{noteError}</div>
+              )}
               <div className="modal-footer">
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setShowNoteModal(false)}
+                  onClick={() => { setShowNoteModal(false); setNoteError(''); }}
                   disabled={isAddingNote}
                 >
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isAddingNote}>
                   {isAddingNote ? 'Adding...' : 'Add Note'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Circle Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Circle Settings</h2>
+              <button className="modal-close" onClick={() => setShowSettingsModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleRenameCircle}>
+                <div className="form-group">
+                  <label className="form-label">Circle Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={settingsName}
+                    onChange={(e) => setSettingsName(e.target.value)}
+                    required
+                    disabled={isRenamingCircle}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Care Recipient Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={settingsElderlyName}
+                    onChange={(e) => setSettingsElderlyName(e.target.value)}
+                    required
+                    disabled={isRenamingCircle}
+                  />
+                </div>
+                {renameError && (
+                  <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{renameError}</div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '2rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowSettingsModal(false)} disabled={isRenamingCircle}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={isRenamingCircle}>
+                    {isRenamingCircle ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+                <h3 style={{ color: 'var(--error)', marginBottom: '0.5rem' }}>Danger Zone</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                  Permanently deletes this care circle, all health data, medications, notes, and member associations.
+                </p>
+                {deleteCircleError && (
+                  <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{deleteCircleError}</div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={handleDeleteCircle}
+                  disabled={isDeletingCircle}
+                >
+                  {isDeletingCircle ? 'Deleting...' : 'Delete Circle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Note Modal */}
+      {editingNote && (
+        <div className="modal-overlay" onClick={() => setEditingNote(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Edit Note</h2>
+              <button className="modal-close" onClick={() => setEditingNote(null)}>×</button>
+            </div>
+            <form onSubmit={handleEditNote}>
+              <div className="form-group">
+                <label className="form-label">Title</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editNoteTitle}
+                  onChange={(e) => setEditNoteTitle(e.target.value)}
+                  required
+                  disabled={isEditingNote}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select
+                  className="form-select"
+                  value={editNoteCategory}
+                  onChange={(e) => setEditNoteCategory(e.target.value as VaultNote['category'])}
+                  disabled={isEditingNote}
+                >
+                  <option value="general">General</option>
+                  <option value="medical">Medical</option>
+                  <option value="financial">Financial</option>
+                  <option value="personal">Personal</option>
+                  <option value="reminder">Reminder</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Content</label>
+                <textarea
+                  className="form-input"
+                  value={editNoteContent}
+                  onChange={(e) => setEditNoteContent(e.target.value)}
+                  rows={4}
+                  required
+                  disabled={isEditingNote}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+              {editNoteError && (
+                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{editNoteError}</div>
+              )}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingNote(null)} disabled={isEditingNote}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isEditingNote}>
+                  {isEditingNote ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
