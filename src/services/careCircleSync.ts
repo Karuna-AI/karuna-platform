@@ -90,8 +90,23 @@ class CareCircleSyncService {
         return { success: false, error: error.error || 'Failed to join circle' };
       }
 
-      const circle = await response.json();
+      // The accept endpoint returns { success, token, user, circle } — NOT a
+      // bare circle. Earlier code read circle.id from the top level which is
+      // undefined, then AsyncStorage.setItem(KEY, undefined) threw → catch
+      // returned 'Network error' even though the server had accepted the
+      // invitation. Extract the right fields and persist the auth token too.
+      const data = await response.json();
+      const circle = data.circle;
+      const authToken = data.token;
+      if (!circle || !circle.id) {
+        console.error('[CareCircleSync] Join: unexpected accept response shape', data);
+        return { success: false, error: 'Unexpected server response' };
+      }
       this.careCircleId = circle.id;
+      if (authToken) {
+        this.authToken = authToken;
+        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken);
+      }
       await AsyncStorage.setItem(STORAGE_KEYS.CARE_CIRCLE_ID, circle.id);
 
       // Connect WebSocket
