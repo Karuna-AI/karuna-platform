@@ -34,8 +34,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const validateToken = async () => {
     const result = await api.checkSession();
     if (result.success && result.data) {
+      // /auth/me returns { user, circles, emailVerified } — unwrap to match the
+      // shape login() / register() use. Without this, state.user is the wrapper
+      // and `state.user.name` is undefined on every page reload.
       setState({
-        user: result.data,
+        user: result.data.user ?? result.data,
         token: null,
         isAuthenticated: true,
         isLoading: false,
