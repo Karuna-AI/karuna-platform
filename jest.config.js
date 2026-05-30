@@ -55,6 +55,7 @@ module.exports = {
     '^expo-constants$': '<rootDir>/src/web/expo-constants-mock.ts',
     '^expo-av$': '<rootDir>/src/web/expo-av-mock.ts',
     '^expo-audio$': '<rootDir>/src/web/expo-audio-mock.ts',
+    '^@react-native-community/netinfo$': '<rootDir>/src/web/netinfo-mock.ts',
     '^@react-native-community/slider$': '<rootDir>/src/web/slider-mock.tsx',
   },
 

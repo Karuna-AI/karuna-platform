@@ -6,6 +6,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { OfflineBanner } from './components/OfflineBanner';
+import { View } from 'react-native';
 import { AppStateProvider, useAppState } from './context/AppStateContext';
 import { RootNavigator } from './navigation/RootNavigator';
 import LockScreen from './components/LockScreen';
@@ -39,12 +41,14 @@ function AppShell(): JSX.Element | null {
   // Still initializing onboarding state — render nothing to avoid flash
   if (isOnboardingComplete === null) return null;
 
+  // Compute body once; OfflineBanner overlays above all variants so the
+  // user always sees the connectivity hint regardless of which screen
+  // mode is active.
+  let body: JSX.Element;
   if (!isOnboardingComplete) {
-    return <OnboardingFlow onComplete={onOnboardingComplete} />;
-  }
-
-  if (isAppLocked && isSecurityInitialized) {
-    return (
+    body = <OnboardingFlow onComplete={onOnboardingComplete} />;
+  } else if (isAppLocked && isSecurityInitialized) {
+    body = (
       <LockScreen
         onUnlock={onAppUnlock}
         title="Welcome Back"
@@ -52,10 +56,8 @@ function AppShell(): JSX.Element | null {
         context="app"
       />
     );
-  }
-
-  if (isVaultUnlockPending) {
-    return (
+  } else if (isVaultUnlockPending) {
+    body = (
       <LockScreen
         onUnlock={onVaultUnlock}
         title="Unlock Vault"
@@ -63,12 +65,19 @@ function AppShell(): JSX.Element | null {
         context="vault"
       />
     );
+  } else {
+    body = (
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
+    );
   }
 
   return (
-    <NavigationContainer>
-      <RootNavigator />
-    </NavigationContainer>
+    <View style={{ flex: 1 }}>
+      <OfflineBanner />
+      {body}
+    </View>
   );
 }
 
