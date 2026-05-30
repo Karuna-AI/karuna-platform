@@ -1831,6 +1831,18 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
       }
     }
 
+    // Push a realtime nudge to other circle members so portals/devices refresh
+    // without waiting for the 30s polling fallback. Only broadcast when something
+    // actually changed; failed conflicts on their own aren't worth a notification.
+    if (applied.length > 0) {
+      broadcastToCircle(circleId, {
+        type: 'sync_update',
+        applied: applied.length,
+        conflicts: conflicts.length,
+        entityTypes: [...new Set(applied.map(a => a.entityType).filter(Boolean))],
+      });
+    }
+
     res.json({
       success: true,
       applied,
@@ -2625,16 +2637,17 @@ router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_
       return res.status(403).json({ error: 'Not a member' });
     }
 
-    // Physiological bounds for health data validation
+    // Physiological bounds for health data validation. Keys MUST match validDataTypes
+    // entries. blood_pressure has nested systolic/diastolic bounds because its value
+    // is an object {systolic, diastolic}.
     const HEALTH_RANGES = {
-      heart_rate: { min: 20, max: 300 },
-      blood_pressure_systolic: { min: 50, max: 300 },
-      blood_pressure_diastolic: { min: 20, max: 200 },
-      blood_glucose: { min: 20, max: 600 },
-      weight: { min: 10, max: 500 },
-      temperature: { min: 30, max: 45 },
+      heart_rate:        { min: 20, max: 300 },
+      blood_pressure:    { systolic: { min: 50, max: 300 }, diastolic: { min: 20, max: 200 } },
+      blood_glucose:     { min: 20, max: 600 },
+      weight:            { min: 10, max: 500 },
+      temperature:       { min: 30, max: 45 },
       oxygen_saturation: { min: 50, max: 100 },
-      steps: { min: 0, max: 200000 }
+      steps:             { min: 0, max: 200000 },
     };
 
     const validDataTypes = ['heart_rate', 'blood_pressure', 'blood_glucose', 'weight', 'temperature', 'oxygen_saturation', 'steps'];
@@ -2647,10 +2660,22 @@ router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_
         continue;
       }
 
-      // Validate numeric values against physiological bounds
-      const numValue = typeof reading.value === 'object' ? reading.value.systolic || reading.value.value : reading.value;
+      // Validate numeric values against physiological bounds. Composite types
+      // (blood_pressure) check both sub-components; scalar types check the lone value.
       const range = HEALTH_RANGES[reading.dataType];
-      if (range && typeof numValue === 'number' && (numValue < range.min || numValue > range.max)) {
+      const rawValue = reading.value;
+      let outOfRange = false;
+      if (range) {
+        if (reading.dataType === 'blood_pressure' && typeof rawValue === 'object' && rawValue !== null) {
+          const sys = rawValue.systolic, dia = rawValue.diastolic;
+          if (typeof sys === 'number' && (sys < range.systolic.min || sys > range.systolic.max)) outOfRange = true;
+          if (typeof dia === 'number' && (dia < range.diastolic.min || dia > range.diastolic.max)) outOfRange = true;
+        } else {
+          const scalar = typeof rawValue === 'object' ? rawValue?.value : rawValue;
+          if (typeof scalar === 'number' && (scalar < range.min || scalar > range.max)) outOfRange = true;
+        }
+      }
+      if (outOfRange) {
         skipped.push({ reading, reason: 'out_of_range' });
         continue;
       }
@@ -2663,7 +2688,8 @@ router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_
       inserted++;
 
       try {
-        await checkVitalThreshold(circleId, reading.dataType, numValue, reading.unit);
+        // Pass full value (object or scalar). checkVitalThreshold dispatches per dataType.
+        await checkVitalThreshold(circleId, reading.dataType, rawValue, reading.unit);
       } catch (thresholdErr) {
         console.error('Vital threshold check failed:', thresholdErr);
       }
@@ -3196,6 +3222,16 @@ router.post('/circles/:circleId/checkins', authMiddleware, requireConsent('healt
 // ============================================================================
 
 // Get comprehensive dashboard data
+// Convert snake_case keys to camelCase so portal/mobile clients can use the
+// fields directly without per-table normalization. Used by /dashboard which
+// returns raw rows from several tables.
+function camelizeRow(row) {
+  if (row == null || typeof row !== 'object') return row;
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v])
+  );
+}
+
 router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
   try {
     const { circleId } = req.params;
@@ -3273,12 +3309,12 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
     const totalDoses = adherence.taken + adherence.missed + adherence.skipped;
     adherence.rate = totalDoses > 0 ? Math.round((adherence.taken / totalDoses) * 100) : 100;
 
-    // Process activity
-    const lastActivity = activityResult.rows[0] || null;
+    // Process activity (camelize so the client doesn't need to handle snake_case)
+    const lastActivity = activityResult.rows[0] ? camelizeRow(activityResult.rows[0]) : null;
     let inactivityMinutes = null;
     let inactivityStatus = 'unknown';
     if (lastActivity) {
-      inactivityMinutes = Math.floor((Date.now() - new Date(lastActivity.recorded_at).getTime()) / 60000);
+      inactivityMinutes = Math.floor((Date.now() - new Date(lastActivity.recordedAt).getTime()) / 60000);
       if (inactivityMinutes < 60) inactivityStatus = 'active';
       else if (inactivityMinutes < 240) inactivityStatus = 'normal';
       else if (inactivityMinutes < 480) inactivityStatus = 'concerning';
@@ -3293,7 +3329,7 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
 
     res.json({
       health: {
-        latest: healthResult.rows,
+        latest: healthResult.rows.map(camelizeRow),
       },
       adherence: {
         today: adherence,
@@ -3304,7 +3340,7 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
         inactivityStatus,
       },
       alerts: {
-        active: alertsResult.rows,
+        active: alertsResult.rows.map(camelizeRow),
         count: alertsResult.rows.length,
       },
       checkins: {
@@ -3326,45 +3362,70 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
 
 const wsClients = new Map(); // circleId -> Set of WebSocket connections
 
+// Keys MUST match the dataType values accepted by POST /circles/:id/health
+// (heart_rate, blood_pressure, blood_glucose, weight, temperature, oxygen_saturation, steps).
+// Composite types (blood_pressure) carry nested systolic/diastolic thresholds; each
+// component fires its own alert when out of range.
 const VITAL_THRESHOLDS = {
-  heart_rate:               { low: 50, high: 110, unit: 'bpm',    lowSeverity: 'high', highSeverity: 'high' },
-  blood_pressure_systolic:  { low: 85, high: 140, unit: 'mmHg',   lowSeverity: 'high', highSeverity: 'high' },
-  blood_pressure_diastolic: { low: 55, high: 95,  unit: 'mmHg',   lowSeverity: 'medium', highSeverity: 'medium' },
-  temperature:              { low: 35.5, high: 38.5, unit: '°C',  lowSeverity: 'medium', highSeverity: 'high' },
-  glucose:                  { low: 60, high: 180, unit: 'mg/dL',  lowSeverity: 'high', highSeverity: 'medium' },
-  spo2:                     { low: 90, high: null, unit: '%',     lowSeverity: 'critical', highSeverity: null },
-  weight:                   { low: null, high: null, unit: 'kg',  lowSeverity: null, highSeverity: null },
+  heart_rate:        { low: 50, high: 110, unit: 'bpm',   lowSeverity: 'high',     highSeverity: 'high' },
+  blood_pressure:    {
+    unit: 'mmHg',
+    systolic:  { low: 85, high: 140, lowSeverity: 'high',   highSeverity: 'high' },
+    diastolic: { low: 55, high: 95,  lowSeverity: 'medium', highSeverity: 'medium' },
+  },
+  temperature:       { low: 35.5, high: 38.5, unit: '°C',   lowSeverity: 'medium',  highSeverity: 'high' },
+  blood_glucose:     { low: 60,   high: 180,  unit: 'mg/dL', lowSeverity: 'high',    highSeverity: 'medium' },
+  oxygen_saturation: { low: 90,   high: null, unit: '%',    lowSeverity: 'critical', highSeverity: null },
+  weight:            { low: null, high: null, unit: 'kg',   lowSeverity: null,      highSeverity: null },
 };
 
-async function checkVitalThreshold(circleId, dataType, numValue, unit) {
+async function checkVitalThreshold(circleId, dataType, value, unit) {
   const threshold = VITAL_THRESHOLDS[dataType];
-  if (!threshold || typeof numValue !== 'number') return;
+  if (!threshold) return;
 
+  // Composite types: dispatch per component.
+  if (dataType === 'blood_pressure' && typeof value === 'object' && value !== null) {
+    const unitToUse = unit || threshold.unit;
+    if (typeof value.systolic === 'number') {
+      await fireVitalAlertIfAbnormal(circleId, dataType, 'systolic', value.systolic, unitToUse, threshold.systolic);
+    }
+    if (typeof value.diastolic === 'number') {
+      await fireVitalAlertIfAbnormal(circleId, dataType, 'diastolic', value.diastolic, unitToUse, threshold.diastolic);
+    }
+    return;
+  }
+
+  // Scalar types: unwrap {value} envelope or accept raw number.
+  const numValue = typeof value === 'object' && value !== null ? value.value : value;
+  if (typeof numValue !== 'number') return;
+  await fireVitalAlertIfAbnormal(circleId, dataType, null, numValue, unit || threshold.unit, threshold);
+}
+
+async function fireVitalAlertIfAbnormal(circleId, dataType, component, numValue, unit, threshold) {
   let severity = null;
   let direction = null;
-
-  if (threshold.low !== null && numValue < threshold.low) {
+  if (threshold.low != null && numValue < threshold.low) {
     severity = threshold.lowSeverity;
     direction = 'low';
-  } else if (threshold.high !== null && numValue > threshold.high) {
+  } else if (threshold.high != null && numValue > threshold.high) {
     severity = threshold.highSeverity;
     direction = 'high';
   }
-
   if (!severity) return;
 
-  const label = dataType.replace(/_/g, ' ');
+  const baseLabel = dataType.replace(/_/g, ' ');
+  const label = component ? `${baseLabel} (${component})` : baseLabel;
   const title = `Abnormal ${label} detected`;
   const message = direction === 'low'
-    ? `${label} of ${numValue} ${threshold.unit} is below the safe threshold of ${threshold.low} ${threshold.unit}.`
-    : `${label} of ${numValue} ${threshold.unit} is above the safe threshold of ${threshold.high} ${threshold.unit}.`;
+    ? `${label} of ${numValue} ${unit} is below the safe threshold of ${threshold.low} ${unit}.`
+    : `${label} of ${numValue} ${unit} is above the safe threshold of ${threshold.high} ${unit}.`;
 
   const result = await db.query(
     `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
     [circleId, 'abnormal_vital', severity, title, message,
-     JSON.stringify({ data_type: dataType, value: numValue, unit: unit || threshold.unit, threshold })]
+     JSON.stringify({ data_type: dataType, component, value: numValue, unit, threshold })]
   );
 
   broadcastToCircle(circleId, {
@@ -3373,6 +3434,7 @@ async function checkVitalThreshold(circleId, dataType, numValue, unit) {
     alertId: result.rows[0].id,
     severity,
     dataType,
+    component,
   });
 }
 
