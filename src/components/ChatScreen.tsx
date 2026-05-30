@@ -11,6 +11,8 @@ import {
   Platform,
   Alert,
   Modal,
+  BackHandler,
+  ToastAndroid,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useChatContext } from '../context/ChatContext';
@@ -36,6 +38,25 @@ interface ChatScreenProps {
 export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
+
+  // "Press back again to exit" — elderly users frequently double-tap back by
+  // accident; one press would otherwise quit the app from the root route.
+  // First press: show a toast, arm the exit flag for 2 seconds. Second press
+  // within that window: allow default behavior (exit). After the window, reset.
+  const backPressedRecentlyRef = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (backPressedRecentlyRef.current) {
+        return false; // second press within window → let the system exit
+      }
+      backPressedRecentlyRef.current = true;
+      ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
+      setTimeout(() => { backPressedRecentlyRef.current = false; }, 2000);
+      return true; // block the first press
+    });
+    return () => handler.remove();
+  }, []);
 
   const {
     messages,

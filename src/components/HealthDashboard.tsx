@@ -188,7 +188,12 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
               <Text style={styles.stepsMessage}>{stepsData.message}</Text>
             </View>
           ) : (
-            <Text style={styles.noDataText}>No step data available</Text>
+            <View style={styles.noVitalsContainer}>
+              <Text style={styles.noDataText}>No steps tracked yet</Text>
+              <Text style={styles.noDataHint}>
+                Connect your phone or watch to start counting steps.
+              </Text>
+            </View>
           )}
         </View>
 
@@ -227,7 +232,8 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
               <Text style={styles.allDoneText}>All medications taken for today!</Text>
             )}
             {medicationSchedule.total === 0 && (
-              <Text style={styles.noDataText}>No medications scheduled</Text>
+              <Text style={styles.noDataText}>No medications yet</Text>
+              <Text style={styles.noDataHint}>Tap here to add your medications.</Text>
             )}
           </View>
         </TouchableOpacity>
