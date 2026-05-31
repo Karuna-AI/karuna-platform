@@ -31,6 +31,19 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
 
   useEffect(() => {
     loadConsentData();
+    // Surface failures to sync consent to the care circle (previously silent).
+    // PUT /consent is owner-only, so a non-owner member gets a clear message
+    // instead of a toggle that appears to work but never reaches caregivers.
+    const unsubscribe = consentService.addSyncErrorListener((err) => {
+      const ownerOnly = /permission|owner|denied|403|forbidden/i.test(err);
+      Alert.alert(
+        ownerOnly ? 'Only the circle owner can change sharing' : 'Couldn’t save sharing settings',
+        ownerOnly
+          ? 'Only the person who set up this care circle can change what is shared. Your choice was saved on this device but not applied for caregivers.'
+          : 'We couldn’t save your sharing settings to your care circle. They’re saved on this device — please try again when you’re online.',
+      );
+    });
+    return unsubscribe;
   }, []);
 
   const loadConsentData = async () => {
