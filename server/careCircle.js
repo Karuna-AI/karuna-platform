@@ -612,6 +612,15 @@ function checkConsent(consentData, role, category) {
  * Express middleware: reads patient_consent from care_circles and blocks
  * non-owner members whose access to `category` has been denied by the patient.
  */
+// Consent gating notes (intentional scope):
+//  - This guards READ access to a patient's shared categories. Vault WRITE
+//    endpoints and POST /sync are deliberately NOT consent-gated: consent governs
+//    the patient sharing THEIR data for caregivers to read, whereas caregiver
+//    edits are a separate authorization concern (role permissions). Revisit if
+//    product wants writes gated too.
+//  - checkConsent() intentionally allows access when patient_consent is empty
+//    (backward-compat default). Flipping that to deny would block caregivers on
+//    every circle until its patient re-syncs consent, so it's a rollout decision.
 function requireConsent(category) {
   return async (req, res, next) => {
     try {
@@ -642,8 +651,11 @@ function requireConsent(category) {
 
       next();
     } catch (error) {
+      // Fail CLOSED: a consent gate must not grant access to health/financial/
+      // contact/document data when it cannot verify consent — a transient DB
+      // error must never become an authorization bypass (was fail-open before).
       console.error('Consent check error:', error);
-      next(); // fail-open: don't block on DB errors
+      return res.status(503).json({ error: 'Unable to verify data-sharing consent. Please try again.' });
     }
   };
 }
