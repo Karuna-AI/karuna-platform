@@ -612,6 +612,15 @@ function checkConsent(consentData, role, category) {
  * Express middleware: reads patient_consent from care_circles and blocks
  * non-owner members whose access to `category` has been denied by the patient.
  */
+// Consent gating notes (intentional scope):
+//  - This guards READ access to a patient's shared categories. Vault WRITE
+//    endpoints and POST /sync are deliberately NOT consent-gated: consent governs
+//    the patient sharing THEIR data for caregivers to read, whereas caregiver
+//    edits are a separate authorization concern (role permissions). Revisit if
+//    product wants writes gated too.
+//  - checkConsent() intentionally allows access when patient_consent is empty
+//    (backward-compat default). Flipping that to deny would block caregivers on
+//    every circle until its patient re-syncs consent, so it's a rollout decision.
 function requireConsent(category) {
   return async (req, res, next) => {
     try {
@@ -642,8 +651,11 @@ function requireConsent(category) {
 
       next();
     } catch (error) {
+      // Fail CLOSED: a consent gate must not grant access to health/financial/
+      // contact/document data when it cannot verify consent — a transient DB
+      // error must never become an authorization bypass (was fail-open before).
       console.error('Consent check error:', error);
-      next(); // fail-open: don't block on DB errors
+      return res.status(503).json({ error: 'Unable to verify data-sharing consent. Please try again.' });
     }
   };
 }
@@ -704,7 +716,15 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
 
     const user = result.rows[0];
     const verificationUrl = `${APP_BASE_URL}/verify-email/${verificationToken}`;
-    await sendVerificationEmail(user.email, user.name, verificationUrl);
+    // Best-effort: the user row is already committed. If the verification email
+    // throws (e.g. Resend configured but erroring), don't 500 the registration —
+    // that left an orphan unverified account the client believed had failed, and
+    // the 3/hr limiter then blocked retry. The email can be re-sent later.
+    try {
+      await sendVerificationEmail(user.email, user.name, verificationUrl);
+    } catch (emailErr) {
+      console.warn('[register] verification email send failed:', emailErr.message);
+    }
 
     const token = createJWT(user);
 
@@ -1574,6 +1594,16 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
 
     const paginationSuffix = paginated ? ` LIMIT ${limit} OFFSET ${offset}` : '';
 
+    // Incremental pull: when the client passes ?since=<ISO>, return only rows
+    // changed after that timestamp. Previously `since` was ignored and every
+    // pull re-downloaded the full snapshot.
+    const sinceIso = (() => {
+      const s = req.query.since;
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    })();
+
     // Get vault data based on permissions AND patient consent
     const canSeeHealth    = permissions.canViewMedications && checkConsent(consentData, role, 'health_data');
     const canSeeDoctors   = permissions.canViewDoctors     && checkConsent(consentData, role, 'health_data');
@@ -1581,25 +1611,34 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
     const canSeeContacts  = permissions.canViewContacts    && checkConsent(consentData, role, 'contact_info');
     const canSeeAccounts  = permissions.canViewAccounts    && checkConsent(consentData, role, 'financial_data');
 
+    // table names are fixed literals (not user input); `since` is parameterized.
+    const vaultQuery = (table, allowed) => {
+      if (!allowed) return Promise.resolve({ rows: [] });
+      const params = [circleId];
+      let sinceClause = '';
+      if (sinceIso) { params.push(sinceIso); sinceClause = ` AND updated_at > $${params.length}`; }
+      return db.query(`SELECT * FROM ${table} WHERE circle_id = $1${sinceClause}${paginationSuffix}`, params);
+    };
+
+    const notesQuery = () => {
+      const params = [circleId];
+      let authorClause = '';
+      if (!permissions.canViewAllNotes) { params.push(req.user.id); authorClause = ` AND author_id = $${params.length}`; }
+      let sinceClause = '';
+      if (sinceIso) { params.push(sinceIso); sinceClause = ` AND updated_at > $${params.length}`; }
+      return db.query(
+        `SELECT * FROM vault_notes WHERE circle_id = $1${authorClause}${sinceClause} ORDER BY created_at DESC${paginationSuffix}`,
+        params,
+      );
+    };
+
     const [medications, doctors, appointments, contacts, notes, accounts] = await Promise.all([
-      canSeeHealth
-        ? db.query(`SELECT * FROM vault_medications WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeDoctors
-        ? db.query(`SELECT * FROM vault_doctors WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeAppts
-        ? db.query(`SELECT * FROM vault_appointments WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeContacts
-        ? db.query(`SELECT * FROM vault_contacts WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      permissions.canViewAllNotes
-        ? db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 ORDER BY created_at DESC${paginationSuffix}`, [circleId])
-        : db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 AND author_id = $2 ORDER BY created_at DESC${paginationSuffix}`, [circleId, req.user.id]),
-      canSeeAccounts
-        ? db.query(`SELECT * FROM vault_accounts WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
+      vaultQuery('vault_medications', canSeeHealth),
+      vaultQuery('vault_doctors', canSeeDoctors),
+      vaultQuery('vault_appointments', canSeeAppts),
+      vaultQuery('vault_contacts', canSeeContacts),
+      notesQuery(),
+      vaultQuery('vault_accounts', canSeeAccounts),
     ]);
 
     res.json({

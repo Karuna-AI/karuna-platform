@@ -641,20 +641,28 @@ describe('MedicationService – getTodaySchedule', () => {
   });
 
   it('attaches an existing dose when one matches the scheduled time', async () => {
-    const med = await svc.addMedication(buildMed({ isActive: true }));
-    const todayStr = new Date().toISOString().slice(0, 10);
-    (svc as any).doses.push({
-      id: 'dose_match',
-      medicationId: med.id,
-      scheduledTime: `${todayStr}T09:00:00+00:00`,
-      status: 'taken',
-      recordedAt: new Date().toISOString(),
-    });
+    // Pin to a fixed midday moment so the UTC date this test forms matches
+    // the local date the service computes via localDateString(). Without
+    // pinning, runs that straddle a UTC↔local date boundary disagreed and
+    // the dose lookup missed.
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-15T12:00:00Z'));
+    try {
+      const med = await svc.addMedication(buildMed({ isActive: true }));
+      const todayStr = new Date().toISOString().slice(0, 10);
+      (svc as any).doses.push({
+        id: 'dose_match',
+        medicationId: med.id,
+        scheduledTime: `${todayStr}T09:00:00+00:00`,
+        status: 'taken',
+        recordedAt: new Date().toISOString(),
+      });
 
-    const schedule = svc.getTodaySchedule();
-    // At least one entry should have a non-null dose (the matching one)
-    const withDose = schedule.filter((s) => s.dose !== null);
-    expect(withDose.length).toBeGreaterThan(0);
+      const schedule = svc.getTodaySchedule();
+      const withDose = schedule.filter((s) => s.dose !== null);
+      expect(withDose.length).toBeGreaterThan(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('sorts schedule by time ascending', async () => {
@@ -756,22 +764,26 @@ describe('MedicationService – getNextDose', () => {
   });
 
   it('returns null when all doses for today are already taken', async () => {
-    const med = await svc.addMedication(buildMed({
-      isActive: true,
-      // Use a past time so no future dose exists today
-      schedule: [{ id: 's_past', time: '01:00', label: 'Very Early' }],
-    }));
-    // Record a taken dose so item.dose is set
-    (svc as any).doses.push({
-      id: 'dose_taken',
-      medicationId: med.id,
-      scheduledTime: new Date().toISOString(),
-      status: 'taken',
-      recordedAt: new Date().toISOString(),
-    });
-    // getNextDose uses getTodaySchedule then checks future time
-    // 01:00 has already passed, so result should be null
-    expect(svc.getNextDose()).toBeNull();
+    // Pin to midday so "01:00" is unambiguously in the past. Without pinning,
+    // a run between 00:00 and 01:00 saw 01:00 as a future dose and failed.
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-15T12:00:00Z'));
+    try {
+      const med = await svc.addMedication(buildMed({
+        isActive: true,
+        schedule: [{ id: 's_past', time: '01:00', label: 'Very Early' }],
+      }));
+      (svc as any).doses.push({
+        id: 'dose_taken',
+        medicationId: med.id,
+        scheduledTime: new Date().toISOString(),
+        status: 'taken',
+        recordedAt: new Date().toISOString(),
+      });
+      // 01:00 has already passed at the pinned 12:00 wall clock
+      expect(svc.getNextDose()).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('returns the next future pending dose', async () => {

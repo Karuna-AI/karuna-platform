@@ -8,12 +8,54 @@ import {
   RefreshControl,
   Dimensions,
   Platform,
+  Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { healthDataService } from '../services/healthData';
 import { medicationService } from '../services/medication';
-import { VitalType, VITAL_TYPE_INFO, VitalSummary } from '../types/health';
+import { VitalType, VITAL_TYPE_INFO, VitalSummary, VitalReading } from '../types/health';
 
 import { getColors } from '../utils/accessibility';
+
+// Vital types a user can log by hand, with their unit and whether they need a
+// second value (blood pressure: systolic + diastolic).
+const LOGGABLE_VITALS: { type: VitalType; label: string; unit: string; secondary?: string }[] = [
+  { type: 'heart_rate', label: 'Heart rate', unit: 'bpm' },
+  { type: 'blood_pressure', label: 'Blood pressure', unit: 'mmHg', secondary: 'diastolic' },
+  { type: 'blood_glucose', label: 'Blood glucose', unit: 'mg/dL' },
+  { type: 'weight', label: 'Weight', unit: 'kg' },
+  { type: 'temperature', label: 'Temperature', unit: '°C' },
+  { type: 'oxygen_saturation', label: 'Oxygen (SpO₂)', unit: '%' },
+];
+
+/**
+ * Build a VitalReading payload from manual entry, or null if the value(s) are
+ * invalid. Pure + exported for testing. blood_pressure carries diastolic in
+ * secondaryValue (mapped to {systolic,diastolic} on upload).
+ */
+export function buildVitalReading(
+  type: VitalType,
+  value: string,
+  secondary?: string,
+): Omit<VitalReading, 'id' | 'timestamp'> | null {
+  const opt = LOGGABLE_VITALS.find((o) => o.type === type);
+  if (!opt) return null;
+  const v = Number(value);
+  if (!value.trim() || Number.isNaN(v) || v <= 0) return null;
+  const reading: Omit<VitalReading, 'id' | 'timestamp'> = {
+    type,
+    value: v,
+    unit: opt.unit,
+    source: 'manual',
+  };
+  if (opt.secondary) {
+    const s = Number(secondary);
+    if (!secondary || !secondary.trim() || Number.isNaN(s) || s <= 0) return null;
+    reading.secondaryValue = s;
+  }
+  return reading;
+}
 
 const c = getColors();
 const { width } = Dimensions.get('window');
@@ -42,6 +84,40 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
     total: number;
     nextDose: { name: string; time: string } | null;
   }>({ taken: 0, total: 0, nextDose: null });
+
+  // Manual vital-entry modal
+  const [vitalModalVisible, setVitalModalVisible] = useState(false);
+  const [vitalType, setVitalType] = useState<VitalType>('heart_rate');
+  const [vitalValue, setVitalValue] = useState('');
+  const [vitalSecondary, setVitalSecondary] = useState('');
+  const [savingVital, setSavingVital] = useState(false);
+
+  const openVitalModal = () => {
+    setVitalType('heart_rate');
+    setVitalValue('');
+    setVitalSecondary('');
+    setVitalModalVisible(true);
+  };
+
+  const saveVital = async () => {
+    const reading = buildVitalReading(vitalType, vitalValue, vitalSecondary);
+    if (!reading) {
+      Alert.alert('Check your entry', 'Please enter a valid number for the reading.');
+      return;
+    }
+    setSavingVital(true);
+    try {
+      await healthDataService.addVitalReading(reading);
+      setVitalModalVisible(false);
+      await loadData();
+    } catch {
+      Alert.alert('Could not save', 'Something went wrong saving your reading. Please try again.');
+    } finally {
+      setSavingVital(false);
+    }
+  };
+
+  const currentVitalOption = LOGGABLE_VITALS.find((o) => o.type === vitalType)!;
 
   const loadData = useCallback(async () => {
     try {
@@ -83,6 +159,15 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
 
   useEffect(() => {
     loadData();
+    // Surface vital-upload failures: the reading is saved on the device, but if
+    // it didn't reach the care circle the user should know (previously silent).
+    const unsubscribe = healthDataService.addSyncErrorListener((err) => {
+      Alert.alert(
+        'Saved on this device',
+        `Your reading was saved here, but couldn’t be shared with your care circle (${err}). It’ll retry next time you’re online.`,
+      );
+    });
+    return unsubscribe;
   }, [loadData]);
 
   const handleRefresh = useCallback(async () => {
@@ -297,9 +382,94 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
             <Text style={styles.actionText}>Log Medication</Text>
           </TouchableOpacity>
         </View>
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={openVitalModal}
+            accessibilityRole="button"
+            accessibilityLabel="Log a vital reading"
+          >
+            <Text style={styles.actionIcon}>❤️</Text>
+            <Text style={styles.actionText}>Log Vital Reading</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Manual vital-entry modal */}
+      <Modal
+        visible={vitalModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVitalModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Log a Vital Reading</Text>
+
+            <Text style={styles.modalLabel}>What are you recording?</Text>
+            <View style={styles.vitalTypeRow}>
+              {LOGGABLE_VITALS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.type}
+                  style={[styles.vitalTypeChip, vitalType === opt.type && styles.vitalTypeChipActive]}
+                  onPress={() => setVitalType(opt.type)}
+                  accessibilityRole="button"
+                  accessibilityLabel={opt.label}
+                >
+                  <Text style={[styles.vitalTypeChipText, vitalType === opt.type && styles.vitalTypeChipTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>
+              {currentVitalOption.secondary ? 'Systolic' : 'Reading'} ({currentVitalOption.unit})
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="numeric"
+              value={vitalValue}
+              onChangeText={setVitalValue}
+              placeholder={currentVitalOption.secondary ? 'e.g. 120' : 'Enter value'}
+              accessibilityLabel="Vital reading value"
+            />
+            {currentVitalOption.secondary && (
+              <>
+                <Text style={styles.modalLabel}>Diastolic ({currentVitalOption.unit})</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  keyboardType="numeric"
+                  value={vitalSecondary}
+                  onChangeText={setVitalSecondary}
+                  placeholder="e.g. 80"
+                  accessibilityLabel="Diastolic value"
+                />
+              </>
+            )}
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancel]}
+                onPress={() => setVitalModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSave, savingVital && styles.modalSaveDisabled]}
+                onPress={saveVital}
+                disabled={savingVital}
+                accessibilityRole="button"
+                accessibilityLabel="Save vital reading"
+              >
+                <Text style={styles.modalSaveText}>{savingVital ? 'Saving…' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -575,6 +745,100 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: c.surface,
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: c.text,
+    marginBottom: 16,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: c.textSecondary,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  vitalTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  vitalTypeChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: c.background,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  vitalTypeChipActive: {
+    backgroundColor: c.primary,
+    borderColor: c.primary,
+  },
+  vitalTypeChipText: {
+    fontSize: 14,
+    color: c.text,
+  },
+  vitalTypeChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: 18,
+    color: c.text,
+    backgroundColor: c.background,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 20,
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  modalCancel: {
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: c.text,
+    fontWeight: '600',
+  },
+  modalSave: {
+    backgroundColor: c.primary,
+  },
+  modalSaveDisabled: {
+    opacity: 0.6,
+  },
+  modalSaveText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '700',
   },
 });
 

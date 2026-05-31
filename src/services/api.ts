@@ -2,6 +2,15 @@ import axios, { AxiosError } from 'axios';
 import Constants from 'expo-constants';
 import { OpenAIMessage } from '../types';
 import { telemetryService } from './telemetry';
+import { careCircleSyncService } from './careCircleSync';
+
+// Attach the care Bearer token when the user is in a circle so the gateway can
+// attribute AI usage (chat/STT) to them. Optional — chat/STT work anonymously
+// too, so standalone users are unaffected.
+function authHeader(): Record<string, string> {
+  const token = careCircleSyncService.getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * API Configuration
@@ -52,6 +61,7 @@ async function sendChatViaGateway(
         headers: {
           'Content-Type': 'application/json',
           'X-Client-Version': '1.0.0',
+          ...authHeader(),
         },
         timeout: 30000,
       }
@@ -111,6 +121,7 @@ async function transcribeViaGateway(audioBlob: Blob, language: string): Promise<
         headers: {
           'Content-Type': 'multipart/form-data',
           'X-Client-Version': '1.0.0',
+          ...authHeader(),
         },
         timeout: 60000,
       }

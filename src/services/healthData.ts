@@ -4,6 +4,7 @@ import { Pedometer } from 'expo-sensors';
 import { consentService } from './consent';
 import { auditLogService } from './auditLog';
 import { healthAdapter } from './healthAdapter';
+import { careCircleSyncService } from './careCircleSync';
 import {
   VitalType,
   VitalReading,
@@ -21,6 +22,39 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_STEPS_GOAL = 7000;
+
+// dataTypes the gateway's POST /health accepts. 'sleep' has no server equivalent.
+const SERVER_HEALTH_TYPES: VitalType[] = [
+  'heart_rate', 'blood_pressure', 'blood_glucose', 'weight', 'temperature', 'oxygen_saturation', 'steps',
+];
+
+/**
+ * Map a local VitalReading to the gateway POST /health reading shape, or null
+ * if the type isn't supported server-side. blood_pressure becomes a nested
+ * {systolic,diastolic} object (diastolic = secondaryValue); scalars pass through.
+ */
+export function vitalReadingToServerReading(v: VitalReading): {
+  dataType: string;
+  value: unknown;
+  unit?: string;
+  measuredAt: string;
+  source: string;
+  notes?: string;
+} | null {
+  if (!SERVER_HEALTH_TYPES.includes(v.type)) return null;
+  const value =
+    v.type === 'blood_pressure'
+      ? { systolic: v.value, diastolic: v.secondaryValue ?? 0 }
+      : v.value;
+  return {
+    dataType: v.type,
+    value,
+    unit: v.unit,
+    measuredAt: v.timestamp,
+    source: v.source || 'device',
+    notes: v.notes,
+  };
+}
 
 /**
  * Health Data Service
@@ -308,7 +342,44 @@ class HealthDataService {
       entityName: `${VITAL_TYPE_INFO[reading.type].displayName}: ${reading.value}`,
     });
 
+    // Upload to the care circle so caregivers see the vital and the server can
+    // run its abnormal-vital → caregiver_alert pipeline. Fire-and-forget: a
+    // failure leaves the reading stored locally and is retried on the next add.
+    if (careCircleSyncService.isConnected()) {
+      const serverReading = vitalReadingToServerReading(newReading);
+      if (serverReading) {
+        void careCircleSyncService
+          .pushHealthReadings([serverReading])
+          .then((r) => {
+            if (!r.success) {
+              console.warn('[HealthData] vital upload failed:', r.error);
+              this.notifySyncError(r.error || 'Upload failed');
+            }
+          })
+          .catch((e) => {
+            console.warn('[HealthData] vital upload error:', e);
+            this.notifySyncError('Network error');
+          });
+      }
+    }
+
     return newReading;
+  }
+
+  private syncErrorListeners: ((error: string) => void)[] = [];
+
+  /** Subscribe to vital-upload failures so the UI can tell the user it didn't reach caregivers. */
+  addSyncErrorListener(listener: (error: string) => void): () => void {
+    this.syncErrorListeners.push(listener);
+    return () => {
+      this.syncErrorListeners = this.syncErrorListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifySyncError(error: string): void {
+    this.syncErrorListeners.forEach((l) => {
+      try { l(error); } catch { /* listener errors must not break health logging */ }
+    });
   }
 
   /**

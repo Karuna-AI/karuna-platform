@@ -338,6 +338,22 @@ app.get('/api/feature-flags', generalLimiter, async (req, res) => {
 });
 
 // Chat completion endpoint with fallback support
+// Optional attribution: /api/chat and /api/stt are unauthenticated, but if the
+// client sends its care Bearer token we attribute the ai_usage_logs row to the
+// user (previously user_id/circle_id were always null → admin per-user AI
+// analytics were unattributable). Returns null when no/invalid token — never throws.
+function optionalUserId(req) {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) return null;
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET);
+    return decoded && decoded.id ? decoded.id : null;
+  } catch {
+    return null;
+  }
+}
+
 app.post('/api/chat', aiLimiter, async (req, res) => {
   const startTime = Date.now();
 
@@ -461,9 +477,9 @@ app.post('/api/chat', aiLimiter, async (req, res) => {
       const pricing = PRICING[modelName] || { input: 0.0000002, output: 0.0000008 };
       const estimatedCost = ((usage.prompt_tokens || 0) * pricing.input + (usage.completion_tokens || 0) * pricing.output);
       await db.query(
-        `INSERT INTO ai_usage_logs (request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, latency_ms, success)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        ['chat', `${modelName} (${provider})`, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, estimatedCost, Date.now() - startTime, true]
+        `INSERT INTO ai_usage_logs (user_id, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, latency_ms, success)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [optionalUserId(req), 'chat', `${modelName} (${provider})`, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, estimatedCost, Date.now() - startTime, true]
       );
     } catch (logError) {
       console.warn('Failed to log AI usage:', logError.message);
@@ -537,6 +553,19 @@ app.post('/api/stt', sttLimiter, upload.single('audio'), async (req, res) => {
     );
 
     recordMetric('stt', true, Date.now() - startTime);
+
+    // Log STT usage (previously unlogged → a cost/usage blind spot). Whisper
+    // bills by audio length, not tokens, so token columns stay 0.
+    try {
+      const db = require('./db');
+      await db.query(
+        `INSERT INTO ai_usage_logs (user_id, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, latency_ms, success)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [optionalUserId(req), 'stt', 'whisper-1 (openai)', 0, 0, 0, 0, Date.now() - startTime, true]
+      );
+    } catch (logError) {
+      console.warn('Failed to log STT usage:', logError.message);
+    }
 
     res.json({
       text: response.data.text,

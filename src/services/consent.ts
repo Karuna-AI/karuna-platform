@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auditLogService } from './auditLog';
+import { careCircleSyncService } from './careCircleSync';
 import {
   ConsentCategory,
   ConsentGrantee,
@@ -137,6 +138,7 @@ class ConsentService {
     });
 
     this.notifyListeners(category, grantee);
+    await this.syncConsentToServer();
 
     return { success: true };
   }
@@ -182,6 +184,7 @@ class ConsentService {
     });
 
     this.notifyListeners(category, grantee);
+    await this.syncConsentToServer();
 
     return { success: true };
   }
@@ -316,6 +319,8 @@ class ConsentService {
       consentCategory: 'caregiver_sharing',
       details: `Global data sharing ${enabled ? 'enabled' : 'disabled'}`,
     });
+
+    await this.syncConsentToServer();
   }
 
   /**
@@ -499,6 +504,47 @@ class ConsentService {
     } catch (error) {
       console.error('[Consent] Save error:', error);
     }
+  }
+
+  /**
+   * Sync the patient's consent to the care circle so the server enforces their
+   * actual choices. Called only from user-initiated changes (grant/revoke/global
+   * toggle), NOT from init's save(), to avoid a startup round-trip/alert.
+   * No-op when not in a circle. The server's PUT /consent is owner-only, so a
+   * non-owner gets a 403 — surfaced via the sync-error listener instead of being
+   * swallowed silently.
+   */
+  private async syncConsentToServer(): Promise<void> {
+    if (!this.preferences || !careCircleSyncService.isConnected()) return;
+    try {
+      const result = await careCircleSyncService.pushConsent({
+        globalDataSharing: this.preferences.globalDataSharing,
+        consents: this.preferences.consents,
+      });
+      if (!result.success) {
+        console.warn('[Consent] server sync failed:', result.error);
+        this.notifySyncError(result.error || 'Sync failed');
+      }
+    } catch (e) {
+      console.warn('[Consent] server sync error:', e);
+      this.notifySyncError('Network error');
+    }
+  }
+
+  private syncErrorListeners: ((error: string) => void)[] = [];
+
+  /** Subscribe to consent server-sync failures (e.g. owner-only 403). */
+  addSyncErrorListener(listener: (error: string) => void): () => void {
+    this.syncErrorListeners.push(listener);
+    return () => {
+      this.syncErrorListeners = this.syncErrorListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifySyncError(error: string): void {
+    this.syncErrorListeners.forEach((l) => {
+      try { l(error); } catch { /* listener errors must not break consent */ }
+    });
   }
 }
 

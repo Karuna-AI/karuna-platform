@@ -57,7 +57,21 @@ class CareCircleSyncService {
     // Load saved state
     const savedCircleId = await AsyncStorage.getItem(STORAGE_KEYS.CARE_CIRCLE_ID);
     const savedTokenResult = await secureStorageService.getCaregiverToken();
-    const savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
+    let savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
+
+    // One-time migration: older builds persisted the auth token in AsyncStorage,
+    // but we now read it from SecureStore. If SecureStore has none yet the legacy
+    // key does, adopt it and move it across so existing installs recover their
+    // session (and resume syncing) without having to re-join the circle.
+    if (!savedToken) {
+      const legacyToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      if (legacyToken) {
+        await this.setAuthToken(legacyToken);
+        await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        savedToken = legacyToken;
+      }
+    }
+
     const savedChanges = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_CHANGES);
 
     if (savedCircleId) this.careCircleId = savedCircleId;
@@ -104,8 +118,9 @@ class CareCircleSyncService {
       }
       this.careCircleId = circle.id;
       if (authToken) {
-        this.authToken = authToken;
-        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken);
+        // Persist via SecureStore (the store initialize() reads back) so the
+        // write and read stores stay aligned across app restarts.
+        await this.setAuthToken(authToken);
       }
       await AsyncStorage.setItem(STORAGE_KEYS.CARE_CIRCLE_ID, circle.id);
 
@@ -143,6 +158,13 @@ class CareCircleSyncService {
   // Get current care circle ID
   getCareCircleId(): string | null {
     return this.careCircleId;
+  }
+
+  // Current in-memory care auth token, for clients that want to attribute
+  // otherwise-unauthenticated requests (e.g. AI usage logging on /api/chat,
+  // /api/stt). Null when not authenticated to a circle.
+  getAuthToken(): string | null {
+    return this.authToken;
   }
 
   // Set authentication token (from caregiver login)
@@ -269,8 +291,21 @@ class CareCircleSyncService {
   private handleWebSocketMessage(message: { type: string; [key: string]: unknown }) {
     switch (message.type) {
       case 'sync_update':
-        // Another device pushed changes
-        this.handleRemoteChanges(message.changes as SyncChange[]);
+        // The server broadcasts {applied, conflicts, entityTypes} — NOT an inline
+        // changes array (reading message.changes was always undefined). Re-pull
+        // the latest circle state to apply whatever changed.
+        void this.pullFromCloud();
+        this.notifyListeners('sync_update', message);
+        break;
+
+      case 'health_update':
+        this.notifyListeners('health_update', message);
+        break;
+
+      case 'alert':
+        // Abnormal-vital / missed-medication / missed-checkin alerts. Previously
+        // ignored, so the patient device got no realtime caregiver signal.
+        this.notifyListeners('alert', message);
         break;
 
       case 'member_joined':
@@ -279,6 +314,10 @@ class CareCircleSyncService {
 
       case 'member_left':
         this.notifyListeners('member_left', message.memberId);
+        break;
+
+      case 'connected':
+      case 'pong':
         break;
 
       default:
@@ -422,7 +461,80 @@ class CareCircleSyncService {
       success: pullResult.success,
       synced: pushResult.synced + pullResult.synced,
       conflicts: [...pushResult.conflicts, ...pullResult.conflicts],
+      // Propagate the real reason (e.g. 'Not connected to care circle',
+      // 'Invalid or expired token') instead of dropping it and letting the UI
+      // fall back to a generic "Unable to sync".
+      error: pullResult.error,
     };
+  }
+
+  /**
+   * Push health readings to the cloud. Health data is NOT part of the vault
+   * change-log/sync; it has a dedicated append-only endpoint that also runs the
+   * abnormal-vital threshold → caregiver_alert → WebSocket-broadcast pipeline
+   * server-side. Returns success/error so callers can surface or retry.
+   */
+  async pushHealthReadings(
+    readings: { dataType: string; value: unknown; unit?: string; measuredAt: string; source?: string; notes?: string }[]
+  ): Promise<{ success: boolean; inserted?: number; error?: string }> {
+    if (!this.careCircleId || !this.authToken) {
+      return { success: false, error: 'Not connected to care circle' };
+    }
+    if (!readings || readings.length === 0) return { success: true, inserted: 0 };
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/care/circles/${this.careCircleId}/health`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({ readings }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.error || `HTTP ${response.status}` };
+      }
+      const data = await response.json();
+      return { success: true, inserted: data.inserted };
+    } catch (error) {
+      console.error('[CareCircleSync] Health push error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  /**
+   * Push the patient's consent preferences to the care circle. The server route
+   * is owner-only, which the patient (circle owner) satisfies. This keeps
+   * care_circles.patient_consent in sync with the device so the server's consent
+   * enforcement actually reflects the patient's choices (previously it never did
+   * — the device never uploaded consent, so enforcement ran against an empty {}).
+   */
+  async pushConsent(consent: {
+    globalDataSharing: boolean;
+    consents: unknown[];
+  }): Promise<{ success: boolean; error?: string }> {
+    if (!this.careCircleId || !this.authToken) {
+      return { success: false, error: 'Not connected to care circle' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/api/care/circles/${this.careCircleId}/consent`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({ consent }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.error || `HTTP ${response.status}` };
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[CareCircleSync] Consent push error:', error);
+      return { success: false, error: 'Network error' };
+    }
   }
 
   // Apply remote data to local vault
@@ -494,6 +606,31 @@ class CareCircleSyncService {
     }
   }
 
+  /**
+   * Last-write-wins decision for a remote item vs the local copy. Reads the
+   * timestamp from EITHER snake_case (`updated_at`, as the server returns) or
+   * camelCase (`updatedAt`, the local model) — the previous code only read
+   * camelCase, so server `updated_at` was always undefined and remote edits
+   * (e.g. a caregiver changing a medication) never overwrote the device.
+   */
+  static mergeDecision(remoteItem: any, localItem: any | undefined): 'add' | 'update' | 'skip' {
+    if (!localItem) return 'add';
+    const remoteTs = remoteItem?.updated_at ?? remoteItem?.updatedAt;
+    const localTs = localItem?.updated_at ?? localItem?.updatedAt;
+    if (!remoteTs) return 'skip'; // no remote timestamp — don't clobber local
+    if (!localTs) return 'update'; // local has no timestamp — remote wins
+    return new Date(remoteTs) > new Date(localTs) ? 'update' : 'skip';
+  }
+
+  // Server rows are snake_case; surface camelCase timestamps so locally-stored
+  // items carry a usable updatedAt/createdAt for subsequent merges.
+  private static normalizeTimestamps(item: any): any {
+    const out = { ...item };
+    if (out.updated_at && !out.updatedAt) out.updatedAt = out.updated_at;
+    if (out.created_at && !out.createdAt) out.createdAt = out.created_at;
+    return out;
+  }
+
   private async mergeEntities<T extends { id: string; updatedAt?: string }>(
     remoteItems: T[],
     getLocal: () => Promise<T[]>,
@@ -506,18 +643,17 @@ class CareCircleSyncService {
 
       for (const remoteItem of remoteItems) {
         const localItem = localMap.get(remoteItem.id);
+        const decision = CareCircleSyncService.mergeDecision(remoteItem, localItem);
 
-        if (!localItem) {
-          // New item from remote - add it
+        if (decision === 'add') {
           const { id: _id, ...rest } = remoteItem as any;
-          await addItem(rest);
-        } else if (remoteItem.updatedAt && localItem.updatedAt &&
-                   new Date(remoteItem.updatedAt) > new Date(localItem.updatedAt)) {
-          // Remote is newer - update local
-          const { id: _id2, createdAt: _createdAt, createdBy: _createdBy, ...updates } = remoteItem as any;
-          await updateItem(remoteItem.id, updates);
+          await addItem(CareCircleSyncService.normalizeTimestamps(rest));
+        } else if (decision === 'update') {
+          const { id: _id2, createdAt: _c1, created_at: _c2, createdBy: _cb1, created_by: _cb2, ...updates } =
+            remoteItem as any;
+          await updateItem(remoteItem.id, CareCircleSyncService.normalizeTimestamps(updates));
         }
-        // Otherwise local is newer or same - keep local
+        // 'skip' → local is newer/equal or remote lacks a timestamp → keep local
       }
     } catch (error) {
       console.error('[CareCircleSync] Entity merge error:', error);
@@ -582,5 +718,6 @@ class CareCircleSyncService {
   }
 }
 
+export { CareCircleSyncService };
 export const careCircleSyncService = new CareCircleSyncService();
 export default careCircleSyncService;

@@ -24,7 +24,7 @@ interface SecuritySettingsScreenProps {
   onOpenAuditLog: () => void;
 }
 
-export default function SecuritySettingsScreen({
+export function SecuritySettingsScreen({
   onBack,
   onOpenConsent,
   onOpenAuditLog,
@@ -737,3 +737,5 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
+
+export default SecuritySettingsScreen;
