@@ -17,8 +17,29 @@ const STORAGE_KEYS = {
   ENCRYPTION_SALT: '@karuna/vault_salt',
 };
 
-// Key derivation iterations for brute-force resistance
+// Key derivation iterations for brute-force resistance.
+// The PBKDF2 (crypto.subtle) path is native/fast, so it keeps the full count.
 const KEY_DERIVATION_ITERATIONS = 100000;
+// The fallback path hashes via expo-crypto, which is one native bridge round-trip
+// per iteration — 100k took ~2 minutes on a low-end device and is the reason
+// vault creation appeared to hang. Use a far smaller count there so create/unlock
+// stay responsive. (Defence-in-depth note: the device salt + OS app-sandbox are
+// the primary protection for the short PIN; a future hardening pass could swap in
+// native PBKDF2 to raise this safely.)
+const FALLBACK_KEY_DERIVATION_ITERATIONS = 1000;
+
+/**
+ * Web Crypto (crypto.subtle) is absent on Hermes (Android) and JSC (iOS) — i.e.
+ * every real device build. Detect it so we can fall back to an expo-crypto based
+ * cipher instead of throwing, mirroring src/services/encryptedDatabase.ts.
+ */
+function hasCryptoSubtle(): boolean {
+  return (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.subtle !== 'undefined' &&
+    typeof crypto.subtle.importKey === 'function'
+  );
+}
 
 /**
  * Generate a cryptographically secure random salt using expo-crypto
@@ -114,10 +135,10 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
     }
   }
 
-  // Fallback: Iterative SHA-256 using expo-crypto (still secure, just slower in JS)
+  // Fallback: Iterative SHA-256 using expo-crypto (Hermes/JSC have no crypto.subtle)
   let hash = `${salt}:${pin}:${salt}`;
 
-  for (let i = 0; i < KEY_DERIVATION_ITERATIONS; i++) {
+  for (let i = 0; i < FALLBACK_KEY_DERIVATION_ITERATIONS; i++) {
     hash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       hash + i.toString()
@@ -138,6 +159,8 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
 class EncryptionService {
   private cryptoKey: CryptoKey | null = null;
   private keyBytes: Uint8Array | null = null;
+  private keyString: string | null = null;
+  private useWebCrypto = false;
   private isInitialized = false;
   private salt: string | null = null;
 
@@ -157,8 +180,11 @@ class EncryptionService {
       // Derive key from PIN using PBKDF2 or iterative SHA-256
       this.keyBytes = await deriveKey(pin, salt);
 
-      // Import as CryptoKey for Web Crypto API - required for AES-GCM encryption
-      if (typeof crypto !== 'undefined' && crypto.subtle) {
+      // Prefer AES-256-GCM via Web Crypto when available (web). On Hermes/JSC
+      // (every real device) crypto.subtle is absent, so fall back to the
+      // expo-crypto SHA-256 keystream cipher instead of throwing.
+      this.useWebCrypto = hasCryptoSubtle();
+      if (this.useWebCrypto) {
         try {
           this.cryptoKey = await crypto.subtle.importKey(
             'raw',
@@ -168,11 +194,14 @@ class EncryptionService {
             ['encrypt', 'decrypt']
           );
         } catch (error) {
-          console.error('[Encryption] Failed to import AES-GCM key:', error);
-          throw new Error('Web Crypto API required for secure encryption');
+          // crypto.subtle exists but rejected the key — drop to the fallback
+          // rather than failing vault creation outright.
+          console.warn('[Encryption] AES-GCM import failed, using expo-crypto fallback:', error);
+          this.useWebCrypto = false;
         }
-      } else {
-        throw new Error('Web Crypto API not available - secure encryption requires a modern browser or React Native 0.73+');
+      }
+      if (!this.useWebCrypto) {
+        this.keyString = bytesToBase64(this.keyBytes);
       }
 
       // Verify the PIN by trying to decrypt the key check
@@ -221,26 +250,36 @@ class EncryptionService {
    * Encrypt a string value using AES-256-GCM
    */
   async encrypt(plaintext: string): Promise<string> {
-    if (!this.cryptoKey) {
-      throw new Error('Encryption not initialized - call initialize() first');
+    if (this.useWebCrypto && this.cryptoKey) {
+      const iv = await generateIV();
+      const data = stringToBytes(plaintext);
+
+      // Encrypt using AES-GCM (authenticated encryption)
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        this.cryptoKey,
+        data
+      );
+      const ciphertext = new Uint8Array(encrypted);
+
+      // Combine IV + ciphertext and encode as base64
+      const combined = new Uint8Array(iv.length + ciphertext.length);
+      combined.set(iv);
+      combined.set(ciphertext, iv.length);
+
+      return bytesToBase64(combined);
     }
 
-    const iv = await generateIV();
-    const data = stringToBytes(plaintext);
-
-    // Encrypt using AES-GCM (authenticated encryption)
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      this.cryptoKey,
-      data
-    );
-    const ciphertext = new Uint8Array(encrypted);
-
-    // Combine IV + ciphertext and encode as base64
-    const combined = new Uint8Array(iv.length + ciphertext.length);
+    // Fallback (Hermes/JSC): SHA-256 keystream XOR with a 16-byte IV.
+    if (!this.keyString) {
+      throw new Error('Encryption not initialized - call initialize() first');
+    }
+    const ivBytes = await Crypto.getRandomBytesAsync(16);
+    const iv = new Uint8Array(ivBytes);
+    const encrypted = await this.xorKeystream(stringToBytes(plaintext), iv);
+    const combined = new Uint8Array(iv.length + encrypted.length);
     combined.set(iv);
-    combined.set(ciphertext, iv.length);
-
+    combined.set(encrypted, iv.length);
     return bytesToBase64(combined);
   }
 
@@ -248,22 +287,60 @@ class EncryptionService {
    * Decrypt an encrypted string using AES-256-GCM
    */
   async decrypt(encryptedData: string): Promise<string> {
-    if (!this.cryptoKey) {
-      throw new Error('Encryption not initialized - call initialize() first');
+    if (this.useWebCrypto && this.cryptoKey) {
+      const combined = base64ToBytes(encryptedData);
+      const iv = combined.slice(0, 12);
+      const ciphertext = combined.slice(12);
+
+      // Decrypt using AES-GCM (validates authentication tag)
+      const decryptedBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        this.cryptoKey,
+        ciphertext
+      );
+
+      return bytesToString(new Uint8Array(decryptedBuffer));
     }
 
+    // Fallback (Hermes/JSC): 16-byte IV prefix + SHA-256 keystream XOR (symmetric).
+    if (!this.keyString) {
+      throw new Error('Encryption not initialized - call initialize() first');
+    }
     const combined = base64ToBytes(encryptedData);
-    const iv = combined.slice(0, 12);
-    const ciphertext = combined.slice(12);
+    const iv = combined.slice(0, 16);
+    const ciphertext = combined.slice(16);
+    const plain = await this.xorKeystream(ciphertext, iv);
+    return bytesToString(plain);
+  }
 
-    // Decrypt using AES-GCM (validates authentication tag)
-    const decryptedBuffer = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      this.cryptoKey,
-      ciphertext
-    );
+  /**
+   * SHA-256 keystream XOR (symmetric — same call encrypts and decrypts), used
+   * when crypto.subtle is unavailable. Mirrors the fallback in
+   * src/services/encryptedDatabase.ts. Keystream block i = SHA-256(key:iv:i).
+   */
+  private async xorKeystream(data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> {
+    const result = new Uint8Array(data.length);
+    const ivHex = Array.from(iv).map((b) => b.toString(16).padStart(2, '0')).join('');
+    let keystream = new Uint8Array(0);
+    let keystreamOffset = 0;
+    let blockCounter = 0;
 
-    return bytesToString(new Uint8Array(decryptedBuffer));
+    for (let i = 0; i < data.length; i++) {
+      if (keystreamOffset >= keystream.length) {
+        const hash = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${this.keyString}:${ivHex}:${blockCounter}`
+        );
+        keystream = new Uint8Array(32);
+        for (let j = 0; j < 32; j++) {
+          keystream[j] = parseInt(hash.substring(j * 2, j * 2 + 2), 16);
+        }
+        keystreamOffset = 0;
+        blockCounter++;
+      }
+      result[i] = data[i] ^ keystream[keystreamOffset++];
+    }
+    return result;
   }
 
   /**
@@ -303,6 +380,7 @@ class EncryptionService {
       this.isInitialized = false;
       this.cryptoKey = null;
       this.keyBytes = null;
+      this.keyString = null;
 
       return await this.initialize(newPin);
     } catch (error) {
@@ -320,6 +398,7 @@ class EncryptionService {
     this.isInitialized = false;
     this.cryptoKey = null;
     this.keyBytes = null;
+    this.keyString = null;
     this.salt = null;
   }
 
@@ -334,9 +413,11 @@ class EncryptionService {
     }
     this.cryptoKey = null;
     this.keyBytes = null;
+    this.keyString = null;
     this.salt = null;
   }
 }
 
+export { EncryptionService };
 export const encryptionService = new EncryptionService();
 export default encryptionService;
