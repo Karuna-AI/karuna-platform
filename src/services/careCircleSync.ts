@@ -160,6 +160,13 @@ class CareCircleSyncService {
     return this.careCircleId;
   }
 
+  // Current in-memory care auth token, for clients that want to attribute
+  // otherwise-unauthenticated requests (e.g. AI usage logging on /api/chat,
+  // /api/stt). Null when not authenticated to a circle.
+  getAuthToken(): string | null {
+    return this.authToken;
+  }
+
   // Set authentication token (from caregiver login)
   async setAuthToken(token: string): Promise<void> {
     this.authToken = token;
