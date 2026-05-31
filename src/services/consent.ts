@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auditLogService } from './auditLog';
+import { careCircleSyncService } from './careCircleSync';
 import {
   ConsentCategory,
   ConsentGrantee,
@@ -498,6 +499,20 @@ class ConsentService {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(this.preferences));
     } catch (error) {
       console.error('[Consent] Save error:', error);
+    }
+
+    // Sync consent up to the care circle so the server enforces the patient's
+    // actual choices. No-op when not connected to a circle. Fire-and-forget.
+    if (careCircleSyncService.isConnected()) {
+      void careCircleSyncService
+        .pushConsent({
+          globalDataSharing: this.preferences.globalDataSharing,
+          consents: this.preferences.consents,
+        })
+        .then((r) => {
+          if (!r.success) console.warn('[Consent] server sync failed:', r.error);
+        })
+        .catch((e) => console.warn('[Consent] server sync error:', e));
     }
   }
 }

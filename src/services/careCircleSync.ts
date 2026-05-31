@@ -444,6 +444,75 @@ class CareCircleSyncService {
     };
   }
 
+  /**
+   * Push health readings to the cloud. Health data is NOT part of the vault
+   * change-log/sync; it has a dedicated append-only endpoint that also runs the
+   * abnormal-vital threshold → caregiver_alert → WebSocket-broadcast pipeline
+   * server-side. Returns success/error so callers can surface or retry.
+   */
+  async pushHealthReadings(
+    readings: { dataType: string; value: unknown; unit?: string; measuredAt: string; source?: string; notes?: string }[]
+  ): Promise<{ success: boolean; inserted?: number; error?: string }> {
+    if (!this.careCircleId || !this.authToken) {
+      return { success: false, error: 'Not connected to care circle' };
+    }
+    if (!readings || readings.length === 0) return { success: true, inserted: 0 };
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/care/circles/${this.careCircleId}/health`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({ readings }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.error || `HTTP ${response.status}` };
+      }
+      const data = await response.json();
+      return { success: true, inserted: data.inserted };
+    } catch (error) {
+      console.error('[CareCircleSync] Health push error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  /**
+   * Push the patient's consent preferences to the care circle. The server route
+   * is owner-only, which the patient (circle owner) satisfies. This keeps
+   * care_circles.patient_consent in sync with the device so the server's consent
+   * enforcement actually reflects the patient's choices (previously it never did
+   * — the device never uploaded consent, so enforcement ran against an empty {}).
+   */
+  async pushConsent(consent: {
+    globalDataSharing: boolean;
+    consents: unknown[];
+  }): Promise<{ success: boolean; error?: string }> {
+    if (!this.careCircleId || !this.authToken) {
+      return { success: false, error: 'Not connected to care circle' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/api/care/circles/${this.careCircleId}/consent`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({ consent }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.error || `HTTP ${response.status}` };
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[CareCircleSync] Consent push error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
   // Apply remote data to local vault
   private async applyRemoteData(data: {
     medications?: unknown[];
