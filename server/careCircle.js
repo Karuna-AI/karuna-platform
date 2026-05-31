@@ -704,7 +704,15 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
 
     const user = result.rows[0];
     const verificationUrl = `${APP_BASE_URL}/verify-email/${verificationToken}`;
-    await sendVerificationEmail(user.email, user.name, verificationUrl);
+    // Best-effort: the user row is already committed. If the verification email
+    // throws (e.g. Resend configured but erroring), don't 500 the registration —
+    // that left an orphan unverified account the client believed had failed, and
+    // the 3/hr limiter then blocked retry. The email can be re-sent later.
+    try {
+      await sendVerificationEmail(user.email, user.name, verificationUrl);
+    } catch (emailErr) {
+      console.warn('[register] verification email send failed:', emailErr.message);
+    }
 
     const token = createJWT(user);
 
