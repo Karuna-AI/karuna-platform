@@ -23,10 +23,34 @@ const KEY_DERIVATION_ITERATIONS = 100000;
 // The fallback path hashes via expo-crypto, which is one native bridge round-trip
 // per iteration — 100k took ~2 minutes on a low-end device and is the reason
 // vault creation appeared to hang. Use a far smaller count there so create/unlock
-// stay responsive. (Defence-in-depth note: the device salt + OS app-sandbox are
-// the primary protection for the short PIN; a future hardening pass could swap in
-// native PBKDF2 to raise this safely.)
+// stay responsive.
 const FALLBACK_KEY_DERIVATION_ITERATIONS = 1000;
+
+/*
+ * SECURITY — ACCEPTED RISK (Hermes/JSC fallback path only)
+ * ---------------------------------------------------------
+ * crypto.subtle is unavailable on Hermes (Android) and JSC (iOS), so on real
+ * devices the vault uses the expo-crypto fallback below. An automated security
+ * review flagged two HIGH issues here; they are knowingly accepted for now to
+ * unblock the vault (which previously failed on every device), and tracked for
+ * hardening:
+ *
+ *   1. No authentication (not AEAD). The fallback is a SHA-256 keystream XOR
+ *      with no integrity tag, so ciphertext is malleable — unlike the AES-GCM
+ *      (crypto.subtle) path. Confidentiality holds (random per-record IV); a
+ *      tampered record is not detected. (The `keyCheck` record still detects a
+ *      wrong PIN, but not targeted bit-flips of vault data.)
+ *   2. Weak KDF for a low-entropy PIN. 1000 iterations + a 4–6 digit PIN is
+ *      brute-forceable offline by an attacker who can read the on-device salt +
+ *      ciphertext (e.g. a rooted/jailbroken device or an unencrypted backup).
+ *      The device salt + OS app-sandbox are the primary protection.
+ *
+ * HARDENING PATH (no native build risk): swap this path to pure-JS audited
+ * crypto — @noble/ciphers (real AES-256-GCM AEAD) + @noble/hashes (PBKDF2 100k,
+ * runs <1s in-engine on Hermes). Alternatively a native module
+ * (react-native-quick-crypto / react-native-aes-crypto). Until then, prefer a
+ * longer passphrase over a 4-digit PIN for sensitive vaults.
+ */
 
 /**
  * Web Crypto (crypto.subtle) is absent on Hermes (Android) and JSC (iOS) — i.e.
