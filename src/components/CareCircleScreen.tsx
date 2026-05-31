@@ -17,6 +17,24 @@ interface CareCircleScreenProps {
   inviteToken?: string;
 }
 
+/**
+ * Turn a sync error into the alert shown to the user. Session/auth failures
+ * (missing, expired, or rejected token) are dead-ends on mobile — there is no
+ * password login, only invite codes — so guide the user to reconnect rather
+ * than showing a confusing generic failure.
+ */
+export function syncFailureAlert(error?: string): { title: string; message: string } {
+  if (error && /token|not connected|expired|unauthor/i.test(error)) {
+    return {
+      title: 'Reconnect Needed',
+      message:
+        'Your secure link to your care circle has expired. Ask your family member for a ' +
+        'new invitation code, then enter it here to reconnect.',
+    };
+  }
+  return { title: 'Sync Failed', message: error || 'Unable to sync' };
+}
+
 interface SyncStatus {
   connected: boolean;
   careCircleId: string | null;
@@ -94,7 +112,8 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
     if (result.success) {
       Alert.alert('Sync Complete', `Synced ${result.synced} items`);
     } else {
-      Alert.alert('Sync Failed', result.error || 'Unable to sync');
+      const { title, message } = syncFailureAlert(result.error);
+      Alert.alert(title, message);
     }
 
     loadStatus();

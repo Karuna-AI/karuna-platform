@@ -57,7 +57,21 @@ class CareCircleSyncService {
     // Load saved state
     const savedCircleId = await AsyncStorage.getItem(STORAGE_KEYS.CARE_CIRCLE_ID);
     const savedTokenResult = await secureStorageService.getCaregiverToken();
-    const savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
+    let savedToken = savedTokenResult.success ? (savedTokenResult.token ?? null) : null;
+
+    // One-time migration: older builds persisted the auth token in AsyncStorage,
+    // but we now read it from SecureStore. If SecureStore has none yet the legacy
+    // key does, adopt it and move it across so existing installs recover their
+    // session (and resume syncing) without having to re-join the circle.
+    if (!savedToken) {
+      const legacyToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      if (legacyToken) {
+        await this.setAuthToken(legacyToken);
+        await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        savedToken = legacyToken;
+      }
+    }
+
     const savedChanges = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_CHANGES);
 
     if (savedCircleId) this.careCircleId = savedCircleId;
@@ -104,8 +118,9 @@ class CareCircleSyncService {
       }
       this.careCircleId = circle.id;
       if (authToken) {
-        this.authToken = authToken;
-        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken);
+        // Persist via SecureStore (the store initialize() reads back) so the
+        // write and read stores stay aligned across app restarts.
+        await this.setAuthToken(authToken);
       }
       await AsyncStorage.setItem(STORAGE_KEYS.CARE_CIRCLE_ID, circle.id);
 
@@ -422,6 +437,10 @@ class CareCircleSyncService {
       success: pullResult.success,
       synced: pushResult.synced + pullResult.synced,
       conflicts: [...pushResult.conflicts, ...pullResult.conflicts],
+      // Propagate the real reason (e.g. 'Not connected to care circle',
+      // 'Invalid or expired token') instead of dropping it and letting the UI
+      // fall back to a generic "Unable to sync".
+      error: pullResult.error,
     };
   }
 
@@ -582,5 +601,6 @@ class CareCircleSyncService {
   }
 }
 
+export { CareCircleSyncService };
 export const careCircleSyncService = new CareCircleSyncService();
 export default careCircleSyncService;
