@@ -284,8 +284,21 @@ class CareCircleSyncService {
   private handleWebSocketMessage(message: { type: string; [key: string]: unknown }) {
     switch (message.type) {
       case 'sync_update':
-        // Another device pushed changes
-        this.handleRemoteChanges(message.changes as SyncChange[]);
+        // The server broadcasts {applied, conflicts, entityTypes} — NOT an inline
+        // changes array (reading message.changes was always undefined). Re-pull
+        // the latest circle state to apply whatever changed.
+        void this.pullFromCloud();
+        this.notifyListeners('sync_update', message);
+        break;
+
+      case 'health_update':
+        this.notifyListeners('health_update', message);
+        break;
+
+      case 'alert':
+        // Abnormal-vital / missed-medication / missed-checkin alerts. Previously
+        // ignored, so the patient device got no realtime caregiver signal.
+        this.notifyListeners('alert', message);
         break;
 
       case 'member_joined':
@@ -294,6 +307,10 @@ class CareCircleSyncService {
 
       case 'member_left':
         this.notifyListeners('member_left', message.memberId);
+        break;
+
+      case 'connected':
+      case 'pong':
         break;
 
       default:
@@ -582,6 +599,31 @@ class CareCircleSyncService {
     }
   }
 
+  /**
+   * Last-write-wins decision for a remote item vs the local copy. Reads the
+   * timestamp from EITHER snake_case (`updated_at`, as the server returns) or
+   * camelCase (`updatedAt`, the local model) — the previous code only read
+   * camelCase, so server `updated_at` was always undefined and remote edits
+   * (e.g. a caregiver changing a medication) never overwrote the device.
+   */
+  static mergeDecision(remoteItem: any, localItem: any | undefined): 'add' | 'update' | 'skip' {
+    if (!localItem) return 'add';
+    const remoteTs = remoteItem?.updated_at ?? remoteItem?.updatedAt;
+    const localTs = localItem?.updated_at ?? localItem?.updatedAt;
+    if (!remoteTs) return 'skip'; // no remote timestamp — don't clobber local
+    if (!localTs) return 'update'; // local has no timestamp — remote wins
+    return new Date(remoteTs) > new Date(localTs) ? 'update' : 'skip';
+  }
+
+  // Server rows are snake_case; surface camelCase timestamps so locally-stored
+  // items carry a usable updatedAt/createdAt for subsequent merges.
+  private static normalizeTimestamps(item: any): any {
+    const out = { ...item };
+    if (out.updated_at && !out.updatedAt) out.updatedAt = out.updated_at;
+    if (out.created_at && !out.createdAt) out.createdAt = out.created_at;
+    return out;
+  }
+
   private async mergeEntities<T extends { id: string; updatedAt?: string }>(
     remoteItems: T[],
     getLocal: () => Promise<T[]>,
@@ -594,18 +636,17 @@ class CareCircleSyncService {
 
       for (const remoteItem of remoteItems) {
         const localItem = localMap.get(remoteItem.id);
+        const decision = CareCircleSyncService.mergeDecision(remoteItem, localItem);
 
-        if (!localItem) {
-          // New item from remote - add it
+        if (decision === 'add') {
           const { id: _id, ...rest } = remoteItem as any;
-          await addItem(rest);
-        } else if (remoteItem.updatedAt && localItem.updatedAt &&
-                   new Date(remoteItem.updatedAt) > new Date(localItem.updatedAt)) {
-          // Remote is newer - update local
-          const { id: _id2, createdAt: _createdAt, createdBy: _createdBy, ...updates } = remoteItem as any;
-          await updateItem(remoteItem.id, updates);
+          await addItem(CareCircleSyncService.normalizeTimestamps(rest));
+        } else if (decision === 'update') {
+          const { id: _id2, createdAt: _c1, created_at: _c2, createdBy: _cb1, created_by: _cb2, ...updates } =
+            remoteItem as any;
+          await updateItem(remoteItem.id, CareCircleSyncService.normalizeTimestamps(updates));
         }
-        // Otherwise local is newer or same - keep local
+        // 'skip' → local is newer/equal or remote lacks a timestamp → keep local
       }
     } catch (error) {
       console.error('[CareCircleSync] Entity merge error:', error);

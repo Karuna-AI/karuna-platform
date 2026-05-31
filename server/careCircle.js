@@ -1574,6 +1574,16 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
 
     const paginationSuffix = paginated ? ` LIMIT ${limit} OFFSET ${offset}` : '';
 
+    // Incremental pull: when the client passes ?since=<ISO>, return only rows
+    // changed after that timestamp. Previously `since` was ignored and every
+    // pull re-downloaded the full snapshot.
+    const sinceIso = (() => {
+      const s = req.query.since;
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    })();
+
     // Get vault data based on permissions AND patient consent
     const canSeeHealth    = permissions.canViewMedications && checkConsent(consentData, role, 'health_data');
     const canSeeDoctors   = permissions.canViewDoctors     && checkConsent(consentData, role, 'health_data');
@@ -1581,25 +1591,34 @@ router.get('/circles/:circleId/sync', authMiddleware, async (req, res) => {
     const canSeeContacts  = permissions.canViewContacts    && checkConsent(consentData, role, 'contact_info');
     const canSeeAccounts  = permissions.canViewAccounts    && checkConsent(consentData, role, 'financial_data');
 
+    // table names are fixed literals (not user input); `since` is parameterized.
+    const vaultQuery = (table, allowed) => {
+      if (!allowed) return Promise.resolve({ rows: [] });
+      const params = [circleId];
+      let sinceClause = '';
+      if (sinceIso) { params.push(sinceIso); sinceClause = ` AND updated_at > $${params.length}`; }
+      return db.query(`SELECT * FROM ${table} WHERE circle_id = $1${sinceClause}${paginationSuffix}`, params);
+    };
+
+    const notesQuery = () => {
+      const params = [circleId];
+      let authorClause = '';
+      if (!permissions.canViewAllNotes) { params.push(req.user.id); authorClause = ` AND author_id = $${params.length}`; }
+      let sinceClause = '';
+      if (sinceIso) { params.push(sinceIso); sinceClause = ` AND updated_at > $${params.length}`; }
+      return db.query(
+        `SELECT * FROM vault_notes WHERE circle_id = $1${authorClause}${sinceClause} ORDER BY created_at DESC${paginationSuffix}`,
+        params,
+      );
+    };
+
     const [medications, doctors, appointments, contacts, notes, accounts] = await Promise.all([
-      canSeeHealth
-        ? db.query(`SELECT * FROM vault_medications WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeDoctors
-        ? db.query(`SELECT * FROM vault_doctors WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeAppts
-        ? db.query(`SELECT * FROM vault_appointments WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      canSeeContacts
-        ? db.query(`SELECT * FROM vault_contacts WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
-      permissions.canViewAllNotes
-        ? db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 ORDER BY created_at DESC${paginationSuffix}`, [circleId])
-        : db.query(`SELECT * FROM vault_notes WHERE circle_id = $1 AND author_id = $2 ORDER BY created_at DESC${paginationSuffix}`, [circleId, req.user.id]),
-      canSeeAccounts
-        ? db.query(`SELECT * FROM vault_accounts WHERE circle_id = $1${paginationSuffix}`, [circleId])
-        : { rows: [] },
+      vaultQuery('vault_medications', canSeeHealth),
+      vaultQuery('vault_doctors', canSeeDoctors),
+      vaultQuery('vault_appointments', canSeeAppts),
+      vaultQuery('vault_contacts', canSeeContacts),
+      notesQuery(),
+      vaultQuery('vault_accounts', canSeeAccounts),
     ]);
 
     res.json({
