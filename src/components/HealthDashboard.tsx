@@ -159,6 +159,15 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
 
   useEffect(() => {
     loadData();
+    // Surface vital-upload failures: the reading is saved on the device, but if
+    // it didn't reach the care circle the user should know (previously silent).
+    const unsubscribe = healthDataService.addSyncErrorListener((err) => {
+      Alert.alert(
+        'Saved on this device',
+        `Your reading was saved here, but couldn’t be shared with your care circle (${err}). It’ll retry next time you’re online.`,
+      );
+    });
+    return unsubscribe;
   }, [loadData]);
 
   const handleRefresh = useCallback(async () => {

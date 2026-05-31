@@ -351,13 +351,35 @@ class HealthDataService {
         void careCircleSyncService
           .pushHealthReadings([serverReading])
           .then((r) => {
-            if (!r.success) console.warn('[HealthData] vital upload failed:', r.error);
+            if (!r.success) {
+              console.warn('[HealthData] vital upload failed:', r.error);
+              this.notifySyncError(r.error || 'Upload failed');
+            }
           })
-          .catch((e) => console.warn('[HealthData] vital upload error:', e));
+          .catch((e) => {
+            console.warn('[HealthData] vital upload error:', e);
+            this.notifySyncError('Network error');
+          });
       }
     }
 
     return newReading;
+  }
+
+  private syncErrorListeners: ((error: string) => void)[] = [];
+
+  /** Subscribe to vital-upload failures so the UI can tell the user it didn't reach caregivers. */
+  addSyncErrorListener(listener: (error: string) => void): () => void {
+    this.syncErrorListeners.push(listener);
+    return () => {
+      this.syncErrorListeners = this.syncErrorListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifySyncError(error: string): void {
+    this.syncErrorListeners.forEach((l) => {
+      try { l(error); } catch { /* listener errors must not break health logging */ }
+    });
   }
 
   /**
