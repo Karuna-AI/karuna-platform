@@ -10,12 +10,15 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
 ## Issues to fix (todos)
 
 ### 🔴 HIGH
-- [ ] **H1 — Vault data added on device never syncs to the care circle.**
-  `careCircleSync.trackChange` has zero callers; `vaultService.add/update/delete*`
-  (medications, doctors, appointments, contacts, accounts, documents) write
-  locally only. Patient-entered vault data is invisible to caregivers
-  (vault sync is pull-only). Verified: QATestMed saved locally, never reached prod.
-  Fix: invoke `trackChange(entityType,id,action,data)` from each vault mutation.
+- [x] **H1 — Vault data added on device never syncs to the care circle. FIXED (code, commit 2eed198).**
+  `careCircleSync.trackChange` had zero callers; vault writes stayed local
+  (verified live: vault_accounts=0, sync_changes=0). Fix: vault now emits a
+  change event after every mutation → careCircleSync maps it (new `vaultSyncMap`,
+  camelCase→snake_case to the server's column whitelist) → trackChange → sync.
+  Covers doctor/medication/appointment/contact; account & document excluded
+  (server *_encrypted columns + caregivers can't edit). Client `generateId()` →
+  UUID and server `create` reuses it (ON CONFLICT idempotent) so update/delete
+  match. Unit-tested (12 cases). **Needs next mobile build to verify device→portal E2E.**
 - [x] **H2 — Chat could not answer "what day is it?" (emitted a literal
   `[insert current date here]` placeholder).** Root cause: the chat pipeline
   (`useChat.ts`) injected weather/vault/health context into the user turn but
@@ -51,7 +54,7 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
 - [ ] **M3 — "Sync Health Data" gives no feedback** when there's nothing to pull
   (0 steps) — silent no-op; add a toast/result.
 
-- [ ] **M4 — Vault category delete doesn't refresh the list (looks broken).** Tapping
+- [x] **M4 — Vault category delete doesn't refresh the list (looks broken). FIXED (commit 4f0094a).** Tapping
   Delete on a vault item (Accounts confirmed; same pattern in Doctors/Contacts/
   Documents/Appointments/Medications) removes & persists the item at the data layer
   (verified: lock→unlock reload shows it gone, grid count drops to 0) **but the
