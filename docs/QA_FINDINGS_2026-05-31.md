@@ -52,12 +52,21 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
      and forgetting it loses all data (current copy does not say this).
 
 ### 🟠 MEDIUM
-- [x] **M1 — Consent controls shown to non-owner members. FIXED.** Privacy & Consent
-  screen now disables all toggles + global switch for caregivers (role from
-  onboardingStore), with handler guards (defense-in-depth).
-- [x] **M2 — Patient/owner framing regardless of role. FIXED (consent screen).**
-  Info card + subtitle reframed to "Managed by the Care Recipient" for caregivers.
-  (Broader copy audit of other screens' "your …" wording is a minor follow-up.)
+- [x] **M1 — Consent controls shown to non-owner members. FIXED (re-fixed 2026-06-01).**
+  First attempt used `onboardingStore.getRole()` — on-device QA found it ineffective
+  (a caregiver onboarded as 'self' still saw editable owner toggles). Re-fixed to source
+  edit-permission from **care-circle ownership** via `careCircleSync.getMyCircleRole()`
+  (/auth/me, cached); a circle member — including role-not-yet-resolved — is read-only.
+- [x] **M2 — Patient/owner framing regardless of role. FIXED (re-fixed 2026-06-01).**
+  Consent screen reframes for caregivers; now driven by the circle role (see M1).
+- [x] **N1 — Vault grid counts stale after add (showed "0 items" until full reload). FIXED.**
+  Screen stays mounted in the stack; navigator now bumps a `refreshKey` via `useFocusEffect`
+  so the grid reloads its summary on refocus.
+- [x] **N2 — Care Circle "Offline" right after a successful sync. FIXED.** Status required
+  an open WebSocket; now reports connected when the WS is open OR the last REST sync
+  succeeded (WS is only a realtime-nudge channel). +2 tests.
+- [x] **N3 — Care Circle copy owner-framed for caregivers. FIXED.** Sync/Leave/About copy
+  reframed by circle role (same source as M1/M2).
 - [x] **M3 — "Sync Health Data" gives no feedback. FIXED.** Always alerts now:
   synced N / up-to-date / error (pure helper `syncHealthResultMessage` + 5 tests).
 
@@ -136,3 +145,153 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
 | Consent change (owner) | `care_circles` consent / PUT | ✅ owner path; non-owner 403 surfaced |
 | Vault add (med/doctor/etc.) | (should be `care_circle_vault_items`) | ❌ **H1 — never leaves device** |
 | Emergency contact / Settings prefs / Check-In / What Karuna Knows / Activity Log | local-only by design (AsyncStorage/SecureStore) | n/a — not a backend feature |
+
+---
+
+## ✅ vc9 on-device re-verification (2026-06-01, build af9e111d, versionCode 9, commit b30c4f9)
+
+Installed the fixed preview build (`adb install -r`; confirmed running versionCode=9,
+prior was vc8). Device = caregiver in circle `9d4d87d7`. Screen-recorded the whole session.
+Baseline before testing: vault_doctors=0, vault_medications=0, sync_changes=0 (table empty).
+
+- [x] **H2 — Chat date.** Sent a fresh "what day is it today?" on vc9 → reply
+  **"Today is Monday, June 1, 2026."** (real date, correct DOW, no `[insert current date here]`).
+  Cross-check: `ai_usage_logs` row at 2026-06-01T08:59:59Z, model gpt-4o-mini, success,
+  858 tokens, user_id f21c5ca0 populated. **VERIFIED FIXED.**
+- [x] **L1 — "Appointments" label.** Vault grid renders "Appointments" on a single line
+  (not wrapped). **VERIFIED FIXED.**
+- [x] **H1 — Vault→circle sync (doctor).** Added DrMCPTest / General Physician / MCPClinic
+  → "Doctor added successfully" → prod `vault_doctors` shows
+  `DrMCPTest / general_physician / MCPClinic` (was 0). Deleted it → `vault_doctors`=[] again.
+  **VERIFIED FIXED both directions.**
+- [x] **H1 — Vault→circle sync (medication).** Added MedMCPTest / 1 tablet / once daily
+  → prod `vault_medications` shows `MedMCPTest / 1 tablet / once_daily`. Deleted → []. 
+  **VERIFIED FIXED both directions.**
+- [x] **M4 — Delete refresh.** Deleting the doctor and the medication both removed the card
+  **immediately in-place** (list went straight to "No doctors yet" / "No medications yet",
+  no navigate-away needed, no stale card). **VERIFIED FIXED** (Doctors + Medications).
+- [ ] **N1 (NEW, 🟡) — Vault grid item counts don't refresh after add.** After adding
+  DrMCPTest and returning to the category grid, the **Doctors card still showed "0 items"**
+  even though the doctor was saved, persisted, and synced to prod. Re-entering Doctors showed
+  the card present. So data is correct; only the grid's cached count is stale until full reload.
+  Same root-cause family as M4 (count read once at grid mount; not refreshed on focus).
+  Repro: Vault → Doctors → Add New Doctor → Save → ← Vault. Expected "1 item", got "0 items".
+- [~] **sync_changes note.** The QA plan expected `sync_changes` to grow on a vault edit, but
+  the table is **globally empty (0 rows)** even though the entity reached `vault_doctors` /
+  `vault_medications` directly. The server's `POST /circles/:id/sync` writes the entity table
+  but does not populate the `sync_changes` changelog (columns: action/synced_to_device/…, looks
+  built for server→device push). Not an H1 failure — caregiver edits DO reach the circle — but
+  other members relying on the incremental changelog (vs a full entity pull) wouldn't get deltas.
+  Worth a follow-up to confirm cross-device propagation uses the entity tables, not sync_changes.
+
+### 🔴 M1 + M2 REOPENED — consent role-awareness does NOT trigger for a real caregiver (vc9, on-device)
+
+- [ ] **M1/M2 — NOT working on-device (was marked fixed; unit-tested only).** On the caregiver
+  device, Settings → Security → Privacy & Consent **still shows the owner/patient experience**:
+  - Header reads **"Your Data, Your Control"** (not "Managed by the Care Recipient").
+  - Body reads "You decide what information Karuna can access…" (owner framing).
+  - The **"Share with Caregivers" toggle is interactive, NOT read-only** — tapping it opens the
+    owner-only **"Enable Data Sharing"** dialog (CANCEL/ENABLE). (Cancelled — no consent mutated.)
+  - **Root cause (code-confirmed):** `ConsentScreen` derives the audience from
+    `onboardingStore.getRole()` (`src/components/ConsentScreen.tsx:57`). `getRole()`
+    (`src/services/onboardingStore.ts:75,88`) returns the **local onboarding self-description**
+    stored at `@karuna_onboarding_role`, which **defaults to `'self'`** and is only ever set to
+    `'caregiver'` inside the onboarding flow (`OnboardingFlow.tsx:70`) when the user taps
+    "I'm a caregiver". It has **nothing to do with care-circle membership**. This device's user
+    is a caregiver by *circle membership* (server-side, non-owner), but onboarded as / defaulted
+    to `'self'`, so `consentAudience('self')` → `canEdit:true` → owner UI.
+  - **Runtime proof:** the "Enable Data Sharing" dialog only appears past
+    `if (!audience.canEdit) return;` (ConsentScreen.tsx:64), so `canEdit===true`, so
+    `getRole()!=='caregiver'` on this device — despite it being a real caregiver account.
+  - **Why it matters (HIGH):** (a) privacy miscommunication — a caregiver is told the data is
+    *theirs*; (b) the original M1 defect (editable toggles that the server rejects owner-only)
+    is **still present** for real caregivers — the fix's `canEdit` guard never engages for them.
+  - **Recommended fix:** key consent edit-permission off **care-circle ownership**, not the
+    onboarding role. The authority already exists server-side (`PUT /consent` 403s non-owners,
+    surfaced via consent.ts sync-error listener). The client should learn "am I the circle owner"
+    from the circle membership data (Family/Care Circle fetch: members + roles + this device's
+    userId) and pass *that* to `consentAudience()`. The onboarding self/caregiver flag is the
+    wrong signal and also mis-handles patient-who-onboarded-as-caregiver. **Needs a new build.**
+
+- [x] **M3 — Sync Health Data feedback.** Health → Quick Actions → "Sync Health Data" → explicit
+  alert **"Sync didn't finish — Not connected to health platform"** (OK). No silent no-op; clear
+  result message (this device has no health platform connected). **VERIFIED FIXED.**
+
+### vc9 — additional on-device CRUD + cross-checks (closing prior "inferred" gaps)
+
+- [x] **H1 Appointments (now driven on-device).** Added "ApptMCPTest" (Doctor type, 15 Jun 2026,
+  10:30 AM) → prod `vault_appointments` (purpose='ApptMCPTest', date 2026-06-14T23:00Z=15 Jun BST,
+  time 10:30, status scheduled). Deleted → []. **Synced both directions; M4 refresh OK.**
+- [x] **H1 Contacts (now driven on-device).** Added "ContactMCPTest" (Friend, 5551234567) → prod
+  `vault_contacts` (name=ContactMCPTest, relationship=friend, phone=5551234567). Deleted → [].
+  **Synced both directions; M4 refresh OK.** → **H1 now verified on-device for ALL FOUR
+  caregiver-editable entity types: doctors, medications, appointments, contacts.**
+- [x] **Log Vital Reading (vc9 re-verify).** Logged heart rate 135 bpm (out-of-range) →
+  `health_data` (heart_rate, 135, bpm, manual, 2026-06-01T09:26:00Z) + `caregiver_alerts`
+  ("Abnormal heart rate detected", severity high, 09:26:01Z). Recent Vitals card refreshed
+  in-place. **Both directions confirmed; abnormal value correctly fires alert.** (test row cleaned up)
+- [x] **Vault Accounts (add/edit/delete + sync boundary).** Added "AcctMCPTest" (Bank) → "Account
+  added successfully"; Edited (institution → "MCPBank") → "Account updated successfully", card
+  refreshed in-place; Deleted → "No accounts yet" (M4 OK). Cross-check: `vault_accounts`=0 the
+  whole time → **accounts correctly EXCLUDED from circle sync by design** (financial data stays
+  on-device). Good security boundary.
+- [~] **Vault Documents** — not driven on-device (file-upload type; excluded from sync by design
+  like accounts). Empty state renders.
+
+### Care Circle (Family) tab — vc9
+
+- [x] **Sync Now** → explicit **"Sync Complete — Synced 1 items"** alert; "Last Sync" updated to
+  "Just now". Good feedback.
+- [x] **Leave Care Circle** → confirmation dialog ("Are you sure you want to leave this care
+  circle? Your data will no longer sync with caregivers.") → **CANCELLED** (did NOT leave).
+- [ ] **N2 (NEW, 🟡) — "Connection Status: Offline" persists even right after a successful sync.**
+  The Care Circle screen shows a red/amber "Offline" dot continuously, including immediately after
+  "Sync Complete — Synced 1 items" and while vault writes are actively reaching prod. Almost
+  certainly reflects WebSocket/real-time status, not REST reachability — but to a caregiver/elder
+  it reads as "not connected / my data isn't going anywhere," which contradicts the successful
+  sync. Recommend: label it "Real-time updates: off" or reconcile it with actual sync success.
+- [ ] **N3 (NEW, 🟡) — Care Circle copy is owner/patient-framed for a caregiver device.** Same
+  root cause as M1/M2 (onboarding role='self'): the screen says "Sync **your** data with **your**
+  care circle", "**your** data will no longer sync with caregivers", and "Care Circles allow
+  **your** family members to: View **your** medication schedule…". A caregiver member is not the
+  patient; this framing is misleading. Fix alongside M1/M2 by sourcing role from circle membership.
+
+### Remaining screen sweep (vc9) — all render correctly
+
+- [x] **Chat — Voice (hold to talk).** Switch to Voice → long-press mic → recording overlay
+  ("● 0:12 Listening…", red Stop, Cancel). Cancel stops cleanly. (STT→backend round-trip not
+  exercisable headlessly — no real mic audio.) UI verified on vc9.
+- [x] **Chat — Clear conversation.** "Clear" → confirm dialog ("Are you sure you want to clear all
+  messages?") — CANCELLED (preserved H2 evidence). Confirm-gated.
+- [x] **Settings — Check-In Settings.** Proactive Check-Ins (ON), Daily Frequency slider (Max 3/day),
+  Check-In Types all ON (Steps/Weather/Medication/Appointments/Wellbeing/Hydration). Renders OK.
+- [x] **Settings — What Karuna Knows.** Your Name (Not set/Edit), People Mentioned (none), Things to
+  Remember (none), "Nothing remembered yet … stored only on your device." Renders OK.
+- [x] **Settings — Reset to Defaults.** Confirm dialog ("This will reset all settings to their
+  default values. Continue?") — CANCELLED. Confirm-gated.
+- [x] **Settings — Security Settings.** Set Up PIN, Face ID (⚠️ none enrolled), App Lock, Vault Lock,
+  Privacy & Consent, Activity Log all render. Top prefs (text size/speech/language/voice/
+  accessibility/emergency) render.
+- [x] **Vault lock/unlock + Lock confirmation dialog** re-verified on vc9 (PIN 2580).
+
+### Test-data cleanup (prod) — all removed
+All on-device test entities deleted via the app (doctor/med/appt/contact/account). The one
+direct-DB artifact (manual 135 bpm `health_data` row + its `caregiver_alerts` row) deleted by id.
+Final state for circle 9d4d87d7: vault_doctors/medications/appointments/contacts/accounts all = 0.
+(Chat `ai_usage_logs` rows from the H2 test are append-only telemetry — left as-is.)
+
+## vc9 verification summary (2026-06-01)
+| Item | Result |
+|---|---|
+| H1 vault→circle sync (doctor/med/appointment/contact, add+delete) | ✅ FIXED — verified both directions, all 4 entity types |
+| H2 chat current date | ✅ FIXED — "Today is Monday, June 1, 2026." |
+| M3 Sync Health Data feedback | ✅ FIXED — explicit result alert |
+| M4 delete refreshes list in-place | ✅ FIXED — all categories |
+| L1 "Appointments" label one line | ✅ FIXED |
+| **M1 caregiver consent toggles read-only** | ❌ **NOT working** — toggle still editable (root cause: role from onboardingStore='self', not circle membership) |
+| **M2 caregiver consent copy reframed** | ❌ **NOT working** — still "Your Data, Your Control" (same root cause) |
+| N1 vault grid item counts refresh after add | 🟡 NEW — count stays "0 items" until full reload |
+| N2 Care Circle "Offline" after successful sync | 🟡 NEW — confusing status |
+| N3 Care Circle owner-framed copy for caregiver | 🟡 NEW — same root cause as M1/M2 |
+| Accounts excluded from sync (security boundary) | ✅ confirmed by design |
+| Log Vital Reading → health_data + caregiver_alerts | ✅ verified (out-of-range fires alert) |

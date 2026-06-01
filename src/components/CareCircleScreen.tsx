@@ -48,6 +48,9 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
   const [isJoining, setIsJoining] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // N3: frame copy for the device user's actual circle role (caregiver vs owner),
+  // not patient-only "your data" wording. Sourced from circle membership (see M1/M2).
+  const [isCaregiver, setIsCaregiver] = useState(false);
 
   useEffect(() => {
     loadStatus();
@@ -59,6 +62,17 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      if (!careCircleSyncService.isConnected()) {
+        setIsCaregiver(false);
+        return;
+      }
+      const role = await careCircleSyncService.getMyCircleRole();
+      setIsCaregiver(role === 'caregiver' || role === 'viewer');
+    })();
+  }, [status?.careCircleId]);
 
   const loadStatus = async () => {
     const syncStatus = await careCircleSyncService.getSyncStatus();
@@ -203,7 +217,9 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Sync</Text>
               <Text style={styles.description}>
-                Sync your data with your care circle to keep caregivers updated.
+                {isCaregiver
+                  ? 'Sync to get the latest updates from this care circle.'
+                  : 'Sync your data with your care circle to keep caregivers updated.'}
               </Text>
 
               <TouchableOpacity
@@ -222,7 +238,9 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Leave Circle</Text>
               <Text style={styles.description}>
-                If you leave, your data will no longer be shared with your caregivers.
+                {isCaregiver
+                  ? 'If you leave, you’ll no longer see the information this person shares with the circle.'
+                  : 'If you leave, your data will no longer be shared with your caregivers.'}
               </Text>
 
               <TouchableOpacity
@@ -268,17 +286,22 @@ export default function CareCircleScreen({ onBack, inviteToken }: CareCircleScre
         <View style={styles.card}>
           <Text style={styles.cardTitle}>About Care Circles</Text>
           <Text style={styles.description}>
-            Care Circles allow your family members to:
+            {isCaregiver
+              ? 'A Care Circle lets you help the person you care for. You can:'
+              : 'Care Circles allow your family members to:'}
           </Text>
           <View style={styles.bulletList}>
-            <Text style={styles.bullet}>• View your medication schedule</Text>
+            <Text style={styles.bullet}>
+              • {isCaregiver ? 'View their medication schedule' : 'View your medication schedule'}
+            </Text>
             <Text style={styles.bullet}>• See upcoming appointments</Text>
             <Text style={styles.bullet}>• Add helpful notes and reminders</Text>
             <Text style={styles.bullet}>• Access emergency contacts</Text>
           </View>
           <Text style={[styles.description, { marginTop: 12 }]}>
-            Your sensitive information like bank accounts is protected and only visible
-            to trusted family members with appropriate permissions.
+            {isCaregiver
+              ? 'Sensitive information like bank accounts stays private to the person you care for, visible only with their permission.'
+              : 'Your sensitive information like bank accounts is protected and only visible to trusted family members with appropriate permissions.'}
           </Text>
         </View>
       </ScrollView>

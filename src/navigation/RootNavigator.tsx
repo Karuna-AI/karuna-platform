@@ -1,6 +1,6 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 
 import { ChatScreen } from '../components/ChatScreen';
 import { SettingsScreen } from '../components/SettingsScreen';
@@ -152,8 +152,13 @@ function SettingsScreenWrapper() {
 
 function VaultScreenWrapper() {
   const navigation = useNavigation<RootNavigationProp>();
+  // Bump refreshKey each time the grid regains focus (e.g. returning from a
+  // category add/edit/delete) so the category counts reload (N1).
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  useFocusEffect(React.useCallback(() => { setRefreshKey((k) => k + 1); }, []));
   return (
     <VaultScreen
+      refreshKey={refreshKey}
       onClose={() => navigation.goBack()}
       onNavigate={(screen: string) => {
         const screenMap: Record<string, keyof RootStackParamList> = {
