@@ -67,8 +67,8 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   or `setState([...data])` in each `loadX()`. Surfaced 2026-06-01 (Accounts).
 
 ### 🟡 LOW / cosmetic
-- [x] **L1 — "Appointments" label wraps** to "Appointment​s" on the vault grid card.
-  Re-confirmed on-device 2026-06-01.
+- [ ] **L1 — "Appointments" label wraps** to "Appointment​s" on the vault grid card.
+  Re-confirmed (still present) on-device 2026-06-01 — NOT yet fixed.
 
 ## Vault CRUD verification (2026-06-01, device circle 9d4d87d7, PIN reset to 2580)
 - [x] **Vault reset/recreate** — Forgot PIN → delete → Create Vault (4–6 digit) → Success
