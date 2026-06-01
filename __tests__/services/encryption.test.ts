@@ -335,9 +335,31 @@ describe('EncryptionService', () => {
       expect(result).toBe(true);
     });
 
-    it('returns false when AsyncStorage.removeItem throws during changePin', async () => {
+    it('data stays readable after a PIN change (DEK is re-wrapped, not re-derived)', async () => {
+      // The DEK model (H3 foundation) decouples the data key from the PIN, so a
+      // PIN change must NOT orphan previously-encrypted data.
       await encryptionService.initialize('original-pin');
-      (AsyncStorage.removeItem as jest.Mock).mockRejectedValueOnce(new Error('storage error'));
+      const cipher = await encryptionService.encrypt('my-secret-record');
+
+      expect(await encryptionService.changePin('original-pin', 'new-pin')).toBe(true);
+      // Readable immediately after the change…
+      expect(await encryptionService.decrypt(cipher)).toBe('my-secret-record');
+
+      // …and after a lock + unlock with the new PIN.
+      encryptionService.lock();
+      expect(await encryptionService.initialize('new-pin')).toBe(true);
+      expect(await encryptionService.decrypt(cipher)).toBe('my-secret-record');
+
+      // The old PIN no longer unlocks the vault.
+      encryptionService.lock();
+      expect(await encryptionService.initialize('original-pin')).toBe(false);
+    });
+
+    it('returns false when a storage write throws during changePin', async () => {
+      await encryptionService.initialize('original-pin');
+      // changePin re-wraps the DEK and persists it (setItem); a write failure
+      // must surface as false rather than silently leaving the PIN unchanged.
+      (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('storage error'));
       const result = await encryptionService.changePin('original-pin', 'new-pin');
       expect(result).toBe(false);
     });

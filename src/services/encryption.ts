@@ -15,6 +15,10 @@ import * as Crypto from 'expo-crypto';
 const STORAGE_KEYS = {
   ENCRYPTION_KEY_CHECK: '@karuna/vault_key_check',
   ENCRYPTION_SALT: '@karuna/vault_salt',
+  // DEK (data encryption key) wrapped under the PIN-derived key. Decoupling the
+  // data key from the PIN lets the PIN change (and, later, recovery re-key) without
+  // re-encrypting vault data. See docs/VAULT_PIN_RECOVERY_DESIGN.md (H3).
+  WRAPPED_DEK: '@karuna/vault_wrapped_dek',
 };
 
 // Key derivation iterations for brute-force resistance.
@@ -189,7 +193,41 @@ class EncryptionService {
   private salt: string | null = null;
 
   /**
-   * Initialize encryption with a user PIN
+   * Load the given raw key bytes as the active cipher key (AES-GCM via subtle
+   * when available, else the expo-crypto SHA-256 keystream fallback).
+   */
+  private async setActiveKey(keyBytes: Uint8Array): Promise<void> {
+    this.keyBytes = keyBytes;
+    this.useWebCrypto = hasCryptoSubtle();
+    this.cryptoKey = null;
+    if (this.useWebCrypto) {
+      try {
+        this.cryptoKey = await crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['encrypt', 'decrypt']
+        );
+      } catch (error) {
+        console.warn('[Encryption] AES-GCM import failed, using expo-crypto fallback:', error);
+        this.useWebCrypto = false;
+      }
+    }
+    // Keep keyString set regardless so the fallback cipher always has key material.
+    this.keyString = bytesToBase64(keyBytes);
+  }
+
+  /**
+   * Initialize encryption with a user PIN.
+   *
+   * Uses a DEK (data encryption key) decoupled from the PIN: the PIN-derived key
+   * only wraps/unwraps the DEK; all vault data is encrypted under the DEK. This
+   * lets the PIN change (and caregiver-assisted recovery, later) re-key without
+   * re-encrypting data. Legacy vaults (data encrypted directly under the
+   * PIN-derived key, no wrapped DEK) are migrated in place by *freezing* that
+   * key as the DEK and wrapping it — so no vault data is ever re-encrypted.
+   * See docs/VAULT_PIN_RECOVERY_DESIGN.md (H3).
    */
   async initialize(pin: string): Promise<boolean> {
     try {
@@ -201,39 +239,29 @@ class EncryptionService {
       }
       this.salt = salt;
 
-      // Derive key from PIN using PBKDF2 or iterative SHA-256
-      this.keyBytes = await deriveKey(pin, salt);
+      // Derive the PIN key (used only to wrap/unwrap the DEK). Make it the active
+      // key first so encrypt()/decrypt() operate under the PIN key for (un)wrapping.
+      const pinKeyBytes = await deriveKey(pin, salt);
+      await this.setActiveKey(pinKeyBytes);
 
-      // Prefer AES-256-GCM via Web Crypto when available (web). On Hermes/JSC
-      // (every real device) crypto.subtle is absent, so fall back to the
-      // expo-crypto SHA-256 keystream cipher instead of throwing.
-      this.useWebCrypto = hasCryptoSubtle();
-      if (this.useWebCrypto) {
-        try {
-          this.cryptoKey = await crypto.subtle.importKey(
-            'raw',
-            this.keyBytes,
-            { name: 'AES-GCM' },
-            false,
-            ['encrypt', 'decrypt']
-          );
-        } catch (error) {
-          // crypto.subtle exists but rejected the key — drop to the fallback
-          // rather than failing vault creation outright.
-          console.warn('[Encryption] AES-GCM import failed, using expo-crypto fallback:', error);
-          this.useWebCrypto = false;
-        }
-      }
-      if (!this.useWebCrypto) {
-        this.keyString = bytesToBase64(this.keyBytes);
-      }
-
-      // Verify the PIN by trying to decrypt the key check
+      const wrapped = await AsyncStorage.getItem(STORAGE_KEYS.WRAPPED_DEK);
       const keyCheck = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
-      if (keyCheck) {
+      let dekBytes: Uint8Array;
+
+      if (wrapped) {
+        // Existing DEK vault: unwrap the DEK with the PIN key. Failure = wrong PIN.
         try {
-          const decrypted = await this.decrypt(keyCheck);
-          if (decrypted !== 'KARUNA_VAULT_KEY_VALID') {
+          dekBytes = base64ToBytes(await this.decrypt(wrapped));
+        } catch {
+          console.error('Invalid PIN - DEK unwrap failed');
+          return false;
+        }
+      } else if (keyCheck) {
+        // Legacy vault: data is encrypted directly under the PIN key. Verify the
+        // PIN against the key check FIRST (before writing anything), then freeze
+        // the PIN key as the DEK and wrap it — no data re-encryption needed.
+        try {
+          if (await this.decrypt(keyCheck) !== 'KARUNA_VAULT_KEY_VALID') {
             console.error('Invalid PIN - decryption failed');
             return false;
           }
@@ -241,10 +269,34 @@ class EncryptionService {
           console.error('Invalid PIN - decryption error');
           return false;
         }
+        dekBytes = pinKeyBytes;
+        await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, await this.encrypt(bytesToBase64(dekBytes)));
       } else {
-        // First time setup - save key check
-        const encrypted = await this.encrypt('KARUNA_VAULT_KEY_VALID');
-        await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK, encrypted);
+        // Brand-new vault: random DEK, wrapped under the PIN key.
+        dekBytes = new Uint8Array(await Crypto.getRandomBytesAsync(32));
+        await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, await this.encrypt(bytesToBase64(dekBytes)));
+      }
+
+      // Switch the active key to the DEK for all subsequent data operations.
+      await this.setActiveKey(dekBytes);
+
+      // Key check (under the DEK) — integrity guard. Legacy migration: DEK === old
+      // PIN key, so the existing key check still validates. New vault: create it.
+      if (keyCheck) {
+        try {
+          if (await this.decrypt(keyCheck) !== 'KARUNA_VAULT_KEY_VALID') {
+            console.error('Vault key check failed - data may be corrupted');
+            return false;
+          }
+        } catch {
+          console.error('Vault key check could not be decrypted');
+          return false;
+        }
+      } else {
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.ENCRYPTION_KEY_CHECK,
+          await this.encrypt('KARUNA_VAULT_KEY_VALID')
+        );
       }
 
       this.isInitialized = true;
@@ -388,25 +440,26 @@ class EncryptionService {
    */
   async changePin(oldPin: string, newPin: string): Promise<boolean> {
     try {
-      // Verify old PIN
+      // Verify old PIN and load the DEK (becomes the active key after initialize).
       if (!await this.initialize(oldPin)) {
         return false;
       }
+      if (!this.keyBytes) return false;
+      const dekBytes = this.keyBytes;
 
-      // Clear the old key check
-      await AsyncStorage.removeItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
-
-      // Generate new salt for the new PIN
+      // Re-wrap the same DEK under a new-PIN-derived key. Vault data stays
+      // encrypted under the unchanged DEK, so nothing else needs re-encrypting.
       const newSalt = await generateSalt(32);
+      const newPinKey = await deriveKey(newPin, newSalt);
+      await this.setActiveKey(newPinKey);
+      const newWrapped = await this.encrypt(bytesToBase64(dekBytes));
+
+      // Commit new salt + wrapped DEK, then restore the DEK as the active key.
       await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, newSalt);
-
-      // Re-initialize with new PIN
-      this.isInitialized = false;
-      this.cryptoKey = null;
-      this.keyBytes = null;
-      this.keyString = null;
-
-      return await this.initialize(newPin);
+      await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, newWrapped);
+      this.salt = newSalt;
+      await this.setActiveKey(dekBytes);
+      return true;
     } catch (error) {
       console.error('PIN change failed:', error);
       return false;
@@ -419,6 +472,7 @@ class EncryptionService {
   async resetVault(): Promise<void> {
     await AsyncStorage.removeItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
     await AsyncStorage.removeItem(STORAGE_KEYS.ENCRYPTION_SALT);
+    await AsyncStorage.removeItem(STORAGE_KEYS.WRAPPED_DEK);
     this.isInitialized = false;
     this.cryptoKey = null;
     this.keyBytes = null;
