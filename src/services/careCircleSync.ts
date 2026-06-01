@@ -46,6 +46,10 @@ class CareCircleSyncService {
   private syncListeners: ((event: string, data?: unknown) => void)[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  // Whether the last REST sync reached the server. The WebSocket is only for
+  // realtime nudges, so connectivity status should reflect this, not WS state
+  // alone (N2 — screen showed "Offline" right after a successful sync).
+  private lastSyncOk = false;
   private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private isShuttingDown = false;
 
@@ -162,6 +166,7 @@ class CareCircleSyncService {
     this.disconnectWebSocket();
     this.careCircleId = null;
     this.pendingChanges = [];
+    this.lastSyncOk = false;
     await AsyncStorage.multiRemove([
       STORAGE_KEYS.CARE_CIRCLE_ID,
       STORAGE_KEYS.PENDING_CHANGES,
@@ -482,6 +487,7 @@ class CareCircleSyncService {
 
       if (!response.ok) {
         const error = await response.json();
+        this.lastSyncOk = false;
         return { success: false, synced: 0, conflicts: [], error: error.error };
       }
 
@@ -490,12 +496,14 @@ class CareCircleSyncService {
       // Apply remote data to local vault
       await this.applyRemoteData(data);
       await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
+      this.lastSyncOk = true;
 
       this.notifyListeners('pull_complete', data);
 
       return { success: true, synced: 1, conflicts: [] };
     } catch (error) {
       console.error('[CareCircleSync] Pull error:', error);
+      this.lastSyncOk = false;
       return { success: false, synced: 0, conflicts: [], error: 'Network error' };
     }
   }
@@ -764,7 +772,13 @@ class CareCircleSyncService {
     const lastSync = await AsyncStorage.getItem(STORAGE_KEYS.LAST_SYNC);
 
     return {
-      connected: this.careCircleId !== null && this.ws?.readyState === WebSocket.OPEN,
+      // "Connected" = we can reach the care circle. True when the realtime
+      // WebSocket is open OR the last REST sync succeeded (the WS is only a
+      // realtime nudge channel, so a successful sync without an open socket is
+      // still "connected" — N2).
+      connected:
+        this.careCircleId !== null &&
+        (this.ws?.readyState === WebSocket.OPEN || this.lastSyncOk),
       careCircleId: this.careCircleId,
       pendingChanges: this.pendingChanges.length,
       lastSync,

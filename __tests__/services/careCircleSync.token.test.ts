@@ -164,3 +164,28 @@ describe('getMyCircleRole (M1/M2 — role from circle membership, not onboarding
     expect(await svc.getMyCircleRole()).toBe('caregiver');
   });
 });
+
+describe('getSyncStatus connectivity (N2 — not just WebSocket state)', () => {
+  it('reports connected after a successful REST sync even with no open WebSocket', async () => {
+    mockAcceptResponse('tok-n2', 'circle-1');
+    const svc = new CareCircleSyncService();
+    await svc.initialize(URL_BASE);
+    await svc.joinCircle('invite-1'); // joinCircle pulls; WS won't be OPEN in jsdom/node
+
+    const status = await svc.getSyncStatus();
+    expect(status.careCircleId).toBe('circle-1');
+    expect(status.connected).toBe(true); // was false (WS-only) before the N2 fix
+  });
+
+  it('reports NOT connected when a sync fails (and no socket)', async () => {
+    mockAcceptResponse('tok-n2b', 'circle-1');
+    const svc = new CareCircleSyncService();
+    await svc.initialize(URL_BASE);
+    await svc.joinCircle('invite-1');
+    // A failing pull flips lastSyncOk false.
+    (global as any).fetch = jest.fn(async () => { throw new Error('offline'); });
+    await svc.pullFromCloud();
+
+    expect((await svc.getSyncStatus()).connected).toBe(false);
+  });
+});
