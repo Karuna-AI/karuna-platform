@@ -18,6 +18,22 @@ import { VitalType, VITAL_TYPE_INFO, VitalSummary, VitalReading } from '../types
 
 import { getColors } from '../utils/accessibility';
 
+/**
+ * Title/body for the "Sync Health Data" result alert (M3). Always returns a
+ * message — including the "nothing to pull" case, which used to be silent.
+ */
+export function syncHealthResultMessage(
+  result: { success: boolean; synced: number; error?: string }
+): { title: string; body: string } {
+  if (!result.success) {
+    return { title: 'Sync didn’t finish', body: result.error || 'Could not sync your health data. Please try again.' };
+  }
+  if (result.synced > 0) {
+    return { title: 'Health data synced', body: `Added ${result.synced} new reading${result.synced === 1 ? '' : 's'}.` };
+  }
+  return { title: 'You’re up to date', body: 'No new health data to sync right now.' };
+}
+
 // Vital types a user can log by hand, with their unit and whether they need a
 // second value (blood pressure: systolic + diastolic).
 const LOGGABLE_VITALS: { type: VitalType; label: string; unit: string; secondary?: string }[] = [
@@ -175,6 +191,15 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
     await healthDataService.syncFromHealthPlatform();
     await loadData();
     setRefreshing(false);
+  }, [loadData]);
+
+  // Explicit "Sync Health Data" button — always give a result (M3): previously a
+  // silent no-op when there was nothing to pull, which read as "nothing happened".
+  const handleSyncHealth = useCallback(async () => {
+    const result = await healthDataService.syncFromHealthPlatform();
+    await loadData();
+    const { title, body } = syncHealthResultMessage(result);
+    Alert.alert(title, body);
   }, [loadData]);
 
   const getStatusColor = (status: string): string => {
@@ -372,7 +397,7 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
         <View style={styles.actionsRow}>
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => healthDataService.syncFromHealthPlatform()}
+            onPress={handleSyncHealth}
           >
             <Text style={styles.actionIcon}>🔄</Text>
             <Text style={styles.actionText}>Sync Health Data</Text>
