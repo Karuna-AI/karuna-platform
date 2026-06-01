@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import { encryptionService } from './encryption';
 import {
   KnowledgeVaultData,
@@ -34,16 +35,14 @@ export type VaultChangeListener = (
 ) => void;
 
 /**
- * Generate a unique ID — RFC4122 v4 UUID. The care-circle vault tables use a
- * UUID primary key, and the sync endpoint now reuses this id on create so local
- * and server ids stay consistent (lets later update/delete match). Not used for
- * anything security-sensitive, so Math.random is acceptable here.
+ * Generate a unique ID — RFC4122 v4 UUID from a CSPRNG (expo-crypto, the same
+ * native module the vault already uses for key derivation). The care-circle
+ * vault tables use a UUID primary key and the sync endpoint reuses this id on
+ * create, so local and server ids stay consistent (lets later update/delete
+ * match). Uses a cryptographically secure source rather than Math.random.
  */
 function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
+  return Crypto.randomUUID();
 }
 
 /**
