@@ -16,6 +16,10 @@ import { vaultService } from '../services/vault';
 interface VaultScreenProps {
   onClose: () => void;
   onNavigate: (screen: 'accounts' | 'medications' | 'doctors' | 'documents' | 'appointments' | 'contacts') => void;
+  // Bumped by the navigator when this screen regains focus, so the category
+  // counts reload after returning from an add/edit/delete (N1 — counts were
+  // stale until a full reload). Optional so the screen still works standalone.
+  refreshKey?: number;
 }
 
 interface VaultSummary {
@@ -27,7 +31,7 @@ interface VaultSummary {
   appointments: number;
 }
 
-export function VaultScreen({ onClose, onNavigate }: VaultScreenProps): JSX.Element {
+export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreenProps): JSX.Element {
   const [isLocked, setIsLocked] = useState(true);
   const [hasVault, setHasVault] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -39,9 +43,12 @@ export function VaultScreen({ onClose, onNavigate }: VaultScreenProps): JSX.Elem
   const [error, setError] = useState<string | null>(null);
 
   // Check vault status on mount
+  // Re-runs on mount and whenever the navigator bumps refreshKey (screen refocus),
+  // so category counts reflect items added/removed in a sub-screen (N1).
   useEffect(() => {
     checkVaultStatus();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const checkVaultStatus = async () => {
     setIsLoading(true);
