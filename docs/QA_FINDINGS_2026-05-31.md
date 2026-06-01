@@ -27,11 +27,13 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   Fix: added `buildDateContext()` and inject `[Today is …, current time …]` every
   turn (`__tests__/hooks/chatDateContext.test.ts`). **Needs next build to verify on-device.**
 
-- [~] **H3 — No safe Vault PIN recovery; a forgotten PIN means TOTAL data loss.**
-  PARTIAL: added an explicit "there is no recovery" warning at PIN setup (commit pending)
-  — the silent copy was blindsiding users. Full cryptographic recovery (below) needs a
-  DEK refactor + a design decision, proposed separately; encryption key is currently
-  derived directly from the PIN (no re-wrappable data key).
+- [~] **H3 — Vault PIN recovery. IN PROGRESS (caregiver-assisted chosen).**
+  Done: (a) explicit no-recovery warning at PIN setup; (b) **Phase 1 — DEK key model**
+  (data key decoupled from PIN; PIN change/recovery re-wraps the DEK instead of
+  re-encrypting; legacy vaults migrate by freezing the old key as the DEK; also fixed a
+  latent changePin data-orphaning bug). Design: docs/VAULT_PIN_RECOVERY_DESIGN.md.
+  Remaining: **Phase 2** (escrow DEK to server) + **Phase 3** (portal owner-approval +
+  device recovery flow) — a multi-component build (mobile + gateway + caregiver portal).
   The only recovery path is `Forgot vault PIN?` → `vault.deleteVault()` →
   `encryptionService.resetVault()`, which **wipes all vault contents** (accounts,
   doctors, documents, medications, appointments, contacts) because the encryption
