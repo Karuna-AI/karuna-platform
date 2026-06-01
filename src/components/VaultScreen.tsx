@@ -345,6 +345,16 @@ export function VaultScreen({ onClose, onNavigate }: VaultScreenProps): JSX.Elem
               />
             )}
 
+            {/* H3: be explicit that there is no PIN recovery — forgetting it loses
+                all vault data. Silent today, which blindsides memory-impaired users. */}
+            {isCreatingVault && (
+              <Text style={styles.pinWarning}>
+                ⚠️ Important: there is no way to recover this PIN. If it’s forgotten, the
+                information saved in the vault can’t be unlocked and will be lost. Please
+                write it down and keep it safe — or share it with someone you trust.
+              </Text>
+            )}
+
             {error && <Text style={styles.errorText}>{error}</Text>}
 
             <View style={styles.modalButtons}>
@@ -405,7 +415,11 @@ function VaultCategoryButton({
   return (
     <TouchableOpacity style={styles.categoryButton} onPress={onPress}>
       <Text style={styles.categoryIcon}>{icon}</Text>
-      <Text style={styles.categoryTitle}>{title}</Text>
+      {/* Keep long labels like "Appointments" on a single line (L1): shrink to
+          fit rather than wrapping mid-word ("Appointment\ns"). */}
+      <Text style={styles.categoryTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        {title}
+      </Text>
       <Text style={styles.categoryCount}>
         {count} {count === 1 ? 'item' : 'items'}
       </Text>
@@ -635,6 +649,16 @@ const styles = StyleSheet.create({
     color: '#F44336',
     fontSize: 16,
     textAlign: 'center',
+    marginBottom: 16,
+  },
+  pinWarning: {
+    color: '#B26A00',
+    backgroundColor: '#FFF4E5',
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: 'left',
+    padding: 12,
+    borderRadius: 10,
     marginBottom: 16,
   },
   modalButtons: {

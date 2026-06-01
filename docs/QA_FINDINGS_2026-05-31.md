@@ -27,7 +27,13 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   Fix: added `buildDateContext()` and inject `[Today is …, current time …]` every
   turn (`__tests__/hooks/chatDateContext.test.ts`). **Needs next build to verify on-device.**
 
-- [ ] **H3 — No safe Vault PIN recovery; a forgotten PIN means TOTAL data loss.**
+- [~] **H3 — Vault PIN recovery. IN PROGRESS (caregiver-assisted chosen).**
+  Done: (a) explicit no-recovery warning at PIN setup; (b) **Phase 1 — DEK key model**
+  (data key decoupled from PIN; PIN change/recovery re-wraps the DEK instead of
+  re-encrypting; legacy vaults migrate by freezing the old key as the DEK; also fixed a
+  latent changePin data-orphaning bug). Design: docs/VAULT_PIN_RECOVERY_DESIGN.md.
+  Remaining: **Phase 2** (escrow DEK to server) + **Phase 3** (portal owner-approval +
+  device recovery flow) — a multi-component build (mobile + gateway + caregiver portal).
   The only recovery path is `Forgot vault PIN?` → `vault.deleteVault()` →
   `encryptionService.resetVault()`, which **wipes all vault contents** (accounts,
   doctors, documents, medications, appointments, contacts) because the encryption
@@ -46,13 +52,14 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
      and forgetting it loses all data (current copy does not say this).
 
 ### 🟠 MEDIUM
-- [ ] **M1 — Consent controls shown to non-owner members.** A caregiver sees the
-  owner-only consent UI; toggling now surfaces "Only the circle owner can change"
-  (silent failure already fixed), but controls should be gated/hidden for non-owners.
-- [ ] **M2 — App presents patient/owner framing regardless of account role**
-  (a caregiver device sees "your data"/consent as if it's the patient).
-- [ ] **M3 — "Sync Health Data" gives no feedback** when there's nothing to pull
-  (0 steps) — silent no-op; add a toast/result.
+- [x] **M1 — Consent controls shown to non-owner members. FIXED.** Privacy & Consent
+  screen now disables all toggles + global switch for caregivers (role from
+  onboardingStore), with handler guards (defense-in-depth).
+- [x] **M2 — Patient/owner framing regardless of role. FIXED (consent screen).**
+  Info card + subtitle reframed to "Managed by the Care Recipient" for caregivers.
+  (Broader copy audit of other screens' "your …" wording is a minor follow-up.)
+- [x] **M3 — "Sync Health Data" gives no feedback. FIXED.** Always alerts now:
+  synced N / up-to-date / error (pure helper `syncHealthResultMessage` + 5 tests).
 
 - [x] **M4 — Vault category delete doesn't refresh the list (looks broken). FIXED (commit 4f0094a).** Tapping
   Delete on a vault item (Accounts confirmed; same pattern in Doctors/Contacts/
@@ -67,8 +74,8 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   or `setState([...data])` in each `loadX()`. Surfaced 2026-06-01 (Accounts).
 
 ### 🟡 LOW / cosmetic
-- [x] **L1 — "Appointments" label wraps** to "Appointment​s" on the vault grid card.
-  Re-confirmed on-device 2026-06-01.
+- [ ] **L1 — "Appointments" label wraps** to "Appointment​s" on the vault grid card.
+  Re-confirmed (still present) on-device 2026-06-01 — NOT yet fixed.
 
 ## Vault CRUD verification (2026-06-01, device circle 9d4d87d7, PIN reset to 2580)
 - [x] **Vault reset/recreate** — Forgot PIN → delete → Create Vault (4–6 digit) → Success
