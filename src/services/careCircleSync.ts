@@ -9,7 +9,12 @@ const STORAGE_KEYS = {
   LAST_SYNC: '@karuna_last_sync',
   PENDING_CHANGES: '@karuna_pending_changes',
   AUTH_TOKEN: '@karuna_care_auth_token',
+  // This device user's role in the current circle (owner/caregiver/viewer),
+  // cached from /auth/me so role-gated UI (e.g. consent) works offline. M1/M2.
+  CIRCLE_ROLE: '@karuna_circle_role',
 };
+
+export type CircleRole = 'owner' | 'caregiver' | 'viewer';
 
 const MAX_CHANGE_RETRIES = 5;
 
@@ -161,6 +166,7 @@ class CareCircleSyncService {
       STORAGE_KEYS.CARE_CIRCLE_ID,
       STORAGE_KEYS.PENDING_CHANGES,
       STORAGE_KEYS.LAST_SYNC,
+      STORAGE_KEYS.CIRCLE_ROLE,
     ]);
     this.notifyListeners('left_circle');
   }
@@ -173,6 +179,39 @@ class CareCircleSyncService {
   // Get current care circle ID
   getCareCircleId(): string | null {
     return this.careCircleId;
+  }
+
+  /**
+   * This device user's role in the current circle, from /auth/me (authoritative —
+   * the server gates owner-only actions by circle membership, not the local
+   * onboarding flag). Caches the result so role-gated UI works offline. Returns
+   * null when not in a circle, or when the role can't be determined (no token,
+   * network failure with no cache) — callers should treat unknown-in-a-circle as
+   * non-owner (see consentAudience). M1/M2.
+   */
+  async getMyCircleRole(): Promise<CircleRole | null> {
+    if (!this.careCircleId || !this.authToken) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/care/auth/me`, {
+        headers: { Authorization: `Bearer ${this.authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const circle = Array.isArray(data?.circles)
+          ? data.circles.find((c: { id?: string }) => c.id === this.careCircleId)
+          : null;
+        const role = circle?.role as CircleRole | undefined;
+        if (role) {
+          await AsyncStorage.setItem(STORAGE_KEYS.CIRCLE_ROLE, role);
+          return role;
+        }
+      }
+    } catch (error) {
+      console.debug('[CareCircleSync] getMyCircleRole fetch failed, using cache:', error);
+    }
+    // Offline / fetch miss: fall back to the last known cached role.
+    const cached = await AsyncStorage.getItem(STORAGE_KEYS.CIRCLE_ROLE);
+    return (cached as CircleRole | null) ?? null;
   }
 
   // Current in-memory care auth token, for clients that want to attribute

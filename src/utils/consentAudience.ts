@@ -1,14 +1,26 @@
-import type { OnboardingRole } from '../services/onboardingStore';
-
 /**
  * Role-aware presentation for the Privacy & Consent screen.
  *
- * M1: consent controls are owner-only (server PUT /consent rejects non-owners),
- * so a caregiver should see them read-only rather than toggles that silently
- * fail. M2: the framing ("what you share") assumes the device user is the
- * patient; a caregiver needs framing that says these belong to the person they
- * care for.
+ * M1/M2: consent controls are owner-only (server `PUT /consent` rejects non-owners),
+ * so a caregiver should see them read-only + reframed rather than an editable owner UI.
+ *
+ * The authority for "may edit consent" is **care-circle ownership**, NOT the local
+ * onboarding self-description (the original fix's bug — a caregiver onboarded as
+ * 'self' got the owner UI). We decide from the device's role in its circle:
+ *   - not in a circle  → it's the user's own data → editable.
+ *   - circle owner      → editable.
+ *   - circle member (caregiver/viewer) or role-not-yet-known → read-only (safe default,
+ *     so a caregiver never sees an editable owner UI before the role resolves).
  */
+export type CircleRole = 'owner' | 'caregiver' | 'viewer';
+
+export interface ConsentAudienceInput {
+  /** Whether the device is connected to a care circle. */
+  inCircle: boolean;
+  /** The device user's role in that circle, or null if not yet known. */
+  role: CircleRole | null;
+}
+
 export interface ConsentAudience {
   /** Whether this device's user may change consent (only the patient/owner). */
   canEdit: boolean;
@@ -18,8 +30,11 @@ export interface ConsentAudience {
   notice?: string;
 }
 
-export function consentAudience(role: OnboardingRole): ConsentAudience {
-  if (role === 'caregiver') {
+export function consentAudience(input: ConsentAudienceInput): ConsentAudience {
+  // Owner of their own data when standalone (no circle) or explicitly the circle owner.
+  const canEdit = !input.inCircle || input.role === 'owner';
+
+  if (!canEdit) {
     return {
       canEdit: false,
       subtitle: 'These sharing choices belong to the person you care for.',
@@ -28,7 +43,6 @@ export function consentAudience(role: OnboardingRole): ConsentAudience {
         'These settings are managed on their device — you’re viewing them here.',
     };
   }
-  // 'self' — the patient/owner controls their own sharing.
   return {
     canEdit: true,
     subtitle: 'Choose what you share with your caregivers.',

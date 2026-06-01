@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { consentService } from '../services/consent';
-import { onboardingStore } from '../services/onboardingStore';
+import { careCircleSyncService } from '../services/careCircleSync';
 import { consentAudience, ConsentAudience } from '../utils/consentAudience';
 import {
   ConsentCategory,
@@ -53,8 +53,12 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
   const loadConsentData = async () => {
     setIsLoading(true);
     await consentService.initialize();
-    await onboardingStore.initialize();
-    setAudience(consentAudience(onboardingStore.getRole()));
+    // Consent edit-permission follows CARE-CIRCLE ownership (server PUT /consent is
+    // owner-only), not the local onboarding flag. A circle member whose role hasn't
+    // resolved defaults to read-only so a caregiver never sees the editable owner UI.
+    const inCircle = careCircleSyncService.isConnected();
+    const role = inCircle ? await careCircleSyncService.getMyCircleRole() : null;
+    setAudience(consentAudience({ inCircle, role }));
     setSummaries(consentService.getConsentSummaries());
     setGlobalSharing(consentService.isGlobalSharingEnabled());
     setIsLoading(false);
