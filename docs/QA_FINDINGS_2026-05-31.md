@@ -27,7 +27,11 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   Fix: added `buildDateContext()` and inject `[Today is …, current time …]` every
   turn (`__tests__/hooks/chatDateContext.test.ts`). **Needs next build to verify on-device.**
 
-- [ ] **H3 — No safe Vault PIN recovery; a forgotten PIN means TOTAL data loss.**
+- [~] **H3 — No safe Vault PIN recovery; a forgotten PIN means TOTAL data loss.**
+  PARTIAL: added an explicit "there is no recovery" warning at PIN setup (commit pending)
+  — the silent copy was blindsiding users. Full cryptographic recovery (below) needs a
+  DEK refactor + a design decision, proposed separately; encryption key is currently
+  derived directly from the PIN (no re-wrappable data key).
   The only recovery path is `Forgot vault PIN?` → `vault.deleteVault()` →
   `encryptionService.resetVault()`, which **wipes all vault contents** (accounts,
   doctors, documents, medications, appointments, contacts) because the encryption
@@ -46,13 +50,14 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
      and forgetting it loses all data (current copy does not say this).
 
 ### 🟠 MEDIUM
-- [ ] **M1 — Consent controls shown to non-owner members.** A caregiver sees the
-  owner-only consent UI; toggling now surfaces "Only the circle owner can change"
-  (silent failure already fixed), but controls should be gated/hidden for non-owners.
-- [ ] **M2 — App presents patient/owner framing regardless of account role**
-  (a caregiver device sees "your data"/consent as if it's the patient).
-- [ ] **M3 — "Sync Health Data" gives no feedback** when there's nothing to pull
-  (0 steps) — silent no-op; add a toast/result.
+- [x] **M1 — Consent controls shown to non-owner members. FIXED.** Privacy & Consent
+  screen now disables all toggles + global switch for caregivers (role from
+  onboardingStore), with handler guards (defense-in-depth).
+- [x] **M2 — Patient/owner framing regardless of role. FIXED (consent screen).**
+  Info card + subtitle reframed to "Managed by the Care Recipient" for caregivers.
+  (Broader copy audit of other screens' "your …" wording is a minor follow-up.)
+- [x] **M3 — "Sync Health Data" gives no feedback. FIXED.** Always alerts now:
+  synced N / up-to-date / error (pure helper `syncHealthResultMessage` + 5 tests).
 
 - [x] **M4 — Vault category delete doesn't refresh the list (looks broken). FIXED (commit 4f0094a).** Tapping
   Delete on a vault item (Accounts confirmed; same pattern in Doctors/Contacts/
