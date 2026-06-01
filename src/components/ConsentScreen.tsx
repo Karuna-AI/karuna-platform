@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { consentService } from '../services/consent';
+import { onboardingStore } from '../services/onboardingStore';
+import { consentAudience, ConsentAudience } from '../utils/consentAudience';
 import {
   ConsentCategory,
   ConsentSummary,
@@ -28,6 +30,8 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
   const [globalSharing, setGlobalSharing] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<ConsentCategory | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Role-aware presentation (M1/M2): caregivers see consent read-only + reframed.
+  const [audience, setAudience] = useState<ConsentAudience>({ canEdit: true, subtitle: '' });
 
   useEffect(() => {
     loadConsentData();
@@ -49,12 +53,15 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
   const loadConsentData = async () => {
     setIsLoading(true);
     await consentService.initialize();
+    await onboardingStore.initialize();
+    setAudience(consentAudience(onboardingStore.getRole()));
     setSummaries(consentService.getConsentSummaries());
     setGlobalSharing(consentService.isGlobalSharingEnabled());
     setIsLoading(false);
   };
 
   const handleGlobalSharingToggle = async (enabled: boolean) => {
+    if (!audience.canEdit) return; // owner-only (M1) — switches are also disabled
     if (enabled) {
       Alert.alert(
         'Enable Data Sharing',
@@ -81,6 +88,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
     grantee: ConsentGrantee,
     currentlyGranted: boolean
   ) => {
+    if (!audience.canEdit) return; // owner-only (M1) — switches are also disabled
     if (currentlyGranted) {
       // Revoke
       const result = await consentService.revokeConsent(category, grantee);
@@ -191,6 +199,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
                 </Text>
               </View>
               <Switch
+                disabled={!audience.canEdit}
                 value={consentService.hasConsent(summary.category, 'app')}
                 onValueChange={(value) =>
                   handleToggleConsent(summary.category, 'app', !value)
@@ -213,6 +222,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
                 </Text>
               </View>
               <Switch
+                disabled={!audience.canEdit}
                 value={consentService.hasConsent(summary.category, 'ai_assistant')}
                 onValueChange={(value) =>
                   handleToggleConsent(summary.category, 'ai_assistant', !value)
@@ -239,6 +249,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
                     </Text>
                   </View>
                   <Switch
+                    disabled={!audience.canEdit}
                     value={consentService.hasConsent(summary.category, 'caregiver_owner')}
                     onValueChange={(value) =>
                       handleToggleConsent(summary.category, 'caregiver_owner', !value)
@@ -262,6 +273,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
                     </Text>
                   </View>
                   <Switch
+                    disabled={!audience.canEdit}
                     value={consentService.hasConsent(summary.category, 'caregiver_member')}
                     onValueChange={(value) =>
                       handleToggleConsent(summary.category, 'caregiver_member', !value)
@@ -321,13 +333,16 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Info Section */}
+        {/* Info Section — role-aware (M1/M2) */}
         <View style={styles.infoCard}>
           <Text style={styles.infoIcon}>🔒</Text>
-          <Text style={styles.infoTitle}>Your Data, Your Control</Text>
+          <Text style={styles.infoTitle}>
+            {audience.canEdit ? 'Your Data, Your Control' : 'Managed by the Care Recipient'}
+          </Text>
           <Text style={styles.infoText}>
-            You decide what information Karuna can access and who it can be shared with.
-            All your data is encrypted and stored securely on your device.
+            {audience.canEdit
+              ? 'You decide what information Karuna can access and who it can be shared with. All your data is encrypted and stored securely on your device.'
+              : audience.notice}
           </Text>
         </View>
 
@@ -340,6 +355,7 @@ export default function ConsentScreen({ onBack }: ConsentScreenProps): JSX.Eleme
             </Text>
           </View>
           <Switch
+            disabled={!audience.canEdit}
             value={globalSharing}
             onValueChange={handleGlobalSharingToggle}
             trackColor={{ false: '#E0E0E0', true: '#81C784' }}
