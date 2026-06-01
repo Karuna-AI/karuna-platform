@@ -201,7 +201,9 @@ class VaultService {
 
   async getAccounts(): Promise<VaultAccount[]> {
     this.ensureUnlocked();
-    return this.data!.accounts;
+    // Return a copy: deleteX() splices in place, and callers setState() the result;
+    // a new reference each call lets React re-render after a delete (see M4).
+    return [...this.data!.accounts];
   }
 
   async getAccount(id: string): Promise<VaultAccount | null> {
@@ -250,7 +252,7 @@ class VaultService {
 
   async getContacts(): Promise<VaultContact[]> {
     this.ensureUnlocked();
-    return this.data!.contacts;
+    return [...this.data!.contacts];
   }
 
   async getContact(id: string): Promise<VaultContact | null> {
@@ -302,7 +304,7 @@ class VaultService {
     if (activeOnly) {
       return this.data!.medications.filter(m => m.isActive);
     }
-    return this.data!.medications;
+    return [...this.data!.medications];
   }
 
   async getMedication(id: string): Promise<VaultMedication | null> {
@@ -351,7 +353,7 @@ class VaultService {
 
   async getDoctors(): Promise<VaultDoctor[]> {
     this.ensureUnlocked();
-    return this.data!.doctors;
+    return [...this.data!.doctors];
   }
 
   async getDoctor(id: string): Promise<VaultDoctor | null> {
@@ -406,7 +408,7 @@ class VaultService {
         .filter(a => a.date >= now && a.status === 'scheduled')
         .sort((a, b) => a.date.localeCompare(b.date));
     }
-    return this.data!.appointments;
+    return [...this.data!.appointments];
   }
 
   async getAppointment(id: string): Promise<VaultAppointment | null> {
@@ -458,7 +460,7 @@ class VaultService {
     if (category) {
       return this.data!.documents.filter(d => d.category === category);
     }
-    return this.data!.documents;
+    return [...this.data!.documents];
   }
 
   async getDocument(id: string): Promise<VaultDocument | null> {
@@ -510,7 +512,7 @@ class VaultService {
     if (activeOnly) {
       return this.data!.routines.filter(r => r.isActive);
     }
-    return this.data!.routines;
+    return [...this.data!.routines];
   }
 
   async addRoutine(routine: Omit<VaultRoutine, keyof VaultEntity>): Promise<VaultRoutine> {
@@ -533,7 +535,7 @@ class VaultService {
     if (visibleToUser) {
       return this.data!.notes.filter(n => n.visibleToUser);
     }
-    return this.data!.notes;
+    return [...this.data!.notes];
   }
 
   async addNote(note: Omit<VaultNote, keyof VaultEntity>): Promise<VaultNote> {

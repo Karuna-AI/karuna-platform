@@ -298,6 +298,44 @@ describe('VaultService – accounts CRUD', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// 3b. List getters return fresh copies (M4 — vault list didn't refresh after delete)
+//     deleteX() splices the internal array in place; if getX() returns that same
+//     reference, the screen's setState(getX()) is Object.is-equal → React bails out
+//     of the re-render and the deleted item lingers on screen. Getters must return
+//     a new array each call so the list re-renders.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('VaultService – list getters return fresh copies (M4 fix)', () => {
+  beforeEach(resetAndUnlock);
+
+  it('getAccounts() returns a new array reference on each call', async () => {
+    const a = await vaultService.getAccounts();
+    const b = await vaultService.getAccounts();
+    expect(a).not.toBe(b);
+  });
+
+  it('mutating the returned array does not corrupt internal vault state', async () => {
+    await vaultService.addAccount(accountFixture());
+    const list = await vaultService.getAccounts();
+    list.length = 0; // external mutation
+    expect(await vaultService.getAccounts()).toHaveLength(1);
+  });
+
+  it('after deleteAccount(), getAccounts() returns a different reference than before', async () => {
+    const acc = await vaultService.addAccount(accountFixture());
+    const before = await vaultService.getAccounts();
+    await vaultService.deleteAccount(acc.id);
+    const after = await vaultService.getAccounts();
+    expect(after).not.toBe(before);
+    expect(after).toHaveLength(0);
+  });
+
+  it('getContacts() and getDoctors() also return fresh references', async () => {
+    expect(await vaultService.getContacts()).not.toBe(await vaultService.getContacts());
+    expect(await vaultService.getDoctors()).not.toBe(await vaultService.getDoctors());
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 4. Contacts CRUD
 // ═════════════════════════════════════════════════════════════════════════════
 describe('VaultService – contacts CRUD', () => {
