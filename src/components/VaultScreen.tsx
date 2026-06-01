@@ -405,7 +405,11 @@ function VaultCategoryButton({
   return (
     <TouchableOpacity style={styles.categoryButton} onPress={onPress}>
       <Text style={styles.categoryIcon}>{icon}</Text>
-      <Text style={styles.categoryTitle}>{title}</Text>
+      {/* Keep long labels like "Appointments" on a single line (L1): shrink to
+          fit rather than wrapping mid-word ("Appointment\ns"). */}
+      <Text style={styles.categoryTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        {title}
+      </Text>
       <Text style={styles.categoryCount}>
         {count} {count === 1 ? 'item' : 'items'}
       </Text>
