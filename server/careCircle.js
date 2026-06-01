@@ -1815,16 +1815,29 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
         if (action === 'create') {
           const columns = Object.keys(safeData);
           const values = Object.values(safeData);
-          const placeholders = columns.map((_, i) => `$${i + 3}`).join(', ');
+
+          // Reuse the device's entityId as the row id when it's a valid UUID, so
+          // local and server ids stay consistent and later update/delete from the
+          // device match this row (H1). ON CONFLICT keeps retried pushes idempotent
+          // (a re-sent create after a lost response won't duplicate). Falls back to
+          // the table's default id for legacy non-UUID client ids.
+          const isUuid = typeof entityId === 'string' &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entityId);
+
+          const headCols = isUuid ? ['id', 'circle_id', 'created_by'] : ['circle_id', 'created_by'];
+          const headVals = isUuid ? [entityId, circleId, userName] : [circleId, userName];
+          const allVals = [...headVals, ...values];
+          const placeholders = allVals.map((_, i) => `$${i + 1}`).join(', ');
 
           const result = await db.query(
-            `INSERT INTO ${tableName} (circle_id, created_by, ${columns.join(', ')})
-             VALUES ($1, $2, ${placeholders})
-             RETURNING *`,
-            [circleId, userName, ...values]
+            `INSERT INTO ${tableName} (${[...headCols, ...columns].join(', ')})
+             VALUES (${placeholders})
+             ${isUuid ? 'ON CONFLICT (id) DO NOTHING' : ''}
+             RETURNING id`,
+            allVals
           );
 
-          applied.push({ ...change, serverId: result.rows[0].id });
+          applied.push({ ...change, serverId: result.rows[0]?.id ?? entityId });
 
         } else if (action === 'update') {
           const existing = await db.query(

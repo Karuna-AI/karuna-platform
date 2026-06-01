@@ -14,15 +14,36 @@ import {
   VaultLookupResult,
   VaultEntity,
 } from '../types/vault';
+import type { VaultEntityKind } from './vaultSyncMap';
 
 const STORAGE_KEY = '@karuna/knowledge_vault';
 const VAULT_VERSION = 1;
 
 /**
- * Generate a unique ID
+ * Mutation event emitted to a registered listener (careCircleSync) so vault
+ * changes propagate to the care circle (H1). Decoupled via a listener rather
+ * than importing careCircleSync here, which would create an import cycle
+ * (careCircleSync already imports vaultService).
+ */
+export type VaultChangeAction = 'create' | 'update' | 'delete';
+export type VaultChangeListener = (
+  kind: VaultEntityKind,
+  id: string,
+  action: VaultChangeAction,
+  entity: Record<string, unknown> | null
+) => void;
+
+/**
+ * Generate a unique ID — RFC4122 v4 UUID. The care-circle vault tables use a
+ * UUID primary key, and the sync endpoint now reuses this id on create so local
+ * and server ids stay consistent (lets later update/delete match). Not used for
+ * anything security-sensitive, so Math.random is acceptable here.
  */
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
 /**
@@ -65,6 +86,30 @@ class VaultService {
   private data: KnowledgeVaultData | null = null;
   private isLoaded = false;
   private isLocked = true;
+  private changeListener: VaultChangeListener | null = null;
+
+  /**
+   * Register a single listener notified after every vault mutation, used by
+   * careCircleSync to push changes to the care circle (H1). Pass null to clear.
+   */
+  setChangeListener(listener: VaultChangeListener | null): void {
+    this.changeListener = listener;
+  }
+
+  /** Fire the change listener; never let a listener error break a vault write. */
+  private notifyChange(
+    kind: VaultEntityKind,
+    id: string,
+    action: VaultChangeAction,
+    entity: Record<string, unknown> | null
+  ): void {
+    if (!this.changeListener) return;
+    try {
+      this.changeListener(kind, id, action, entity);
+    } catch (err) {
+      console.error('[Vault] change listener error:', err);
+    }
+  }
 
   // ============================================================================
   // Initialization & State
@@ -201,7 +246,9 @@ class VaultService {
 
   async getAccounts(): Promise<VaultAccount[]> {
     this.ensureUnlocked();
-    return this.data!.accounts;
+    // Return a copy: deleteX() splices in place, and callers setState() the result;
+    // a new reference each call lets React re-render after a delete (see M4).
+    return [...this.data!.accounts];
   }
 
   async getAccount(id: string): Promise<VaultAccount | null> {
@@ -250,7 +297,7 @@ class VaultService {
 
   async getContacts(): Promise<VaultContact[]> {
     this.ensureUnlocked();
-    return this.data!.contacts;
+    return [...this.data!.contacts];
   }
 
   async getContact(id: string): Promise<VaultContact | null> {
@@ -266,6 +313,7 @@ class VaultService {
     };
     this.data!.contacts.push(newContact);
     await this.saveData();
+    this.notifyChange('contact', newContact.id, 'create', newContact);
     return newContact;
   }
 
@@ -280,6 +328,7 @@ class VaultService {
       updatedAt: Date.now(),
     };
     await this.saveData();
+    this.notifyChange('contact', id, 'update', this.data!.contacts[index]);
     return this.data!.contacts[index];
   }
 
@@ -290,6 +339,7 @@ class VaultService {
 
     this.data!.contacts.splice(index, 1);
     await this.saveData();
+    this.notifyChange('contact', id, 'delete', null);
     return true;
   }
 
@@ -302,7 +352,7 @@ class VaultService {
     if (activeOnly) {
       return this.data!.medications.filter(m => m.isActive);
     }
-    return this.data!.medications;
+    return [...this.data!.medications];
   }
 
   async getMedication(id: string): Promise<VaultMedication | null> {
@@ -318,6 +368,7 @@ class VaultService {
     };
     this.data!.medications.push(newMed);
     await this.saveData();
+    this.notifyChange('medication', newMed.id, 'create', newMed);
     return newMed;
   }
 
@@ -332,6 +383,7 @@ class VaultService {
       updatedAt: Date.now(),
     };
     await this.saveData();
+    this.notifyChange('medication', id, 'update', this.data!.medications[index]);
     return this.data!.medications[index];
   }
 
@@ -342,6 +394,7 @@ class VaultService {
 
     this.data!.medications.splice(index, 1);
     await this.saveData();
+    this.notifyChange('medication', id, 'delete', null);
     return true;
   }
 
@@ -351,7 +404,7 @@ class VaultService {
 
   async getDoctors(): Promise<VaultDoctor[]> {
     this.ensureUnlocked();
-    return this.data!.doctors;
+    return [...this.data!.doctors];
   }
 
   async getDoctor(id: string): Promise<VaultDoctor | null> {
@@ -367,6 +420,7 @@ class VaultService {
     };
     this.data!.doctors.push(newDoctor);
     await this.saveData();
+    this.notifyChange('doctor', newDoctor.id, 'create', newDoctor);
     return newDoctor;
   }
 
@@ -381,6 +435,7 @@ class VaultService {
       updatedAt: Date.now(),
     };
     await this.saveData();
+    this.notifyChange('doctor', id, 'update', this.data!.doctors[index]);
     return this.data!.doctors[index];
   }
 
@@ -391,6 +446,7 @@ class VaultService {
 
     this.data!.doctors.splice(index, 1);
     await this.saveData();
+    this.notifyChange('doctor', id, 'delete', null);
     return true;
   }
 
@@ -406,7 +462,7 @@ class VaultService {
         .filter(a => a.date >= now && a.status === 'scheduled')
         .sort((a, b) => a.date.localeCompare(b.date));
     }
-    return this.data!.appointments;
+    return [...this.data!.appointments];
   }
 
   async getAppointment(id: string): Promise<VaultAppointment | null> {
@@ -422,6 +478,7 @@ class VaultService {
     };
     this.data!.appointments.push(newAppt);
     await this.saveData();
+    this.notifyChange('appointment', newAppt.id, 'create', newAppt);
     return newAppt;
   }
 
@@ -436,6 +493,7 @@ class VaultService {
       updatedAt: Date.now(),
     };
     await this.saveData();
+    this.notifyChange('appointment', id, 'update', this.data!.appointments[index]);
     return this.data!.appointments[index];
   }
 
@@ -446,6 +504,7 @@ class VaultService {
 
     this.data!.appointments.splice(index, 1);
     await this.saveData();
+    this.notifyChange('appointment', id, 'delete', null);
     return true;
   }
 
@@ -458,7 +517,7 @@ class VaultService {
     if (category) {
       return this.data!.documents.filter(d => d.category === category);
     }
-    return this.data!.documents;
+    return [...this.data!.documents];
   }
 
   async getDocument(id: string): Promise<VaultDocument | null> {
@@ -510,7 +569,7 @@ class VaultService {
     if (activeOnly) {
       return this.data!.routines.filter(r => r.isActive);
     }
-    return this.data!.routines;
+    return [...this.data!.routines];
   }
 
   async addRoutine(routine: Omit<VaultRoutine, keyof VaultEntity>): Promise<VaultRoutine> {
@@ -533,7 +592,7 @@ class VaultService {
     if (visibleToUser) {
       return this.data!.notes.filter(n => n.visibleToUser);
     }
-    return this.data!.notes;
+    return [...this.data!.notes];
   }
 
   async addNote(note: Omit<VaultNote, keyof VaultEntity>): Promise<VaultNote> {

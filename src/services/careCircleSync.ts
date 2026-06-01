@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { vaultService } from './vault';
 import { secureStorageService } from './secureStorage';
+import { toSyncPayload, isSyncSupported } from './vaultSyncMap';
 
 const STORAGE_KEYS = {
   CARE_CIRCLE_ID: '@karuna_care_circle_id',
@@ -84,6 +85,20 @@ class CareCircleSyncService {
         this.pendingChanges = [];
       }
     }
+
+    // Wire vault mutations into the sync queue (H1): patient-entered vault data
+    // now propagates to the care circle. trackChange() no-ops until a circle is
+    // joined, so this is safe to register unconditionally. account/document are
+    // intentionally not synced (server-side encryption + caregivers can't edit).
+    vaultService.setChangeListener((kind, id, action, entity) => {
+      if (!isSyncSupported(kind)) return;
+      if (action === 'delete') {
+        void this.trackChange(kind, id, 'delete', {});
+        return;
+      }
+      const payload = toSyncPayload(kind, entity || {});
+      if (payload) void this.trackChange(payload.entityType, id, action, payload.data);
+    });
 
     console.debug('[CareCircleSync] Initialized with device:', this.deviceId);
   }

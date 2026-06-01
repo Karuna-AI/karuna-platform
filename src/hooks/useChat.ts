@@ -30,6 +30,24 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/**
+ * Build the current-date context injected into every chat turn. The model has
+ * no inherent knowledge of "today", and Karuna's elderly / memory-impaired
+ * users very often ask what day it is — without this the LLM emits a literal
+ * "[insert current date here]" placeholder. Bracketed to match the weather /
+ * vault / health context blocks already appended to the user message.
+ */
+export function buildDateContext(now: Date = new Date()): string {
+  const date = now.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `\n[Today is ${date}, current time ${time}]`;
+}
+
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const { onResponse, onError, onIntentDetected } = options;
 
@@ -181,9 +199,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           // Weather context is optional
         }
 
+        // Always tell the model what day/time it is — see buildDateContext.
+        const dateContext = buildDateContext();
+
         const messagesForAPI: OpenAIMessage[] = [
           ...openAIMessages,
-          { role: 'user', content: text + vaultContext + healthContext + weatherContext },
+          { role: 'user', content: text + dateContext + vaultContext + healthContext + weatherContext },
         ];
 
         const response = await chatWithRetry(messagesForAPI);

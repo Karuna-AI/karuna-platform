@@ -298,6 +298,88 @@ describe('VaultService – accounts CRUD', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// 3b. List getters return fresh copies (M4 — vault list didn't refresh after delete)
+//     deleteX() splices the internal array in place; if getX() returns that same
+//     reference, the screen's setState(getX()) is Object.is-equal → React bails out
+//     of the re-render and the deleted item lingers on screen. Getters must return
+//     a new array each call so the list re-renders.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('VaultService – list getters return fresh copies (M4 fix)', () => {
+  beforeEach(resetAndUnlock);
+
+  it('getAccounts() returns a new array reference on each call', async () => {
+    const a = await vaultService.getAccounts();
+    const b = await vaultService.getAccounts();
+    expect(a).not.toBe(b);
+  });
+
+  it('mutating the returned array does not corrupt internal vault state', async () => {
+    await vaultService.addAccount(accountFixture());
+    const list = await vaultService.getAccounts();
+    list.length = 0; // external mutation
+    expect(await vaultService.getAccounts()).toHaveLength(1);
+  });
+
+  it('after deleteAccount(), getAccounts() returns a different reference than before', async () => {
+    const acc = await vaultService.addAccount(accountFixture());
+    const before = await vaultService.getAccounts();
+    await vaultService.deleteAccount(acc.id);
+    const after = await vaultService.getAccounts();
+    expect(after).not.toBe(before);
+    expect(after).toHaveLength(0);
+  });
+
+  it('getContacts() and getDoctors() also return fresh references', async () => {
+    expect(await vaultService.getContacts()).not.toBe(await vaultService.getContacts());
+    expect(await vaultService.getDoctors()).not.toBe(await vaultService.getDoctors());
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 3c. Change listener fires for sync-eligible mutations (H1 — vault → care circle)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('VaultService – change listener (H1 sync wiring)', () => {
+  beforeEach(resetAndUnlock);
+  afterEach(() => vaultService.setChangeListener(null));
+
+  it('fires (doctor, id, create) on addDoctor and (doctor, id, delete) on deleteDoctor', async () => {
+    const events: any[] = [];
+    vaultService.setChangeListener((kind, id, action) => events.push({ kind, id, action }));
+
+    const doc = await vaultService.addDoctor({ name: 'Dr QA', specialty: 'other', clinic: 'QA' } as any);
+    await vaultService.deleteDoctor(doc.id);
+
+    expect(events).toEqual([
+      { kind: 'doctor', id: doc.id, action: 'create' },
+      { kind: 'doctor', id: doc.id, action: 'delete' },
+    ]);
+  });
+
+  it('passes the full entity on create/update and null on delete', async () => {
+    const seen: any[] = [];
+    vaultService.setChangeListener((_k, _i, action, entity) => seen.push({ action, entity }));
+
+    const med = await vaultService.addMedication({ name: 'Aspirin', dosage: '1', frequency: 'once_daily', isActive: true } as any);
+    await vaultService.updateMedication(med.id, { dosage: '2' });
+    await vaultService.deleteMedication(med.id);
+
+    expect(seen[0].entity).toMatchObject({ name: 'Aspirin' });
+    expect(seen[1].entity).toMatchObject({ dosage: '2' });
+    expect(seen[2]).toEqual({ action: 'delete', entity: null });
+  });
+
+  it('generated ids are valid UUIDs (server reuses them for sync id-consistency)', async () => {
+    const doc = await vaultService.addDoctor({ name: 'D', specialty: 'other', clinic: 'C' } as any);
+    expect(doc.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
+  it('does not throw if a listener throws', async () => {
+    vaultService.setChangeListener(() => { throw new Error('boom'); });
+    await expect(vaultService.addDoctor({ name: 'D', specialty: 'other', clinic: 'C' } as any)).resolves.toBeTruthy();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 4. Contacts CRUD
 // ═════════════════════════════════════════════════════════════════════════════
 describe('VaultService – contacts CRUD', () => {
