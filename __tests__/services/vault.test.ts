@@ -336,6 +336,50 @@ describe('VaultService – list getters return fresh copies (M4 fix)', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// 3c. Change listener fires for sync-eligible mutations (H1 — vault → care circle)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('VaultService – change listener (H1 sync wiring)', () => {
+  beforeEach(resetAndUnlock);
+  afterEach(() => vaultService.setChangeListener(null));
+
+  it('fires (doctor, id, create) on addDoctor and (doctor, id, delete) on deleteDoctor', async () => {
+    const events: any[] = [];
+    vaultService.setChangeListener((kind, id, action) => events.push({ kind, id, action }));
+
+    const doc = await vaultService.addDoctor({ name: 'Dr QA', specialty: 'other', clinic: 'QA' } as any);
+    await vaultService.deleteDoctor(doc.id);
+
+    expect(events).toEqual([
+      { kind: 'doctor', id: doc.id, action: 'create' },
+      { kind: 'doctor', id: doc.id, action: 'delete' },
+    ]);
+  });
+
+  it('passes the full entity on create/update and null on delete', async () => {
+    const seen: any[] = [];
+    vaultService.setChangeListener((_k, _i, action, entity) => seen.push({ action, entity }));
+
+    const med = await vaultService.addMedication({ name: 'Aspirin', dosage: '1', frequency: 'once_daily', isActive: true } as any);
+    await vaultService.updateMedication(med.id, { dosage: '2' });
+    await vaultService.deleteMedication(med.id);
+
+    expect(seen[0].entity).toMatchObject({ name: 'Aspirin' });
+    expect(seen[1].entity).toMatchObject({ dosage: '2' });
+    expect(seen[2]).toEqual({ action: 'delete', entity: null });
+  });
+
+  it('generated ids are valid UUIDs (server reuses them for sync id-consistency)', async () => {
+    const doc = await vaultService.addDoctor({ name: 'D', specialty: 'other', clinic: 'C' } as any);
+    expect(doc.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
+  it('does not throw if a listener throws', async () => {
+    vaultService.setChangeListener(() => { throw new Error('boom'); });
+    await expect(vaultService.addDoctor({ name: 'D', specialty: 'other', clinic: 'C' } as any)).resolves.toBeTruthy();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 4. Contacts CRUD
 // ═════════════════════════════════════════════════════════════════════════════
 describe('VaultService – contacts CRUD', () => {
