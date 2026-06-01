@@ -83,8 +83,8 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   or `setState([...data])` in each `loadX()`. Surfaced 2026-06-01 (Accounts).
 
 ### 🟡 LOW / cosmetic
-- [ ] **L1 — "Appointments" label wraps** to "Appointment​s" on the vault grid card.
-  Re-confirmed (still present) on-device 2026-06-01 — NOT yet fixed.
+- [x] **L1 — "Appointments" label wraps. FIXED (commit e0900e3).** Shrink-to-fit
+  (`numberOfLines={1}` + `adjustsFontSizeToFit`); verified on-device 2026-06-01 (build 00b809b7).
 
 ## Vault CRUD verification (2026-06-01, device circle 9d4d87d7, PIN reset to 2580)
 - [x] **Vault reset/recreate** — Forgot PIN → delete → Create Vault (4–6 digit) → Success
@@ -295,3 +295,43 @@ Final state for circle 9d4d87d7: vault_doctors/medications/appointments/contacts
 | N3 Care Circle owner-framed copy for caregiver | 🟡 NEW — same root cause as M1/M2 |
 | Accounts excluded from sync (security boundary) | ✅ confirmed by design |
 | Log Vital Reading → health_data + caregiver_alerts | ✅ verified (out-of-range fires alert) |
+
+---
+
+## ✅✅ Re-verification on build 00b809b7 (2026-06-01 ~13:00, versionCode 9, commit 6087b55)
+
+Installed the new preview build (`adb install -r`, lastUpdateTime 12:51) and confirmed it's the
+new build via the changed M2 copy. Device = caregiver (server-side `circle_members.role='caregiver'`
+for user f21c5ca0; owner is 96077376). All five re-fixes now VERIFIED on-device:
+
+- [x] **M1 — consent toggles read-only for caregiver. NOW FIXED ✅.** Settings → Security →
+  Privacy & Consent: the **"Share with Caregivers" global toggle is greyed/disabled** — tapping it
+  does **nothing** (no "Enable Data Sharing" dialog, unlike the prior build). Expanded Health
+  Information → the category toggles (**Karuna App**, **AI Assistant**) are also greyed and inert.
+  Read-only confirmed at both global and category level.
+- [x] **M2 — reframed copy. NOW FIXED ✅.** Header reads **"Managed by the Care Recipient"** with
+  "Only the person who set up this care circle can change what's shared. These settings are managed
+  on their device — you're viewing them here." (was "Your Data, Your Control"). Root-cause fix
+  confirmed working: edit-permission now sourced from `careCircleSync.getMyCircleRole()` (`/auth/me`),
+  not the onboarding flag.
+- [x] **N1 — vault grid count refresh. NOW FIXED ✅.** Doctors "0 items" → added DrMCPTest2 → back
+  to grid → card **immediately shows "1 item"**; after delete → back to grid → "0 items". The
+  `useFocusEffect` refreshKey works (both increment and decrement).
+- [x] **N2 — Care Circle status after sync. NOW FIXED ✅.** Was "Offline / Last Sync 2 hours ago";
+  tapped Sync Now → "Sync Complete — Synced 1 items" → **Connection Status flips to "Connected"**
+  (green dot), Last Sync "Just now".
+- [x] **N3 — caregiver-framed copy. NOW FIXED ✅.** Care Circle now reads "Sync to get the latest
+  updates from **this** care circle", "you'll no longer see the information **this person** shares
+  with the circle", and "A Care Circle lets you help **the person you care for**. You can: View
+  **their** medication schedule / See upcoming appointments / …", plus "Sensitive information like
+  bank accounts stays private to **the person you care for**." No more "your data"/"your medication".
+
+Earlier fixes re-confirmed on this build:
+- [x] **H1** — added DrMCPTest2/General Physician/MCPClinic2 → prod `vault_doctors` shows it; deleted → `[]`.
+- [x] **M4** — delete → list shows "No doctors yet" immediately (in-place).
+- [x] **H2** — fresh msg 13:14 → "**Today is Monday, June 1, 2026. The current time is 1:14 PM**, …" (real date+time).
+- [x] **M3** — Sync Health Data → "Sync didn't finish — Not connected to health platform" alert.
+- [x] **L1** — "Appointments" grid label on one line.
+
+**Cleanup:** test doctor deleted via app; final prod state for circle 9d4d87d7 — doctors/meds/appts/contacts all = 0.
+**Net: all previously-failing items (M1, M2, N1, N2, N3) now pass on-device. No regressions in H1/H2/M3/M4/L1.**
