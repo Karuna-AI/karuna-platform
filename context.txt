@@ -31,9 +31,21 @@ ISSUE LIST & STATUS
      fails CI instead of failing at prod deploy. Verified all 6 migrations apply
      cleanly to a fresh schema locally; YAML validated with js-yaml.
 
-3. [PENDING] WebSocket state in-memory only (no horizontal scaling)
-   - wsClients/wsTickets/metrics Maps in server/index.js + server/careCircle.js.
-   - Plan: optional Redis pub/sub via REDIS_URL, fallback to current behavior.
+3. [DONE 2026-06-11] WebSocket state in-memory only (no horizontal scaling)
+   - NEW server/realtime.js: optional Redis adapter (REDIS_URL env). Provides:
+     cross-instance circle broadcasts (pub/sub + instance-id self-suppression),
+     shared WS-ticket store (TTL + atomic Lua GET+DEL consume), advisory job
+     lock for archival. Without REDIS_URL: identical single-instance behavior.
+   - careCircle.js: broadcastToCircle = local delivery + publish; tickets
+     async w/ shared-store-first; archival gated by acquireJobLock.
+   - ioredis added to server deps; REDIS_URL documented in .env.production.example.
+   - VERIFIED live against real Redis (2 simulated instances, 9/9 checks) —
+     caught+fixed a subscribe-before-ready bug. Server suite 123/123 w/o Redis.
+   - ALSO FIXED: admin.realdb.test.ts cleanup order (FK: feature_flags →
+     admin_users) which wedged the suite after aborted runs.
+   - NOTE: intermittent test timeouts on this machine are container disk-I/O
+     stalls (Postgres checkpoint fsyncs up to 21s/file) — environmental.
+   - Remaining acceptable: /metrics per-instance; session cleanup idempotent.
 
 4. [PENDING] Password-reset tokens stored raw in DB
    - Migration 007 + hash-at-rest in forgot/reset-password handlers.

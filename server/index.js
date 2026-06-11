@@ -745,6 +745,7 @@ const shutdown = async (signal) => {
   console.log(`[Server] ${signal} received — shutting down gracefully`);
   server.close(async () => {
     try {
+      await require('./realtime').close();
       const db = require('./db');
       await db.close();
       console.log('[Server] Database connections closed');

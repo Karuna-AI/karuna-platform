@@ -5,22 +5,26 @@ The remaining items from the platform audit are infrastructure / ops / destructi
 verify them against the real environment. Each is documented here with the
 concrete fix and its trade-offs so it can be actioned deliberately.
 
-## 1. WebSocket realtime does not survive horizontal scaling (gateway)
+## 1. WebSocket realtime does not survive horizontal scaling (gateway) — FIXED 2026-06-11
 
-**What:** `wsClients`, `wsTickets`, and `metrics` are module-level in-memory Maps,
-and session-cleanup / archival run as bare `setInterval`s (`server/index.js`,
-`server/careCircle.js`). With **one** Railway instance this is fine (current
-state). With **>1** replica:
-- `broadcastToCircle` only reaches clients connected to the **same** node, so a
-  caregiver on node A misses an `alert`/`health_update` emitted on node B.
-- A ws-ticket issued on node A fails when the upgrade lands on node B.
-- Archival/session-cleanup run redundantly (mostly idempotent, but no leader lock).
+`server/realtime.js` now provides an **optional Redis adapter** (enabled by
+setting `REDIS_URL`; see `.env.production.example`):
+- `broadcastToCircle` fans out to other instances via Redis pub/sub (with
+  self-suppression by instance id), so caregivers on any node receive events.
+- WS tickets are stored in Redis with TTL and consumed atomically (Lua
+  GET+DEL), so a ticket issued on node A works when the upgrade lands on node B.
+- The archival job acquires a Redis advisory lock (6h TTL), so only one
+  instance runs it per cycle.
 
-**Fix (when scaling past 1 instance):** introduce a shared pub/sub + store —
-Redis (`ioredis`): publish circle broadcasts to a Redis channel each node
-subscribes to; store ws-tickets in Redis with TTL; gate the archival interval
-behind a Redis advisory lock (or move it to a scheduled one-off job). Until then,
-**pin the gateway to a single instance** and note this in the Railway config.
+Without `REDIS_URL` every path falls back to the previous single-instance
+in-memory behavior — no operational change required. Verified live against a
+real Redis with two simulated instances (cross-instance delivery,
+self-suppression, shared one-shot tickets, TTL expiry, lock exclusivity) and
+the full server suite passes without Redis (fallback path).
+
+Remaining (acceptable): `/metrics` counters in `server/index.js` are still
+per-instance; session-cleanup runs on every instance but is idempotent
+(`DELETE ... WHERE expires_at < NOW()`).
 
 ## 2. Orphaned schema (DB)
 

@@ -14,7 +14,12 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
 const db = require('./db');
+const realtime = require('./realtime');
 const router = express.Router();
+
+// Cross-instance realtime: deliver events published by other gateway instances
+// to this instance's WebSocket clients. No-op unless REDIS_URL is configured.
+realtime.init((circleId, event) => deliverToLocalCircle(circleId, event));
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
@@ -3686,7 +3691,8 @@ async function fireVitalAlertIfAbnormal(circleId, dataType, component, numValue,
   });
 }
 
-function broadcastToCircle(circleId, event) {
+// Deliver an event to WebSocket clients connected to THIS instance.
+function deliverToLocalCircle(circleId, event) {
   const clients = wsClients.get(circleId);
   if (clients) {
     const message = JSON.stringify(event);
@@ -3698,6 +3704,13 @@ function broadcastToCircle(circleId, event) {
   }
 }
 
+// Broadcast to the whole circle: local clients always; other instances via
+// Redis pub/sub when configured (REDIS_URL). See server/realtime.js.
+function broadcastToCircle(circleId, event) {
+  deliverToLocalCircle(circleId, event);
+  realtime.publishCircleEvent(circleId, event);
+}
+
 // Short-lived single-use tickets for WebSocket auth. Clients that cannot set
 // cookies or headers on the WS upgrade (mobile / React Native) POST to
 // /ws-ticket with a valid Bearer token and receive a ticket they can put in
@@ -3706,14 +3719,21 @@ function broadcastToCircle(circleId, event) {
 const WS_TICKET_TTL_MS = 30 * 1000;
 const wsTickets = new Map();
 
-function issueWsTicket(userId) {
+async function issueWsTicket(userId) {
   const ticket = crypto.randomBytes(32).toString('hex');
-  wsTickets.set(ticket, { userId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  // Shared store first (multi-instance); in-memory fallback otherwise.
+  const shared = await realtime.storeTicket(ticket, userId, WS_TICKET_TTL_MS);
+  if (!shared) {
+    wsTickets.set(ticket, { userId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  }
   return ticket;
 }
 
-function consumeWsTicket(ticket) {
+async function consumeWsTicket(ticket) {
   if (!ticket) return null;
+  // undefined = Redis unavailable → fall through to the in-memory store.
+  const sharedUserId = await realtime.consumeTicket(ticket);
+  if (sharedUserId !== undefined) return sharedUserId;
   const entry = wsTickets.get(ticket);
   if (!entry) return null;
   wsTickets.delete(ticket);
@@ -3736,7 +3756,7 @@ async function handleWebSocket(ws, req) {
 
   // Prefer a single-use ticket (mobile clients). Fall back to cookie /
   // Authorization header for browser/portal clients on the same origin.
-  let userId = consumeWsTicket(url.searchParams.get('ticket'));
+  let userId = await consumeWsTicket(url.searchParams.get('ticket'));
 
   if (!userId) {
     let token = getCookie(req, AUTH_COOKIE_NAME);
@@ -3818,8 +3838,8 @@ async function handleWebSocket(ws, req) {
 
 // Issue a short-lived single-use ticket for the WebSocket. Mobile clients
 // call this with their Bearer token, then put the ticket in the WS URL.
-router.post('/ws-ticket', authMiddleware, (req, res) => {
-  const ticket = issueWsTicket(req.user.id);
+router.post('/ws-ticket', authMiddleware, async (req, res) => {
+  const ticket = await issueWsTicket(req.user.id);
   res.json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
 });
 
@@ -3960,11 +3980,19 @@ async function runArchival() {
   }
 }
 
-// Run archival once at startup (after a short delay) and then every 24 hours
+// Run archival once at startup (after a short delay) and then every 24 hours.
+// With Redis configured, an advisory lock ensures only one instance runs it
+// per cycle; without Redis the lock is a pass-through (single instance).
 const ARCHIVAL_INTERVAL_MS = MS_PER_DAY;
+const ARCHIVAL_LOCK_TTL_MS = 6 * 60 * 60 * 1000; // well under the 24h cycle
+async function runArchivalIfLeader() {
+  if (await realtime.acquireJobLock('archival', ARCHIVAL_LOCK_TTL_MS)) {
+    await runArchival();
+  }
+}
 setTimeout(() => {
-  runArchival().catch(() => {});
-  setInterval(() => runArchival().catch(() => {}), ARCHIVAL_INTERVAL_MS);
+  runArchivalIfLeader().catch(() => {});
+  setInterval(() => runArchivalIfLeader().catch(() => {}), ARCHIVAL_INTERVAL_MS);
 }, 30 * 1000);
 
 // Admin endpoint to trigger manual archival (used by ops/cron jobs)
