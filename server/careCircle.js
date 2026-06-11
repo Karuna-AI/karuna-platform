@@ -1027,6 +1027,222 @@ router.get('/auth/me', authMiddleware, async (req, res) => {
 });
 
 // ============================================================================
+// GDPR — Data export & account deletion
+// ============================================================================
+
+const gdprRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { error: 'Too many data requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // The export/delete flows are exercised repeatedly by the realdb suite from
+  // one IP; unlike login/registration these can't be seeded around.
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] GDPR rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
+
+// GDPR right of access: download everything we hold about the authenticated
+// user as JSON. Owned circles include full circle data (the owner is the
+// circle's data custodian); for circles where the user is only a member, just
+// the membership and their own authored notes are included. Document file
+// contents are omitted (metadata only) to keep the export portable — files
+// remain downloadable via the documents endpoint.
+router.get('/auth/export', gdprRateLimiter, authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const profileResult = await db.query(
+      `SELECT id, email, name, phone, is_verified, created_at, last_login_at, login_count
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (profileResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const memberships = (await db.query(
+      `SELECT cm.circle_id, cc.name AS circle_name, cc.care_recipient_name, cm.role,
+              cm.relationship, cm.joined_at
+       FROM circle_members cm JOIN care_circles cc ON cc.id = cm.circle_id
+       WHERE cm.user_id = $1`,
+      [userId]
+    )).rows;
+
+    const EXPORT_ROW_CAP = 10000;
+    const ownedCircles = [];
+    for (const m of memberships.filter((row) => row.role === 'owner')) {
+      const circleId = m.circle_id;
+      const q = (sql) => db.query(sql, [circleId]).then((r) => r.rows);
+      const [members, medications, doctors, appointments, contacts, accounts, documents, routines,
+             notes, health, doses, activity, checkins, alerts] = await Promise.all([
+        q(`SELECT u.name, cm.role, cm.relationship, cm.joined_at
+           FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = $1`),
+        q('SELECT * FROM vault_medications WHERE circle_id = $1'),
+        q('SELECT * FROM vault_doctors WHERE circle_id = $1'),
+        q('SELECT * FROM vault_appointments WHERE circle_id = $1'),
+        q('SELECT * FROM vault_contacts WHERE circle_id = $1'),
+        q('SELECT * FROM vault_accounts WHERE circle_id = $1'),
+        q(`SELECT id, title, type, description, file_name, file_type, file_size, expiry_date,
+                  is_sensitive, created_at FROM vault_documents WHERE circle_id = $1`),
+        q('SELECT * FROM vault_routines WHERE circle_id = $1'),
+        q('SELECT * FROM vault_notes WHERE circle_id = $1'),
+        q(`SELECT data_type, value, unit, measured_at, source, notes FROM health_data
+           WHERE circle_id = $1 ORDER BY measured_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT medication_id, scheduled_time, status, taken_at, skipped_reason FROM medication_doses
+           WHERE circle_id = $1 ORDER BY scheduled_time DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT activity_type, details, recorded_at, source FROM activity_logs
+           WHERE circle_id = $1 ORDER BY recorded_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT checkin_type, message, response, response_text, responded_at FROM checkin_logs
+           WHERE circle_id = $1 ORDER BY created_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT alert_type, severity, title, message, status, created_at FROM caregiver_alerts
+           WHERE circle_id = $1 ORDER BY created_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+      ]);
+      const circleRow = (await db.query(
+        'SELECT id, name, care_recipient_name, settings, patient_consent, subscription_tier, created_at FROM care_circles WHERE id = $1',
+        [circleId]
+      )).rows[0];
+      ownedCircles.push({
+        circle: circleRow,
+        members,
+        vault: {
+          medications,
+          doctors,
+          appointments,
+          contacts,
+          accounts: accounts.map((a) => ({
+            ...a,
+            account_number: decryptField(a.account_number_encrypted),
+            account_number_encrypted: undefined,
+          })),
+          documents,
+          routines,
+          notes,
+        },
+        health: { measurements: health, medicationDoses: doses },
+        activity,
+        checkins,
+        alerts,
+      });
+    }
+
+    const notesAuthored = (await db.query(
+      `SELECT circle_id, title, content, category, priority, created_at
+       FROM vault_notes WHERE author_id = $1`,
+      [userId]
+    )).rows;
+    const auditTrail = (await db.query(
+      `SELECT action, category, description, created_at FROM audit_logs
+       WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000`,
+      [userId]
+    )).rows;
+
+    db.query(
+      `INSERT INTO audit_logs (user_id, action, category, description, metadata, ip_address, user_agent)
+       VALUES ($1, 'data_exported', 'auth', 'User downloaded a GDPR data export', '{}', $2, $3)`,
+      [userId, req.ip, req.headers['user-agent']]
+    ).catch(() => {});
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Disposition', `attachment; filename="karuna-data-export-${stamp}.json"`);
+    res.json({
+      format: 'karuna-gdpr-export/v1',
+      exportedAt: new Date().toISOString(),
+      profile: profileResult.rows[0],
+      memberships,
+      ownedCircles,
+      notesAuthored,
+      auditTrail,
+      notes: 'Document file contents are not embedded; download them individually from the documents section.',
+    });
+  } catch (error) {
+    console.error('Data export error:', error);
+    res.status(500).json({ error: 'Failed to export data' });
+  }
+});
+
+// GDPR right to erasure: delete the account and everything owned by it.
+// Requires the current password. When the user owns circles, the request must
+// also set confirmDeleteOwnedCircles=true — deleting an owned circle removes
+// that circle's data for every member, which deserves an explicit second step.
+// References from circles the user does NOT own are anonymized, not deleted
+// (the circle's data belongs to its own members).
+router.post('/auth/delete-account', gdprRateLimiter, authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { password, confirmDeleteOwnedCircles } = req.body || {};
+    if (!password) return res.status(400).json({ error: 'Password is required' });
+
+    const userResult = await db.query('SELECT id, email, password_hash FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    if (!(await verifyPassword(password, userResult.rows[0].password_hash, userId))) {
+      return res.status(403).json({ error: 'Incorrect password' });
+    }
+
+    const owned = (await db.query(
+      `SELECT cc.id, cc.name,
+              (SELECT COUNT(*)::int FROM circle_members WHERE circle_id = cc.id) AS member_count
+       FROM care_circles cc JOIN circle_members cm ON cm.circle_id = cc.id
+       WHERE cm.user_id = $1 AND cm.role = 'owner'`,
+      [userId]
+    )).rows;
+
+    if (owned.length > 0 && confirmDeleteOwnedCircles !== true) {
+      return res.status(409).json({
+        error: 'You own care circles. Deleting your account permanently deletes them for all members.',
+        ownedCircles: owned.map((c) => ({ id: c.id, name: c.name, memberCount: c.member_count })),
+        confirmationRequired: 'confirmDeleteOwnedCircles',
+      });
+    }
+
+    await db.transaction(async (client) => {
+      const ownedIds = owned.map((c) => c.id);
+      if (ownedIds.length > 0) {
+        // Cascades wipe all circle-scoped data (vault, health, alerts, sync…).
+        await client.query('DELETE FROM care_circles WHERE id = ANY($1)', [ownedIds]);
+      }
+      // Remaining references from circles the user does not own.
+      await client.query('DELETE FROM invitations WHERE invited_by = $1', [userId]);
+      await client.query('DELETE FROM vault_notes WHERE author_id = $1', [userId]);
+      await client.query('UPDATE vault_notes SET resolved_by = NULL WHERE resolved_by = $1', [userId]);
+      await client.query(
+        "UPDATE sync_changes SET changed_by = NULL, changed_by_name = 'Deleted user' WHERE changed_by = $1",
+        [userId]
+      );
+      await client.query('UPDATE caregiver_alerts SET acknowledged_by = NULL WHERE acknowledged_by = $1', [userId]);
+      await client.query('UPDATE vault_recovery_escrow SET approved_by = NULL WHERE approved_by = $1', [userId]);
+      await client.query('UPDATE ai_usage_logs SET user_id = NULL WHERE user_id = $1', [userId]);
+      await client.query('UPDATE audit_logs SET user_id = NULL WHERE user_id = $1', [userId]);
+      // Cascades remove memberships, sessions, reset tokens, own escrow rows.
+      await client.query('DELETE FROM users WHERE id = $1', [userId]);
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, category, description, metadata, ip_address, user_agent)
+         VALUES (NULL, 'account_deleted', 'auth', 'User account deleted (GDPR request)', $1, $2, $3)`,
+        [JSON.stringify({ ownedCirclesDeleted: ownedIds.length }), req.ip, req.headers['user-agent']]
+      );
+    });
+
+    console.log(`[Security] Account deleted (GDPR): ${userResult.rows[0].email}`);
+    res.clearCookie(AUTH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      path: '/',
+    });
+    res.clearCookie('csrf-token', {
+      httpOnly: false,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      path: '/',
+    });
+    res.json({ success: true, message: 'Your account and data have been deleted.' });
+  } catch (error) {
+    console.error('Account deletion error:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+// ============================================================================
 // Care Circle Routes
 // ============================================================================
 

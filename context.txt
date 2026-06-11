@@ -47,11 +47,32 @@ ISSUE LIST & STATUS
      stalls (Postgres checkpoint fsyncs up to 21s/file) — environmental.
    - Remaining acceptable: /metrics per-instance; session cleanup idempotent.
 
-4. [PENDING] Password-reset tokens stored raw in DB
-   - Migration 007 + hash-at-rest in forgot/reset-password handlers.
+4. [CLOSED 2026-06-11 — NOT A BUG] Password-reset tokens stored raw in DB
+   - Verified false: careCircle.js generateToken() (32-byte CSPRNG) +
+     hashToken() (SHA-256) — INSERT stores the hash (line ~943), lookup
+     compares hashes (line ~974). One-shot delete, 1h expiry, enumeration-safe.
+   - Covered by realdb test "stores a hashed token in DB". The original
+     analysis read migration 003's schema, not the handlers. No change needed.
 
-5. [PENDING] No GDPR data export / account deletion
-   - Add export + delete endpoints (backend), portal UI.
+5. [DONE 2026-06-11] No GDPR data export / account deletion
+   - Backend (server/careCircle.js):
+     GET /api/care/auth/export — JSON download (profile, memberships, owned
+       circles w/ full vault [accounts decrypted, document metadata only],
+       health/doses/activity/checkins/alerts capped 10k rows, notes authored,
+       audit trail). Audit-logged. Rate-limited 5/h (skipped in NODE_ENV=test).
+     POST /api/care/auth/delete-account — password-confirmed; owning circles
+       requires confirmDeleteOwnedCircles=true (409 lists them first);
+       transaction: deletes owned circles (cascade), deletes authored
+       notes + sent invitations, anonymizes refs in others' circles
+       (sync_changes/alerts/audit/ai_usage/escrow approved_by), deletes user
+       (cascades memberships/sessions/tokens), audit row, clears cookies.
+   - Frontend (caregiver-portal): new /account page (profile, Download my
+     data, Delete account w/ owned-circle double-confirm), nav link, api.ts
+     exportMyData()/deleteAccount(). Build clean.
+   - Tests: 5 new realdb tests (export contents, password gate, 409 confirm
+     flow, caregiver delete keeps circle + removes notes, owner delete
+     cascades). api.realdb suite 59/59 green.
+   - Caught during testing: GDPR limiter 429'd the suite → skip in test env.
 
 6. [PENDING] Monolith refactors
    - careCircle.js (3,994 LOC), CareCircleDetail.tsx (1,236 LOC),

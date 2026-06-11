@@ -1128,3 +1128,105 @@ describe('Vault PIN recovery escrow (real DB)', () => {
     expect(r.status).toBe(403);
   });
 });
+
+describe('GDPR export & account deletion (real DB)', () => {
+  const stamp = Date.now();
+  const ownerEmail = `gdpr-owner-${stamp}@realtest.karuna`;
+  const cgEmail = `gdpr-cg-${stamp}@realtest.karuna`;
+  const PASSWORD = 'SeedPass123!';
+  let ownerId: string;
+  let cgId: string;
+  let circleId: string;
+  let ownerToken: string;
+  let cgToken: string;
+
+  beforeAll(async () => {
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const hash = bcrypt.hashSync(PASSWORD, 1);
+    const mkUser = async (email: string, name: string) => {
+      const r = await db.query(
+        'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+        [email, hash, name]
+      );
+      return r.rows[0].id as string;
+    };
+    ownerId = await mkUser(ownerEmail, 'GDPR Owner');
+    cgId = await mkUser(cgEmail, 'GDPR Caregiver');
+    const cr = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['GDPR Test Circle', 'GDPR Owner']
+    );
+    circleId = cr.rows[0].id;
+    await db.query(
+      `INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner'), ($1, $3, 'caregiver')`,
+      [circleId, ownerId, cgId]
+    );
+    await db.query(
+      `INSERT INTO vault_medications (circle_id, name, dosage, frequency, timing, is_active, created_by)
+       VALUES ($1, 'GDPR Test Med', '10mg', 'daily', '{08:00}', true, $2)`,
+      [circleId, 'GDPR Owner']
+    );
+    // Note authored by the caregiver in the owner's circle — must be deleted
+    // (not orphaned) when the caregiver deletes their account.
+    await db.query(
+      `INSERT INTO vault_notes (circle_id, author_id, author_name, author_role, title, content, category)
+       VALUES ($1, $2, 'GDPR Caregiver', 'caregiver', 'GDPR note', 'authored by caregiver', 'general')`,
+      [circleId, cgId]
+    );
+    const mkTok = (id: string, email: string, name: string) =>
+      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    ownerToken = mkTok(ownerId, ownerEmail, 'GDPR Owner');
+    cgToken = mkTok(cgId, cgEmail, 'GDPR Caregiver');
+  }, 30_000);
+
+  function auth(r: any, t: string) { return r.set('Authorization', `Bearer ${t}`); }
+
+  it('GET /auth/export returns full data for an owner', async () => {
+    const res = await auth(req.get('/api/care/auth/export'), ownerToken);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toContain('karuna-data-export');
+    expect(res.body.profile.email).toBe(ownerEmail);
+    expect(res.body.memberships.some((m: any) => m.circle_id === circleId)).toBe(true);
+    const owned = res.body.ownedCircles.find((c: any) => c.circle.id === circleId);
+    expect(owned).toBeDefined();
+    expect(owned.vault.medications.some((m: any) => m.name === 'GDPR Test Med')).toBe(true);
+    expect(owned.members.length).toBe(2);
+  });
+
+  it('delete requires the correct password', async () => {
+    const noPw = await auth(req.post('/api/care/auth/delete-account'), cgToken).send({});
+    expect(noPw.status).toBe(400);
+    const wrongPw = await auth(req.post('/api/care/auth/delete-account'), cgToken)
+      .send({ password: 'not-the-password' });
+    expect(wrongPw.status).toBe(403);
+  });
+
+  it('owner deletion without confirmation returns 409 listing owned circles', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), ownerToken)
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(409);
+    expect(res.body.ownedCircles.some((c: any) => c.id === circleId)).toBe(true);
+  });
+
+  it('caregiver deletion removes the user and their notes but keeps the circle', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), cgToken)
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(200);
+
+    expect((await db.query('SELECT 1 FROM users WHERE id = $1', [cgId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM vault_notes WHERE author_id = $1', [cgId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM care_circles WHERE id = $1', [circleId])).rows.length).toBe(1);
+    expect((await db.query('SELECT 1 FROM circle_members WHERE user_id = $1', [cgId])).rows.length).toBe(0);
+  });
+
+  it('owner deletion with confirmation removes the user and the owned circle', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), ownerToken)
+      .send({ password: PASSWORD, confirmDeleteOwnedCircles: true });
+    expect(res.status).toBe(200);
+
+    expect((await db.query('SELECT 1 FROM users WHERE id = $1', [ownerId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM care_circles WHERE id = $1', [circleId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM vault_medications WHERE circle_id = $1', [circleId])).rows.length).toBe(0);
+  });
+});
