@@ -24,8 +24,12 @@ ISSUE LIST & STATUS
      caregiver portal tsc+vite build clean.
    - Pending: on-device verification on next build (noted in QA findings).
 
-2. [PENDING] Deploy gate skips server tests (.github/workflows/deploy.yml)
-   - Add Postgres service + npm run test:server to the gate, mirroring test.yml.
+2. [DONE 2026-06-11] Deploy gate skips server tests (.github/workflows/deploy.yml)
+   - deploy.yml test gate now has postgres:16-alpine service, schema init,
+     migrations (run.js), and npm run test:server — mirrors test.yml.
+   - BONUS: both workflows now run the migration runner, so a broken migration
+     fails CI instead of failing at prod deploy. Verified all 6 migrations apply
+     cleanly to a fresh schema locally; YAML validated with js-yaml.
 
 3. [PENDING] WebSocket state in-memory only (no horizontal scaling)
    - wsClients/wsTickets/metrics Maps in server/index.js + server/careCircle.js.

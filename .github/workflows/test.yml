@@ -61,6 +61,15 @@ jobs:
           psql -h localhost -U karuna_test -d karuna_test -f server/db/init.sql
           psql -h localhost -U karuna_test -d karuna_test -f server/db/admin_tables.sql
 
+      - name: Run database migrations
+        run: node server/db/migrations/run.js
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: karuna_test
+          DB_USER: karuna_test
+          DB_PASSWORD: test_password
+
       - name: Run server tests
         run: npm run test:server
         env:

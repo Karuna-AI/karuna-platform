@@ -40,6 +40,22 @@ jobs:
   test:
     name: Test Gate (coverage must pass before deploy)
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: karuna_test
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: karuna_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,8 +69,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests with coverage gate
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Run mobile tests with coverage gate
         run: npm run test:coverage -- --runInBand --testPathIgnorePatterns='__tests__/server'
+
+      - name: Initialize test database schema
+        env:
+          PGPASSWORD: test_password
+        run: |
+          psql -h localhost -U karuna_test -d karuna_test -f server/db/init.sql
+          psql -h localhost -U karuna_test -d karuna_test -f server/db/admin_tables.sql
+
+      - name: Run database migrations
+        run: node server/db/migrations/run.js
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: karuna_test
+          DB_USER: karuna_test
+          DB_PASSWORD: test_password
+
+      - name: Run server tests
+        run: npm run test:server
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: karuna_test
+          DB_USER: karuna_test
+          DB_PASSWORD: test_password
 
   deploy-backend:
     name: Deploy Backend to Railway

@@ -45,19 +45,14 @@ admin credentials in a migration (that would ship known creds). Document this as
 required first-deploy step and store the password in the secret manager. Consider
 adding account lockout beyond the existing 5/15-min IP limiter.
 
-## 4. Deploy test gate runs mobile tests only (CI)
+## 4. Deploy test gate runs mobile tests only (CI) — FIXED 2026-06-11
 
-`deploy.yml`'s gate runs the mobile coverage suite with
-`--testPathIgnorePatterns=__tests__/server` and **no Postgres service**, so a
-server regression can ship even though `test.yml` (PR/push) runs the full server
-suite.
-
-**Recommendation:** make the deploy gate run the **same** server-test job as
-`test.yml` — add the `postgres:16-alpine` service, bootstrap the DB
-(`init.sql` + `admin_tables.sql` + `run.js`), and run the server tests — OR gate
-the deploy on the `test.yml` workflow's success via `workflow_run`. Not changed
-blindly here because a YAML mistake would block all deploys and can't be verified
-without running CI; do it in a PR where CI validates it.
+`deploy.yml`'s gate now mirrors `test.yml`: `postgres:16-alpine` service, schema
+bootstrap (`init.sql` + `admin_tables.sql`), **migrations via
+`server/db/migrations/run.js`**, then the full server suite before any deploy.
+`test.yml` also gained the migrations step, so a broken migration fails CI on the
+PR instead of at production deploy. The migration runner was verified locally
+against a fresh schema (all 6 migrations apply cleanly); YAML validated.
 
 ## 5. Sync entity-type asymmetry (medium, code — deferred)
 
