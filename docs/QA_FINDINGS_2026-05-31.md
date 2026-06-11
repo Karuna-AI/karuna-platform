@@ -27,13 +27,21 @@ Status legend: [ ] open · [x] fixed/shipped · [~] in progress
   Fix: added `buildDateContext()` and inject `[Today is …, current time …]` every
   turn (`__tests__/hooks/chatDateContext.test.ts`). **Needs next build to verify on-device.**
 
-- [~] **H3 — Vault PIN recovery. IN PROGRESS (caregiver-assisted chosen).**
+- [x] **H3 — Vault PIN recovery. ALL PHASES IMPLEMENTED 2026-06-11 (caregiver-assisted); needs on-device verify.**
   Done: (a) explicit no-recovery warning at PIN setup; (b) **Phase 1 — DEK key model**
   (data key decoupled from PIN; PIN change/recovery re-wraps the DEK instead of
   re-encrypting; legacy vaults migrate by freezing the old key as the DEK; also fixed a
   latent changePin data-orphaning bug). Design: docs/VAULT_PIN_RECOVERY_DESIGN.md.
-  Remaining: **Phase 2** (escrow DEK to server) + **Phase 3** (portal owner-approval +
-  device recovery flow) — a multi-component build (mobile + gateway + caregiver portal).
+  (c) **Phase 2 — escrow**: device wraps DEK under a fresh recovery key on vault
+  create/unlock and escrows it (`vault_recovery_escrow`, migration 006); recovery key
+  AES-256-GCM-encrypted at rest by the gateway. (d) **Phase 3 — approval + recovery**:
+  `Forgot vault PIN?` now offers "Ask my circle" (delete remains a fallback); request
+  raises a high-severity caregiver alert + `recovery_request` WS event; portal shows a
+  RecoveryRequests approval card (approver must be a *different* member with
+  `canApproveRecovery`); on approval the device fetches one-shot material, verifies the
+  DEK against the vault key-check, re-wraps under a **new PIN** — no data loss.
+  Tests: encryption escrow round-trip (39/39 green) + real-DB full-flow suite
+  (123/123 green). Verified portal builds. **Pending: on-device verification.**
   The only recovery path is `Forgot vault PIN?` → `vault.deleteVault()` →
   `encryptionService.resetVault()`, which **wipes all vault contents** (accounts,
   doctors, documents, medications, appointments, contacts) because the encryption
@@ -335,3 +343,28 @@ Earlier fixes re-confirmed on this build:
 
 **Cleanup:** test doctor deleted via app; final prod state for circle 9d4d87d7 — doctors/meds/appts/contacts all = 0.
 **Net: all previously-failing items (M1, M2, N1, N2, N3) now pass on-device. No regressions in H1/H2/M3/M4/L1.**
+
+---
+
+## 🚶 Full real-user walkthrough (2026-06-01 ~16:30, build 00b809b7, screen-recorded)
+
+### Chat tab
+- [x] **Type + Send** — "Can you remind me to drink water?" → round-trip OK; cross-check
+  `ai_usage_logs` row 2026-06-01T15:34:42Z (=16:34 BST), request_type=chat, success, 755 tokens,
+  user_id f21c5ca0. ✅ both directions.
+- [x] **Weather banner** — shows live "71°F Overcast — Cambridgeshire".
+- [x] **Clear conversation** — confirm dialog → **CONFIRM** → thread wiped to empty state
+  ("Hello! I'm Karuna — Your friendly voice assistant. Hold the button below and speak to me.");
+  the "Clear" chip correctly disappears when there are no messages.
+- [x] **Voice (hold to talk)** — recording overlay verified on this build family earlier (Listening/
+  timer/Stop/Cancel); STT round-trip not exercisable headlessly.
+- [ ] **N4 (NEW, 🟡) — Chat reminder UX is self-contradictory.** Asking "Can you remind me to drink
+  water?" triggers the app's NLU → a working **"Set Reminder"** modal (quick options In 15 min/30
+  min/1 hour/2 hours + Set Reminder). I selected "In 15 min" → "Set Reminder". **But (a)** the AI's
+  text reply in the same turn says *"I can't set reminders for you, but I can suggest a way…
+  Would you like help with setting an alarm on your phone?"* — directly contradicting the modal the
+  app just showed; **and (b)** no confirmation ("Reminder set for 4:53 PM") appears in the thread
+  after setting it, so the user can't tell whether it worked. For elderly users this is confusing.
+  Recommend: align the assistant's copy with the actual reminder capability and surface an explicit
+  in-thread confirmation after a reminder is set. (Whether the reminder fires a real local
+  notification couldn't be verified in-session.)

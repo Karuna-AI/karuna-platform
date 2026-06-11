@@ -1,6 +1,15 @@
 # Vault PIN Recovery — Caregiver-Assisted (H3)
 
-Status: design + Phase 1 in progress (2026-06-01). Chosen approach: caregiver-assisted.
+Status: **all 3 phases implemented** (2026-06-11). Chosen approach: caregiver-assisted.
+Phase 1 (DEK model) shipped 2026-06-01 (840d2dd). Phases 2–3 (escrow + approval +
+device recovery) implemented across gateway (`server/careCircle.js` recovery routes,
+migration `006_vault_recovery_escrow.sql`), mobile (`encryption.ts`
+`buildRecoveryEscrow`/`restoreWithRecovery`, `careCircleSync.ts` recovery client,
+`VaultScreen.tsx` "Ask my circle" flow), and caregiver portal
+(`RecoveryRequests.tsx` approval card, real-time via `recovery_request` WS event).
+Covered by `__tests__/services/encryption.test.ts` (escrow round-trip) and
+`__tests__/server/api.realdb.test.ts` (full flow vs real Postgres). Pending:
+on-device verification on the next build.
 
 ## Problem
 The vault encryption key is derived **directly** from the user's PIN (`deriveKey(pin, salt)`).

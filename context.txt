@@ -1,0 +1,49 @@
+KARUNA PLATFORM — LIVE FIX CONTEXT
+===================================
+Branch: fix/security-audit-21-issues
+Started: 2026-06-11
+Purpose: Track the 7 platform-level fixes identified in the full-codebase analysis.
+This file is updated after every fix lands (frontend, backend, DB noted per item).
+
+ISSUE LIST & STATUS
+-------------------
+1. [DONE 2026-06-11] H3 vault PIN recovery Phases 2–3 (escrow + caregiver approval)
+   - Phase 1 (DEK model) was committed earlier (840d2dd).
+   - Phases 2–3 completed and committed:
+     DB: migration 006_vault_recovery_escrow.sql (applied to dev DB).
+     Backend: 6 recovery endpoints in server/careCircle.js (escrow/request/status/
+       requests/approve/material); recovery key AES-256-GCM at rest; approver must be
+       a different member with canApproveRecovery; one-shot material release; audited.
+     Frontend (portal): RecoveryRequests.tsx approval card on dashboard, live via
+       recovery_request WS event.
+     Frontend (mobile): encryption.buildRecoveryEscrow/restoreWithRecovery;
+       careCircleSync recovery client; VaultScreen "Ask my circle" flow with new-PIN modal.
+   - BUG FOUND+FIXED during review: alert insert used severity='warning' which violates
+     caregiver_alerts CHECK (low/medium/high/critical) and failed silently → now 'high'.
+   - Tests: encryption 39/39; server real-DB 123/123 (full recovery flow covered);
+     caregiver portal tsc+vite build clean.
+   - Pending: on-device verification on next build (noted in QA findings).
+
+2. [PENDING] Deploy gate skips server tests (.github/workflows/deploy.yml)
+   - Add Postgres service + npm run test:server to the gate, mirroring test.yml.
+
+3. [PENDING] WebSocket state in-memory only (no horizontal scaling)
+   - wsClients/wsTickets/metrics Maps in server/index.js + server/careCircle.js.
+   - Plan: optional Redis pub/sub via REDIS_URL, fallback to current behavior.
+
+4. [PENDING] Password-reset tokens stored raw in DB
+   - Migration 007 + hash-at-rest in forgot/reset-password handlers.
+
+5. [PENDING] No GDPR data export / account deletion
+   - Add export + delete endpoints (backend), portal UI.
+
+6. [PENDING] Monolith refactors
+   - careCircle.js (3,994 LOC), CareCircleDetail.tsx (1,236 LOC),
+     intentActions/appLauncher duplication, 6 near-identical vault editors.
+
+7. [PENDING] notification_queue has no worker
+   - Implement sender loop (WebSocket + Resend email), status transitions, retry.
+
+CHANGELOG
+---------
+2026-06-11: context.txt created. Task list registered. Starting issue #1 (H3).
