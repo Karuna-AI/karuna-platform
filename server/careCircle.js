@@ -3908,10 +3908,12 @@ async function fireVitalAlertIfAbnormal(circleId, dataType, component, numValue,
 }
 
 // Deliver an event to WebSocket clients connected to THIS instance.
+// circleId '*' fans out to every connected circle (system-wide notifications).
 function deliverToLocalCircle(circleId, event) {
-  const clients = wsClients.get(circleId);
-  if (clients) {
-    const message = JSON.stringify(event);
+  const targets = circleId === '*' ? [...wsClients.values()] : [wsClients.get(circleId)];
+  const message = JSON.stringify(event);
+  for (const clients of targets) {
+    if (!clients) continue;
     clients.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(message);
@@ -4210,6 +4212,18 @@ setTimeout(() => {
   runArchivalIfLeader().catch(() => {});
   setInterval(() => runArchivalIfLeader().catch(() => {}), ARCHIVAL_INTERVAL_MS);
 }, 30 * 1000);
+
+// Push delivery for admin notifications (notification_queue). See
+// server/notificationWorker.js — WS push + email for high/urgent, retries,
+// multi-instance safe via the realtime advisory lock.
+const { startNotificationWorker } = require('./notificationWorker');
+startNotificationWorker({
+  db,
+  broadcast: broadcastToCircle,
+  realtime,
+  resend,
+  fromEmail: FROM_EMAIL,
+});
 
 // Admin endpoint to trigger manual archival (used by ops/cron jobs)
 router.post('/admin/archive', authMiddleware, async (req, res) => {

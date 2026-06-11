@@ -78,8 +78,26 @@ ISSUE LIST & STATUS
    - careCircle.js (3,994 LOC), CareCircleDetail.tsx (1,236 LOC),
      intentActions/appLauncher duplication, 6 near-identical vault editors.
 
-7. [PENDING] notification_queue has no worker
-   - Implement sender loop (WebSocket + Resend email), status transitions, retry.
+7. [DONE 2026-06-12] notification_queue has no worker
+   - Discovery: pull delivery already existed (GET /api/care/notifications +
+     read marker). Missing piece was PUSH delivery + scheduled_at handling.
+   - DB: migration 007_notification_delivery.sql — delivered_at +
+     delivery_error columns + partial index (applied to dev DB).
+   - Backend: NEW server/notificationWorker.js — 60s cycle (gated by the
+     Redis advisory lock from #3, single-runner in multi-instance):
+     recipient 'circle' → WS to that circle; 'user' → WS to user's circles
+     w/ recipientUserId + Resend email when priority high/urgent; 'all' →
+     '*' wildcard broadcast (deliverToLocalCircle now fans '*' to every
+     connected circle, works cross-instance via realtime pub/sub).
+     delivered_at = push-once marker; status stays 'pending' so pull clients
+     still see it until read. Failures keep delivery_error, retried 24h,
+     then marked 'failed'. Worker not auto-started under NODE_ENV=test.
+   - Frontend (caregiver-portal): CareCircleDetail subscribes to
+     'notification' WS events → toast (urgent = error style; user-targeted
+     filtered by recipientUserId). Build clean.
+   - Tests: 2 new realdb tests (push-once for circle/user/all + scheduled
+     future stays queued + second-cycle no-op; failure records error and
+     stays pending for retry). api.realdb suite 61/61 green.
 
 8. [DONE 2026-06-11] Chat must open any named app (user request)
    - Gap: only WhatsApp/YouTube/maps/music had intents; "open instagram" fell

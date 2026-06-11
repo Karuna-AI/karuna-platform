@@ -1230,3 +1230,100 @@ describe('GDPR export & account deletion (real DB)', () => {
     expect((await db.query('SELECT 1 FROM vault_medications WHERE circle_id = $1', [circleId])).rows.length).toBe(0);
   });
 });
+
+describe('Notification queue worker (real DB)', () => {
+  const stamp = Date.now();
+  let userId: string;
+  let circleId: string;
+  let broadcastMock: jest.Mock;
+  let worker: any;
+
+  beforeAll(async () => {
+    // Columns ship via migration 007; ensure they exist for the test DB.
+    await db.query('ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE');
+    await db.query('ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS delivery_error TEXT');
+    await db.query("DELETE FROM notification_queue WHERE title LIKE 'NotifTest%'");
+
+    const u = await db.query(
+      'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+      [`notif-${stamp}@realtest.karuna`, 'x', 'Notif User']
+    );
+    userId = u.rows[0].id;
+    const c = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['NotifTest Circle', 'Notif User']
+    );
+    circleId = c.rows[0].id;
+    await db.query(
+      "INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [circleId, userId]
+    );
+
+    worker = require('../../server/notificationWorker');
+    broadcastMock = jest.fn();
+    worker.initNotificationWorker({
+      db,
+      broadcast: broadcastMock,
+      realtime: { acquireJobLock: async () => true },
+      resend: null,
+      fromEmail: 'Karuna <test@karuna>',
+    });
+  }, 30_000);
+
+  it('pushes due circle/user/all notifications exactly once', async () => {
+    const ins = (recipientType: string, recipientId: string | null, title: string, scheduledAt: string | null = null) =>
+      db.query(
+        `INSERT INTO notification_queue (recipient_type, recipient_id, notification_type, title, message, priority, scheduled_at)
+         VALUES ($1, $2, 'system_announcement', $3, 'hello', 'normal', $4) RETURNING id`,
+        [recipientType, recipientId, title, scheduledAt]
+      );
+    await ins('circle', circleId, 'NotifTest circle');
+    await ins('user', userId, 'NotifTest user');
+    await ins('all', null, 'NotifTest all');
+    await ins('circle', circleId, 'NotifTest future', new Date(Date.now() + 3600_000).toISOString());
+
+    const result = await worker.processNotificationQueue({ skipLock: true });
+    expect(result.delivered).toBeGreaterThanOrEqual(3);
+
+    // circle → its circle id; user → each of the user's circles with recipientUserId; all → '*'
+    const calls = broadcastMock.mock.calls;
+    expect(calls.some(([cid, ev]: any) => cid === circleId && ev.title === 'NotifTest circle')).toBe(true);
+    expect(calls.some(([cid, ev]: any) => cid === circleId && ev.title === 'NotifTest user' && ev.recipientUserId === userId)).toBe(true);
+    expect(calls.some(([cid, ev]: any) => cid === '*' && ev.title === 'NotifTest all')).toBe(true);
+    // future-scheduled stays untouched
+    expect(calls.some(([, ev]: any) => ev.title === 'NotifTest future')).toBe(false);
+
+    const delivered = await db.query(
+      "SELECT title, delivered_at FROM notification_queue WHERE title LIKE 'NotifTest%'"
+    );
+    for (const row of delivered.rows) {
+      if (row.title === 'NotifTest future') expect(row.delivered_at).toBeNull();
+      else expect(row.delivered_at).not.toBeNull();
+    }
+
+    // Second cycle: nothing new to push (delivered_at set), future still pending.
+    broadcastMock.mockClear();
+    const second = await worker.processNotificationQueue({ skipLock: true });
+    expect(second.delivered).toBe(0);
+  });
+
+  it('records delivery_error and keeps the row pending for retry', async () => {
+    // circle notification without recipient_id → deliverNotification throws
+    const bad = await db.query(
+      `INSERT INTO notification_queue (recipient_type, recipient_id, notification_type, title, message)
+       VALUES ('circle', NULL, 'system_announcement', 'NotifTest bad', 'x') RETURNING id`
+    );
+    await worker.processNotificationQueue({ skipLock: true });
+    const row = (await db.query(
+      'SELECT status, delivered_at, delivery_error FROM notification_queue WHERE id = $1',
+      [bad.rows[0].id]
+    )).rows[0];
+    expect(row.delivered_at).toBeNull();
+    expect(row.status).toBe('pending'); // retried within the 24h window
+    expect(row.delivery_error).toContain('recipient_id');
+  });
+
+  afterAll(async () => {
+    await db.query("DELETE FROM notification_queue WHERE title LIKE 'NotifTest%'");
+  });
+});

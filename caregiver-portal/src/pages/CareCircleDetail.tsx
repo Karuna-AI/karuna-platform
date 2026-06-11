@@ -145,10 +145,18 @@ export default function CareCircleDetail() {
       subscribe('alert_acknowledged', () => debouncedLoadDashboard()),
       // Surface a new vault recovery request immediately (H3).
       subscribe('recovery_request', () => setRecoverySignal((n) => n + 1)),
+      // System notifications pushed by the gateway's notification worker.
+      // recipientUserId is set on user-targeted notifications — only show those
+      // to the addressed user.
+      subscribe('notification', (data: any) => {
+        if (!data?.title) return;
+        if (data.recipientUserId && data.recipientUserId !== user?.id) return;
+        showToast(`${data.title} — ${data.message}`, data.priority === 'urgent' ? 'error' : 'info');
+      }),
     ];
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [isConnected, subscribe, debouncedLoadDashboard]);
+  }, [isConnected, subscribe, debouncedLoadDashboard, showToast, user?.id]);
 
   const loadCircleData = async () => {
     setIsLoading(true);
