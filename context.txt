@@ -74,9 +74,24 @@ ISSUE LIST & STATUS
      cascades). api.realdb suite 59/59 green.
    - Caught during testing: GDPR limiter 429'd the suite â†’ skip in test env.
 
-6. [PENDING] Monolith refactors
-   - careCircle.js (3,994 LOC), CareCircleDetail.tsx (1,236 LOC),
-     intentActions/appLauncher duplication, 6 near-identical vault editors.
+6. [DONE 2026-06-12 — server+portal; mobile deferred] Monolith refactors
+   - Backend: careCircle.js 4,252 → 2,531 lines. Extracted into server/routes/
+     via deps-injection mount functions called at the original positions
+     (preserves Express route order — statically verified, 75 routes
+     identical): recovery.js (208), vaultCrud.js (584), notes.js (151),
+     monitoring.js (758, incl. vital thresholds), dashboard.js (151).
+     Route bodies moved byte-identically. Server suite 130/130 green.
+   - Portal: CareCircleDetail.tsx 1,244 → 588 lines. New
+     components/circle/: MembersTab (210), NotesTab (323), VaultTab (181),
+     OverviewTab (30), shared utils + barrel. Dashboard tab stayed in the
+     parent (WebSocket-wired). tsc strict + vite build clean. One accepted
+     nuance: unsubmitted modal draft text now resets when leaving a tab.
+   - DEFERRED (deliberate): mobile refactors — 6 vault editor screens
+     consolidation + intentActions/appLauncher confirmation dedup. Reason:
+     those screens have no component-test coverage, so a pure refactor can't
+     be verified without on-device QA; this repo's own M1/M2 history shows
+     UI regressions slip exactly this way. Tracked for a pass that pairs the
+     refactor with adding component tests first.
 
 7. [DONE 2026-06-12] notification_queue has no worker
    - Discovery: pull delivery already existed (GET /api/care/notifications +

@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
-import type { CareCircle, CareCircleMember, SyncData, CareCircleRole, VaultNote, DashboardData } from '../types';
+import type { CareCircle, CareCircleMember, SyncData, DashboardData } from '../types';
 import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor, RecoveryRequests } from '../components/dashboard';
+import { OverviewTab, MembersTab, VaultTab, NotesTab } from '../components/circle';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -34,36 +35,6 @@ export default function CareCircleDetail() {
   const [isVaultLoading, setIsVaultLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Invite modal state
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<CareCircleRole>('viewer');
-  const [isInviting, setIsInviting] = useState(false);
-  const [inviteError, setInviteError] = useState('');
-  const [inviteSuccess, setInviteSuccess] = useState('');
-
-  // Note modal state
-  const [showNoteModal, setShowNoteModal] = useState(false);
-  const [noteTitle, setNoteTitle] = useState('');
-  const [noteContent, setNoteContent] = useState('');
-  const [noteCategory, setNoteCategory] = useState<VaultNote['category']>('general');
-  const [isAddingNote, setIsAddingNote] = useState(false);
-  const [noteError, setNoteError] = useState('');
-
-  // Note edit state
-  const [editingNote, setEditingNote] = useState<VaultNote | null>(null);
-  const [editNoteTitle, setEditNoteTitle] = useState('');
-  const [editNoteContent, setEditNoteContent] = useState('');
-  const [editNoteCategory, setEditNoteCategory] = useState<VaultNote['category']>('general');
-  const [isEditingNote, setIsEditingNote] = useState(false);
-  const [editNoteError, setEditNoteError] = useState('');
-  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
-
-  // Member action state
-  const [removeError, setRemoveError] = useState('');
-  const [isRemovingId, setIsRemovingId] = useState<string | null>(null);
-  const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
-
   // Alert action state
   const [alertActionError, setAlertActionError] = useState('');
 
@@ -78,7 +49,6 @@ export default function CareCircleDetail() {
 
   const { showToast } = useToast();
   const currentMember = members.find((m) => m.userId === user?.id);
-  const canInvite = currentMember?.permissions.canInviteMembers;
   const canAddNotes = currentMember?.permissions.canAddNotes;
   const canViewVault = currentMember?.permissions.canViewVault;
   const canViewSensitive = currentMember?.permissions.canViewSensitive;
@@ -203,124 +173,6 @@ export default function CareCircleDetail() {
     }
   };
 
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setInviteError('');
-    setInviteSuccess('');
-    setIsInviting(true);
-
-    const result = await api.inviteMember(id!, {
-      email: inviteEmail,
-      role: inviteRole,
-    });
-
-    if (result.success) {
-      setInviteSuccess(`Invitation sent to ${inviteEmail}`);
-      showToast(`Invitation sent to ${inviteEmail}`, 'success');
-      setInviteEmail('');
-      setInviteRole('viewer');
-    } else {
-      setInviteError(result.error || 'Failed to send invitation');
-    }
-
-    setIsInviting(false);
-  };
-
-  const handleChangeRole = async (memberId: string, newRole: CareCircleRole) => {
-    setChangingRoleId(memberId);
-    const result = await api.updateMemberRole(id!, memberId, newRole);
-    setChangingRoleId(null);
-    if (result.success) {
-      setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role: newRole } : m));
-    } else {
-      showToast(result.error || 'Failed to update member role', 'error');
-    }
-  };
-
-  const handleRemoveMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to remove this member?')) return;
-
-    setRemoveError('');
-    setIsRemovingId(memberId);
-    const result = await api.removeMember(id!, memberId);
-    setIsRemovingId(null);
-    if (result.success) {
-      setMembers(members.filter((m) => m.id !== memberId));
-    } else {
-      setRemoveError(result.error || 'Failed to remove member');
-    }
-  };
-
-  const handleAddNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setNoteError('');
-    setIsAddingNote(true);
-
-    const result = await api.addNote(id!, {
-      title: noteTitle,
-      content: noteContent,
-      category: noteCategory,
-    });
-
-    setIsAddingNote(false);
-
-    if (result.success && result.data) {
-      if (vaultData) {
-        setVaultData({
-          ...vaultData,
-          notes: [...vaultData.notes, result.data],
-        });
-      }
-      setShowNoteModal(false);
-      setNoteTitle('');
-      setNoteContent('');
-      setNoteCategory('general');
-      setNoteError('');
-      showToast('Note added', 'success');
-    } else {
-      setNoteError(result.error || 'Failed to add note');
-    }
-  };
-
-  const handleEditNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingNote) return;
-    setEditNoteError('');
-    setIsEditingNote(true);
-    const result = await api.updateNote(id!, editingNote.id, {
-      title: editNoteTitle,
-      content: editNoteContent,
-      category: editNoteCategory,
-    });
-    setIsEditingNote(false);
-    if (result.success && result.data) {
-      if (vaultData) {
-        setVaultData({
-          ...vaultData,
-          notes: vaultData.notes.map((n) => n.id === editingNote.id ? result.data! : n),
-        });
-      }
-      setEditingNote(null);
-    } else {
-      setEditNoteError(result.error || 'Failed to update note');
-    }
-  };
-
-  const handleDeleteNote = async (noteId: string) => {
-    if (!confirm('Delete this note? This cannot be undone.')) return;
-    setDeletingNoteId(noteId);
-    const result = await api.deleteNote(id!, noteId);
-    setDeletingNoteId(null);
-    if (result.success && vaultData) {
-      setVaultData({
-        ...vaultData,
-        notes: vaultData.notes.filter((n) => n.id !== noteId),
-      });
-    } else if (!result.success) {
-      showToast(result.error || 'Failed to delete note', 'error');
-    }
-  };
-
   const handleRenameCircle = async (e: React.FormEvent) => {
     e.preventDefault();
     setRenameError('');
@@ -347,20 +199,6 @@ export default function CareCircleDetail() {
     } else {
       setDeleteCircleError(result.error || 'Failed to delete circle');
     }
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
-
-  const maskSensitive = (value: string | undefined) => {
-    if (!value) return '-';
-    if (canViewSensitive) return value;
-    return '••••' + value.slice(-4);
   };
 
   if (isLoading) {
@@ -646,468 +484,37 @@ export default function CareCircleDetail() {
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (
-        <div className="grid grid-3">
-          <div className="card">
-            <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>Members</h3>
-            <p style={{ fontSize: '2rem', fontWeight: 'bold' }}>{members.length}</p>
-            <p className="text-muted">Active caregivers</p>
-          </div>
-          <div className="card">
-            <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>Medications</h3>
-            <p style={{ fontSize: '2rem', fontWeight: 'bold' }}>{vaultData?.medications.length || 0}</p>
-            <p className="text-muted">Being tracked</p>
-          </div>
-          <div className="card">
-            <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>Appointments</h3>
-            <p style={{ fontSize: '2rem', fontWeight: 'bold' }}>
-              {vaultData?.appointments.filter((a) => a.status === 'scheduled').length || 0}
-            </p>
-            <p className="text-muted">Upcoming</p>
-          </div>
-        </div>
+        <OverviewTab members={members} vaultData={vaultData} />
       )}
 
       {/* Members Tab */}
       {activeTab === 'members' && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Members</h2>
-            {canInvite && (
-              <button className="btn btn-primary btn-sm" onClick={() => setShowInviteModal(true)}>
-                + Invite Member
-              </button>
-            )}
-          </div>
-
-          {removeError && (
-            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{removeError}</div>
-          )}
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Joined</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((member) => (
-                <tr key={member.id}>
-                  <td>{member.name}</td>
-                  <td>{member.email}</td>
-                  <td>
-                    {currentMember?.permissions.canRemoveMembers &&
-                      member.userId !== user?.id &&
-                      member.role !== 'owner' ? (
-                        <select
-                          className="form-select"
-                          value={member.role}
-                          onChange={(e) => handleChangeRole(member.id, e.target.value as CareCircleRole)}
-                          disabled={changingRoleId === member.id}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
-                        >
-                          <option value="viewer">viewer</option>
-                          <option value="caregiver">caregiver</option>
-                        </select>
-                    ) : (
-                      <span className={`badge badge-${member.role}`}>{member.role}</span>
-                    )}
-                  </td>
-                  <td>{formatDate(member.joinedAt)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {currentMember?.permissions.canRemoveMembers &&
-                      member.userId !== user?.id &&
-                      member.role !== 'owner' && (
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleRemoveMember(member.id)}
-                          disabled={isRemovingId === member.id}
-                        >
-                          {isRemovingId === member.id ? 'Removing...' : 'Remove'}
-                        </button>
-                      )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <MembersTab
+          circleId={id!}
+          members={members}
+          setMembers={setMembers}
+          currentMember={currentMember}
+        />
       )}
 
       {/* Vault Tab */}
-      {activeTab === 'vault' && canViewVault && (
-        <div>
-          {isVaultLoading ? (
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <div className="spinner" />
-              <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>Loading vault data…</p>
-            </div>
-          ) : vaultData ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Medications */}
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '1rem' }}>Medications</h3>
-            {vaultData.medications.length === 0 ? (
-              <p className="text-muted">No medications recorded</p>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Dosage</th>
-                    <th>Frequency</th>
-                    <th>Timing</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vaultData.medications.map((med) => (
-                    <tr key={med.id}>
-                      <td><strong>{med.name}</strong></td>
-                      <td>{med.dosage}</td>
-                      <td>{med.frequency}</td>
-                      <td>{med.timing.join(', ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Doctors */}
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '1rem' }}>Doctors</h3>
-            {vaultData.doctors.length === 0 ? (
-              <p className="text-muted">No doctors recorded</p>
-            ) : (
-              <div className="grid grid-2">
-                {vaultData.doctors.map((doc) => (
-                  <div key={doc.id} style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                    <h4>{doc.name}</h4>
-                    <p className="text-muted">{doc.specialty}</p>
-                    {doc.hospital && <p>{doc.hospital}</p>}
-                    {doc.phone && <p>Phone: {doc.phone}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Appointments */}
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '1rem' }}>Upcoming Appointments</h3>
-            {vaultData.appointments.filter((a) => a.status === 'scheduled').length === 0 ? (
-              <p className="text-muted">No upcoming appointments</p>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Doctor</th>
-                    <th>Purpose</th>
-                    <th>Location</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vaultData.appointments
-                    .filter((a) => a.status === 'scheduled')
-                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                    .map((apt) => (
-                      <tr key={apt.id}>
-                        <td>{formatDate(apt.date)}</td>
-                        <td>{apt.time}</td>
-                        <td>{apt.doctorName}</td>
-                        <td>{apt.purpose}</td>
-                        <td>{apt.location || '-'}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Contacts */}
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '1rem' }}>Emergency Contacts</h3>
-            {vaultData.contacts.filter((c) => c.isEmergency).length === 0 ? (
-              <p className="text-muted">No emergency contacts recorded</p>
-            ) : (
-              <div className="grid grid-3">
-                {vaultData.contacts
-                  .filter((c) => c.isEmergency)
-                  .map((contact) => (
-                    <div key={contact.id} style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                      <h4>{contact.name}</h4>
-                      <p className="text-muted">{contact.relationship}</p>
-                      {contact.phone && <p>Phone: {contact.phone}</p>}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-
-          {/* Accounts (only if can view sensitive) */}
-          {canViewSensitive && (
-            <div className="card">
-              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Accounts</h3>
-              {vaultData.accounts.length === 0 ? (
-                <p className="text-muted">No accounts recorded</p>
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Type</th>
-                      <th>Account Number</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vaultData.accounts.map((account) => (
-                      <tr key={account.id}>
-                        <td><strong>{account.name}</strong></td>
-                        <td>{account.type}</td>
-                        <td>{maskSensitive(account.accountNumber)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-        </div>
-          ) : (
-            <div className="card">
-              <div className="empty-state">
-                <p className="text-muted">No vault data available</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'vault' && !canViewVault && (
-        <div className="card">
-          <div className="empty-state">
-            <div className="empty-state-icon">🔒</div>
-            <h3 className="empty-state-title">Access Restricted</h3>
-            <p className="text-muted">You don't have permission to view vault data</p>
-          </div>
-        </div>
+      {activeTab === 'vault' && (
+        <VaultTab
+          vaultData={vaultData}
+          isVaultLoading={isVaultLoading}
+          canViewVault={canViewVault}
+          canViewSensitive={canViewSensitive}
+        />
       )}
 
       {/* Notes Tab */}
       {activeTab === 'notes' && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Care Notes</h2>
-            {canAddNotes && (
-              <button className="btn btn-primary btn-sm" onClick={() => setShowNoteModal(true)}>
-                + Add Note
-              </button>
-            )}
-          </div>
-
-          {!vaultData?.notes.length ? (
-            <div className="empty-state">
-              <p className="text-muted">No notes yet</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {vaultData.notes
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .map((note) => (
-                  <div
-                    key={note.id}
-                    style={{
-                      padding: '1rem',
-                      background: 'var(--bg-secondary)',
-                      borderRadius: '8px',
-                      borderLeft: `4px solid ${
-                        note.category === 'medical'
-                          ? 'var(--error)'
-                          : note.category === 'financial'
-                          ? 'var(--warning)'
-                          : 'var(--primary)'
-                      }`,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <h4>{note.title}</h4>
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <span className="badge" style={{ background: 'var(--bg-tertiary)' }}>
-                          {note.category}
-                        </span>
-                        {(canAddNotes && note.authorId === user?.id) && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => {
-                                setEditingNote(note);
-                                setEditNoteTitle(note.title);
-                                setEditNoteContent(note.content);
-                                setEditNoteCategory(note.category);
-                                setEditNoteError('');
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="btn btn-sm btn-danger"
-                              onClick={() => handleDeleteNote(note.id)}
-                              disabled={deletingNoteId === note.id}
-                            >
-                              {deletingNoteId === note.id ? '...' : 'Delete'}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <p style={{ marginBottom: '0.5rem' }}>{note.content}</p>
-                    <p className="text-muted" style={{ fontSize: '0.875rem' }}>
-                      By {note.authorName} on {formatDate(note.createdAt)}
-                    </p>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Invite Modal */}
-      {showInviteModal && (
-        <div className="modal-overlay" onClick={() => setShowInviteModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Invite Member</h2>
-              <button className="modal-close" onClick={() => setShowInviteModal(false)}>
-                ×
-              </button>
-            </div>
-
-            {inviteError && <div className="alert alert-error">{inviteError}</div>}
-            {inviteSuccess && <div className="alert alert-success">{inviteSuccess}</div>}
-
-            <form onSubmit={handleInvite}>
-              <div className="form-group">
-                <label className="form-label">Email Address</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="Enter email address"
-                  required
-                  disabled={isInviting}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Role</label>
-                <select
-                  className="form-select"
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as CareCircleRole)}
-                  disabled={isInviting}
-                >
-                  <option value="viewer">Viewer - Can view basic info</option>
-                  <option value="caregiver">Caregiver - Can view and edit data</option>
-                </select>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowInviteModal(false)}
-                  disabled={isInviting}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={isInviting}>
-                  {isInviting ? 'Sending...' : 'Send Invitation'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Note Modal */}
-      {showNoteModal && (
-        <div className="modal-overlay" onClick={() => setShowNoteModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Add Note</h2>
-              <button className="modal-close" onClick={() => setShowNoteModal(false)}>
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleAddNote}>
-              <div className="form-group">
-                <label className="form-label">Title</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={noteTitle}
-                  onChange={(e) => setNoteTitle(e.target.value)}
-                  placeholder="Note title"
-                  required
-                  disabled={isAddingNote}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Category</label>
-                <select
-                  className="form-select"
-                  value={noteCategory}
-                  onChange={(e) => setNoteCategory(e.target.value as VaultNote['category'])}
-                  disabled={isAddingNote}
-                >
-                  <option value="general">General</option>
-                  <option value="medical">Medical</option>
-                  <option value="financial">Financial</option>
-                  <option value="personal">Personal</option>
-                  <option value="reminder">Reminder</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Content</label>
-                <textarea
-                  className="form-input"
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Write your note..."
-                  rows={4}
-                  required
-                  disabled={isAddingNote}
-                  style={{ resize: 'vertical' }}
-                />
-              </div>
-
-              {noteError && (
-                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{noteError}</div>
-              )}
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => { setShowNoteModal(false); setNoteError(''); }}
-                  disabled={isAddingNote}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={isAddingNote}>
-                  {isAddingNote ? 'Adding...' : 'Add Note'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NotesTab
+          circleId={id!}
+          vaultData={vaultData}
+          setVaultData={setVaultData}
+          canAddNotes={canAddNotes}
+        />
       )}
 
       {/* Circle Settings Modal */}
@@ -1173,69 +580,6 @@ export default function CareCircleDetail() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Note Modal */}
-      {editingNote && (
-        <div className="modal-overlay" onClick={() => setEditingNote(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Edit Note</h2>
-              <button className="modal-close" onClick={() => setEditingNote(null)}>×</button>
-            </div>
-            <form onSubmit={handleEditNote}>
-              <div className="form-group">
-                <label className="form-label">Title</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editNoteTitle}
-                  onChange={(e) => setEditNoteTitle(e.target.value)}
-                  required
-                  disabled={isEditingNote}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Category</label>
-                <select
-                  className="form-select"
-                  value={editNoteCategory}
-                  onChange={(e) => setEditNoteCategory(e.target.value as VaultNote['category'])}
-                  disabled={isEditingNote}
-                >
-                  <option value="general">General</option>
-                  <option value="medical">Medical</option>
-                  <option value="financial">Financial</option>
-                  <option value="personal">Personal</option>
-                  <option value="reminder">Reminder</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Content</label>
-                <textarea
-                  className="form-input"
-                  value={editNoteContent}
-                  onChange={(e) => setEditNoteContent(e.target.value)}
-                  rows={4}
-                  required
-                  disabled={isEditingNote}
-                  style={{ resize: 'vertical' }}
-                />
-              </div>
-              {editNoteError && (
-                <div className="alert alert-error" style={{ margin: '0 0 1rem' }}>{editNoteError}</div>
-              )}
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setEditingNote(null)} disabled={isEditingNote}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={isEditingNote}>
-                  {isEditingNote ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
