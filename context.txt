@@ -135,3 +135,11 @@ ISSUE LIST & STATUS
 CHANGELOG
 ---------
 2026-06-11: context.txt created. Task list registered. Starting issue #1 (H3).
+2026-06-11: #1 H3 done (24584c6 + 84b14d2). #2 deploy gate done (e685577).
+2026-06-11: #3 Redis realtime adapter done (5715ab8). #4 closed as not-a-bug.
+2026-06-11: #5 GDPR export/deletion done (6ce9999).
+2026-06-11: #8 chat open-any-app done (9be1bb7) — user-requested mid-session.
+2026-06-12: #7 notification push worker done (07e7458).
+2026-06-12: #6 monolith refactors done (3cc992b) — server+portal split;
+            mobile pieces deferred until component tests exist.
+ALL 8 ITEMS CLOSED. Branch ready for push/PR + on-device QA of H3 & open-app.
