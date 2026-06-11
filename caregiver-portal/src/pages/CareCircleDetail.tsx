@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import type { CareCircle, CareCircleMember, SyncData, CareCircleRole, VaultNote, DashboardData } from '../types';
-import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor } from '../components/dashboard';
+import { AlertsPanel, HealthCard, AdherenceCard, ActivityMonitor, RecoveryRequests } from '../components/dashboard';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -27,6 +27,7 @@ export default function CareCircleDetail() {
   const [members, setMembers] = useState<CareCircleMember[]>([]);
   const [vaultData, setVaultData] = useState<SyncData | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [recoverySignal, setRecoverySignal] = useState(0); // bumped on recovery_request WS event (H3)
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
@@ -142,6 +143,8 @@ export default function CareCircleDetail() {
       subscribe('alert', () => debouncedLoadDashboard()),
       subscribe('activity_update', () => debouncedLoadDashboard()),
       subscribe('alert_acknowledged', () => debouncedLoadDashboard()),
+      // Surface a new vault recovery request immediately (H3).
+      subscribe('recovery_request', () => setRecoverySignal((n) => n + 1)),
     ];
 
     return () => unsubs.forEach(unsub => unsub());
@@ -457,6 +460,12 @@ export default function CareCircleDetail() {
       {/* Dashboard Tab */}
       {activeTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Vault PIN recovery approvals (H3) — renders only when requests are pending. */}
+          {id && (
+            <ErrorBoundary>
+              <RecoveryRequests circleId={id} refreshSignal={recoverySignal} />
+            </ErrorBoundary>
+          )}
           {alertActionError && (
             <div className="alert alert-error">{alertActionError}</div>
           )}

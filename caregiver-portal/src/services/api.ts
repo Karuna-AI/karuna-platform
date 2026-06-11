@@ -517,6 +517,36 @@ class ApiService {
       };
     }
   }
+
+  // ── Vault PIN recovery (H3) ───────────────────────────────────────────────
+  async getRecoveryRequests(
+    circleId: string
+  ): Promise<ApiResponse<{ requests: RecoveryRequest[] }>> {
+    try {
+      const response = await this.client.get(`/care/circles/${circleId}/recovery/requests`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to get recovery requests' };
+    }
+  }
+
+  async approveRecovery(circleId: string, requesterId: string): Promise<ApiResponse<void>> {
+    try {
+      await this.client.post(`/care/circles/${circleId}/recovery/${requesterId}/approve`);
+      return { success: true };
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      return { success: false, error: axiosError.response?.data?.error || 'Failed to approve recovery' };
+    }
+  }
+}
+
+export interface RecoveryRequest {
+  userId: string;
+  name: string;
+  email: string;
+  requestedAt: string;
 }
 
 export const api = new ApiService();

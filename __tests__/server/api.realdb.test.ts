@@ -126,6 +126,11 @@ beforeAll(async () => {
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@realtest.karuna'");
   await db.query("DELETE FROM password_reset_tokens WHERE true");
   await db.query("DELETE FROM invitations WHERE true");
+  // audit_logs / caregiver_alerts / escrow reference care_circles without ON DELETE
+  // CASCADE (the recovery endpoints write them), so clear them before the circles.
+  await db.query("DELETE FROM audit_logs WHERE true").catch(() => {});
+  await db.query("DELETE FROM caregiver_alerts WHERE true").catch(() => {});
+  await db.query("DELETE FROM vault_recovery_escrow WHERE true").catch(() => {});
   await db.query("DELETE FROM circle_members WHERE true");
   await db.query("DELETE FROM care_circles WHERE name LIKE 'RealTest%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@realtest.karuna'");
@@ -150,6 +155,11 @@ afterAll(async () => {
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@realtest.karuna'");
   await db.query("DELETE FROM password_reset_tokens WHERE true");
   await db.query("DELETE FROM invitations WHERE true");
+  // audit_logs / caregiver_alerts / escrow reference care_circles without ON DELETE
+  // CASCADE (the recovery endpoints write them), so clear them before the circles.
+  await db.query("DELETE FROM audit_logs WHERE true").catch(() => {});
+  await db.query("DELETE FROM caregiver_alerts WHERE true").catch(() => {});
+  await db.query("DELETE FROM vault_recovery_escrow WHERE true").catch(() => {});
   await db.query("DELETE FROM circle_members WHERE true");
   await db.query("DELETE FROM care_circles WHERE name LIKE 'RealTest%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@realtest.karuna'");
@@ -992,4 +1002,129 @@ describe('Login rate limiter (real DB, real rate-limit) — LAST', () => {
     // Rate limiter (5/min) must have triggered at least once
     expect(statuses.some((s) => s === 429)).toBe(true);
   }, 20_000);
+});
+
+// ── Vault PIN recovery escrow (H3) ──────────────────────────────────────────────
+describe('Vault PIN recovery escrow (real DB)', () => {
+  let recOwnerToken: string;
+  let recCircleId: string;
+  let cgToken: string;
+  let cgUserId: string;
+  const stamp = Date.now();
+  const ownerEmail = `rec-owner-${stamp}@realtest.karuna`;
+  const cgEmail = `rec-cg-${stamp}@realtest.karuna`;
+
+  beforeAll(async () => {
+    // The recovery table ships via migration 006; ensure it exists for the test DB.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS vault_recovery_escrow (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        circle_id UUID NOT NULL REFERENCES care_circles(id) ON DELETE CASCADE,
+        wrapped_dek TEXT NOT NULL,
+        recovery_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        requested_at TIMESTAMP WITH TIME ZONE,
+        approved_by UUID REFERENCES users(id),
+        approved_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, circle_id)
+      )`);
+
+    // Seed owner + caregiver + circle directly (HTTP register/login would hit the
+    // registration rate limiter this late in the suite). Mint matching JWTs.
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const hash = bcrypt.hashSync('SeedPass123!', 1);
+    const mkUser = async (email: string, name: string) => {
+      const r = await db.query(
+        'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+        [email, hash, name]
+      );
+      return r.rows[0].id as string;
+    };
+    const ownerId = await mkUser(ownerEmail, 'Rec Owner');
+    cgUserId = await mkUser(cgEmail, 'Rec Caregiver');
+
+    const cr = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['RealTest Recovery Circle', 'Rec Owner']
+    );
+    recCircleId = cr.rows[0].id;
+    await db.query(
+      `INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner'), ($1, $3, 'caregiver')`,
+      [recCircleId, ownerId, cgUserId]
+    );
+
+    const mkTok = (id: string, email: string, name: string) =>
+      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    recOwnerToken = mkTok(ownerId, ownerEmail, 'Rec Owner');
+    cgToken = mkTok(cgUserId, cgEmail, 'Rec Caregiver');
+  });
+
+  function set2(r: any, t: string) { return r.set('Authorization', `Bearer ${t}`); }
+
+  it('full flow: escrow → request → owner approves → one-shot material release', async () => {
+    // Escrow (caregiver stores their wrapped DEK + recovery key)
+    const esc = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/escrow`), cgToken)
+      .send({ wrappedDek: 'WRAPPED-DEK', recoveryKey: 'RK-super-secret' });
+    expect(esc.status).toBe(200);
+
+    // Material before approval → 403
+    const m0 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m0.status).toBe(403);
+
+    // Request recovery
+    const rq = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/request`), cgToken).send({});
+    expect(rq.status).toBe(200);
+    expect(rq.body.status).toBe('pending');
+
+    // Requester cannot approve their own request
+    const self = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/${cgUserId}/approve`), cgToken).send({});
+    expect(self.status).toBe(403);
+
+    // Owner sees the pending request and approves
+    const list = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/requests`), recOwnerToken);
+    expect(list.status).toBe(200);
+    expect(list.body.requests.some((r: any) => r.userId === cgUserId)).toBe(true);
+
+    const ap = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/${cgUserId}/approve`), recOwnerToken).send({});
+    expect(ap.status).toBe(200);
+
+    // Material released and round-trips the escrowed values
+    const m1 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m1.status).toBe(200);
+    expect(m1.body).toEqual({ wrappedDek: 'WRAPPED-DEK', recoveryKey: 'RK-super-secret' });
+
+    // One-shot: a second fetch is denied (status reset to 'active')
+    const m2 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m2.status).toBe(403);
+  });
+
+  it('stores the recovery key encrypted at rest (not plaintext)', async () => {
+    const row = await db.query(
+      'SELECT recovery_key FROM vault_recovery_escrow WHERE user_id = $1 AND circle_id = $2',
+      [cgUserId, recCircleId]
+    );
+    expect(row.rows[0].recovery_key).not.toContain('RK-super-secret');
+    expect(String(row.rows[0].recovery_key).split('.').length).toBe(3); // iv.tag.ciphertext
+  });
+
+  it('a non-member cannot request recovery', async () => {
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const strangerEmail = `rec-stranger-${stamp}@realtest.karuna`;
+    const sr = await db.query(
+      'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+      [strangerEmail, bcrypt.hashSync('SeedPass123!', 1), 'Stranger']
+    );
+    const strangerToken = jwtLib.sign(
+      { id: sr.rows[0].id, email: strangerEmail, name: 'Stranger' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const r = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/request`), strangerToken).send({});
+    expect(r.status).toBe(403);
+  });
 });
