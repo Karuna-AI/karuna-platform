@@ -115,6 +115,20 @@ const INTENT_PATTERNS: IntentPattern[] = [
       message: /(?:saying|that says|with message)\s+(.+?)$/i,
     },
   },
+  // Open any named app — AFTER the app-specific intents above so "open
+  // whatsapp"/"open youtube" keep their richer handlers, BEFORE call/question
+  // so "can you open instagram" doesn't fall through to chat.
+  {
+    type: 'open_app',
+    patterns: [
+      /\b(open|launch|start)\s+(the\s+)?([a-z][a-z0-9 ]{1,30}?)(\s+app)?\s*$/i,
+      /\bopen\s+(up\s+)?([a-z][a-z0-9 ]{1,30}?)(\s+app)?\s+(please|for me)\s*$/i,
+      /\bcan you (open|launch|start)\s+(the\s+)?([a-z][a-z0-9 ]{1,30})/i,
+    ],
+    entityExtractors: {
+      appName: /(?:open|launch|start)\s+(?:up\s+)?(?:the\s+)?(.+?)(?:\s+app)?(?:\s+(?:please|for me|now))?\s*[?.!]*\s*$/i,
+    },
+  },
   // Existing intents
   {
     type: 'call',
@@ -242,6 +256,7 @@ export function isActionableIntent(intent: ParsedIntent): boolean {
     'otp_help',
     'emergency',
     'whatsapp',
+    'open_app',
   ];
 
   // Emergency intents are always actionable
@@ -314,6 +329,10 @@ export function formatIntentForDisplay(intent: ParsedIntent): string {
       return intent.entities.contact
         ? `WhatsApp to ${intent.entities.contact}`
         : 'Opening WhatsApp';
+    case 'open_app':
+      return intent.entities.appName
+        ? `Opening ${intent.entities.appName}`
+        : 'Opening an app';
     default:
       return 'Processing request';
   }
@@ -341,6 +360,9 @@ export function getIntentSuggestion(intent: ParsedIntent): string | null {
   }
   if (intent.type === 'whatsapp' && !intent.entities.contact) {
     return 'Who would you like to WhatsApp?';
+  }
+  if (intent.type === 'open_app' && !intent.entities.appName) {
+    return 'Which app would you like me to open?';
   }
   return null;
 }

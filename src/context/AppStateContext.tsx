@@ -370,6 +370,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         } else if (t === 'whatsapp') {
           const num = actionConfirmation.details?.find((d: any) => d.label === 'Number')?.value;
           if (num) await intentActionsService.executeWhatsApp(num, currentIntent.entities.message);
+        } else if (t === 'app_open') {
+          await intentActionsService.executeOpenApp(currentIntent.entities.appName || '');
         }
       } catch (err) {
         console.error('[AppState] Action execution error:', err);

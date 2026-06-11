@@ -47,7 +47,8 @@ export type IntentType =
   | 'music'             // Spotify, music playback
   | 'otp_help'          // OTP assistance
   | 'emergency'         // Emergency call
-  | 'whatsapp';         // WhatsApp specific
+  | 'whatsapp'          // WhatsApp specific
+  | 'open_app';         // Open any named app ("open Instagram")
 
 export interface ParsedIntent {
   type: IntentType;
@@ -64,6 +65,7 @@ export interface ParsedIntent {
     artist?: string;             // For music
     song?: string;               // For music
     otpSource?: string;          // OTP source (bank, app name)
+    appName?: string;            // For open_app ("open Instagram")
     [key: string]: string | undefined;
   };
   rawText: string;
