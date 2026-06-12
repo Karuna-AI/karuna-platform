@@ -21,9 +21,17 @@ check() {
   local desc="$1"
   local url="$2"
   local expected_status="${3:-200}"
+  local method="${4:-GET}"
 
+  # No -f: a 4xx is a valid expected outcome here, and -f makes curl exit
+  # non-zero so the || fallback used to append "000" to the printed code.
   local status
-  status=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "000")
+  if [ "$method" = "POST" ]; then
+    status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+      -X POST -H 'Content-Type: application/json' -d '{}' "$url" 2>/dev/null || echo "000")
+  else
+    status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "000")
+  fi
 
   if [ "$status" = "$expected_status" ]; then
     echo "  ✓ $desc ($status)"
@@ -61,15 +69,18 @@ echo "Admin:  $ADMIN_URL"
 echo ""
 
 echo "--- API health ---"
-check_json "API health status is ok"    "$API_URL/api/health" '.status' 'ok'
-check_json "API health reports version" "$API_URL/api/health" '.version | type' 'string'
+# The gateway serves /health (not /api/health) returning {"status":"healthy",...}.
+check_json "API health status is healthy"  "$API_URL/health" '.status' 'healthy'
+check_json "API health reports timestamp"  "$API_URL/health" '.timestamp | type' 'string'
 
 echo ""
 echo "--- API authentication endpoints ---"
-check "Login endpoint reachable (POST returns 4xx without body)" \
-  "$API_URL/api/care/auth/login" "400"
-check "Admin login endpoint reachable" \
-  "$API_URL/api/admin/auth/login" "400"
+check "Login endpoint rejects empty credentials" \
+  "$API_URL/api/care/auth/login" "400" "POST"
+# Admin mutations require X-Requested-With (CSRF defense-in-depth) — a bare
+# POST must be rejected with 403, which also proves the endpoint is alive.
+check "Admin login rejects non-AJAX requests (CSRF guard)" \
+  "$API_URL/api/admin/auth/login" "403" "POST"
 
 echo ""
 echo "--- Portal availability ---"
