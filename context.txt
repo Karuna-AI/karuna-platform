@@ -172,6 +172,14 @@ BUGS FOUND ON-DEVICE (all fixed + committed, in APK build 3):
    vault store never loaded) until manual lock/unlock. Data was intact.
    Fixed: run normal unlock path after recovery (152f475).
 
+FIX VERIFICATION ROUND 2 (APK build 3, commit 152f475):
+- "open whatsapp" → "Open WhatsApp?" modal → confirmed → WhatsApp launched
+  (logcat: START VIEW whatsapp://send → com.whatsapp). PASS.
+- "open instagram" (not installed) → store chooser → Google Play opened
+  DIRECTLY on Instagram's install page (Gallery bug gone). PASS.
+- Recovery round 2 (5678 → 4321): full request/approve/recover cycle —
+  "Doctors 1 item" visible IMMEDIATELY after recovery (reload fix). PASS.
+
 UX NOTES (not fixed, tracked):
 - Device join with an invite for an email WITHOUT an account fails with
   "Password required for new account" — app ignores needsPassword:true
