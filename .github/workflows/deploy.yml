@@ -206,18 +206,21 @@ jobs:
         # from the repo root. Until the dashboard setting is cleared
         # (docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2), build locally and
         # deploy --prebuilt so the remote root-directory setting never applies.
-        working-directory: ./admin-portal
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_ADMIN }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN_ADMIN }}
         run: |
+          # Pull project settings from the repo root: "vercel pull" resolves the
+          # dashboard rootDirectory relative to cwd, so it only works from here.
           npx vercel pull --yes --environment=production --token $VERCEL_TOKEN
-          # Neutralize the root-directory project setting for the local build:
-          # this directory already IS the app root.
+          # Neutralize rootDirectory and hand the link to the app directory,
+          # which IS the app root for the local build.
           jq '.settings.rootDirectory = null' .vercel/project.json > .vercel/project.json.tmp
           mv .vercel/project.json.tmp .vercel/project.json
+          mv .vercel admin-portal/.vercel
+          cd admin-portal
           npx vercel build --prod --token $VERCEL_TOKEN
           npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN
 
