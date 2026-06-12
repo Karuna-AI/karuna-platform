@@ -221,8 +221,8 @@ jobs:
           mv .vercel/project.json.tmp .vercel/project.json
           mv .vercel admin-portal/.vercel
           cd admin-portal
-          npx vercel build --prod --token $VERCEL_TOKEN
-          npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN
+          npx vercel build --prod --yes --token $VERCEL_TOKEN
+          npx vercel deploy --prebuilt --prod --yes --token $VERCEL_TOKEN
 
   smoke-test:
     name: Post-Deploy Smoke Tests
