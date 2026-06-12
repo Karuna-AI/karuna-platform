@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import CareCircleDetail from './pages/CareCircleDetail';
+import Account from './pages/Account';
 import AcceptInvitation from './pages/AcceptInvitation';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
@@ -121,6 +122,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CareCircleDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <ProtectedRoute>
+            <Account />
           </ProtectedRoute>
         }
       />

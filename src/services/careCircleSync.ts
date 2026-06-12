@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { vaultService } from './vault';
 import { secureStorageService } from './secureStorage';
 import { toSyncPayload, isSyncSupported } from './vaultSyncMap';
+import { encryptionService } from './encryption';
+
+export type RecoveryStatus = 'none' | 'active' | 'pending' | 'approved';
 
 const STORAGE_KEYS = {
   CARE_CIRCLE_ID: '@karuna_care_circle_id',
@@ -217,6 +220,85 @@ class CareCircleSyncService {
     // Offline / fetch miss: fall back to the last known cached role.
     const cached = await AsyncStorage.getItem(STORAGE_KEYS.CIRCLE_ROLE);
     return (cached as CircleRole | null) ?? null;
+  }
+
+  // ── Caregiver-assisted vault PIN recovery (H3) ──────────────────────────────
+
+  private recoveryUrl(suffix: string): string {
+    return `${this.baseUrl}/api/care/circles/${this.careCircleId}/recovery${suffix}`;
+  }
+
+  /**
+   * Set up (or refresh) recovery escrow for the unlocked vault: wrap the DEK
+   * under a fresh recovery key and escrow it to the gateway. No-op when not in a
+   * circle or the vault is locked. Idempotent (server upserts). Call after unlock.
+   */
+  async ensureRecoveryEscrow(): Promise<{ success: boolean; error?: string }> {
+    if (!this.careCircleId || !this.authToken) return { success: false, error: 'Not connected to care circle' };
+    const escrow = await encryptionService.buildRecoveryEscrow();
+    if (!escrow) return { success: false, error: 'Vault is locked' };
+    try {
+      const res = await fetch(this.recoveryUrl('/escrow'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.authToken}` },
+        body: JSON.stringify(escrow),
+      });
+      if (!res.ok) return { success: false, error: (await res.json().catch(() => ({}))).error || 'Failed to set up recovery' };
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  /** Ask the care circle to approve recovery of this device's vault PIN. */
+  async requestRecovery(): Promise<{ success: boolean; error?: string }> {
+    if (!this.careCircleId || !this.authToken) return { success: false, error: 'Not connected to care circle' };
+    try {
+      const res = await fetch(this.recoveryUrl('/request'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.authToken}` },
+        body: '{}',
+      });
+      if (!res.ok) return { success: false, error: (await res.json().catch(() => ({}))).error || 'Failed to request recovery' };
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  /** Poll recovery status while waiting for a circle member to approve. */
+  async getRecoveryStatus(): Promise<RecoveryStatus> {
+    if (!this.careCircleId || !this.authToken) return 'none';
+    try {
+      const res = await fetch(this.recoveryUrl('/status'), { headers: { Authorization: `Bearer ${this.authToken}` } });
+      if (!res.ok) return 'none';
+      const data = await res.json();
+      return (data?.status as RecoveryStatus) || 'none';
+    } catch {
+      return 'none';
+    }
+  }
+
+  /**
+   * After approval, fetch the escrow material and re-key the vault to a new PIN.
+   * Returns success only when the vault is recovered and unlocked.
+   */
+  async completeRecovery(newPin: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.careCircleId || !this.authToken) return { success: false, error: 'Not connected to care circle' };
+    try {
+      const res = await fetch(this.recoveryUrl('/material'), { headers: { Authorization: `Bearer ${this.authToken}` } });
+      if (res.status === 403) return { success: false, error: 'Recovery not approved yet' };
+      if (!res.ok) return { success: false, error: (await res.json().catch(() => ({}))).error || 'Failed to fetch recovery material' };
+      const { wrappedDek, recoveryKey } = await res.json();
+      if (!wrappedDek || !recoveryKey) return { success: false, error: 'Recovery material missing' };
+      const ok = await encryptionService.restoreWithRecovery(wrappedDek, recoveryKey, newPin);
+      if (!ok) return { success: false, error: 'Could not restore the vault from recovery material' };
+      // Re-escrow under a fresh recovery key now that the PIN changed.
+      await this.ensureRecoveryEscrow();
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
   }
 
   // Current in-memory care auth token, for clients that want to attribute

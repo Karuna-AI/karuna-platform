@@ -19,6 +19,70 @@ import {
   ACTION_SAFETY,
 } from '../types/actions';
 
+/**
+ * Known apps for the generic "open <app>" intent. Keys are normalized aliases;
+ * each entry lists URL schemes to try first, the Android package (for an
+ * explicit launcher intent), and a web fallback so the request still succeeds
+ * when the native app is missing.
+ */
+interface KnownApp {
+  label: string;
+  schemes: string[];
+  androidPackage?: string;
+  web?: string;
+}
+
+const KNOWN_APPS: Record<string, KnownApp> = {
+  whatsapp:  { label: 'WhatsApp',     schemes: ['whatsapp://send'],        androidPackage: 'com.whatsapp',                 web: 'https://web.whatsapp.com' },
+  youtube:   { label: 'YouTube',      schemes: ['vnd.youtube://', 'youtube://'], androidPackage: 'com.google.android.youtube', web: 'https://www.youtube.com' },
+  facebook:  { label: 'Facebook',     schemes: ['fb://feed'],              androidPackage: 'com.facebook.katana',          web: 'https://www.facebook.com' },
+  instagram: { label: 'Instagram',    schemes: ['instagram://app'],        androidPackage: 'com.instagram.android',        web: 'https://www.instagram.com' },
+  telegram:  { label: 'Telegram',     schemes: ['tg://resolve'],           androidPackage: 'org.telegram.messenger',       web: 'https://web.telegram.org' },
+  spotify:   { label: 'Spotify',      schemes: ['spotify://'],             androidPackage: 'com.spotify.music',            web: 'https://open.spotify.com' },
+  gmail:     { label: 'Gmail',        schemes: ['googlegmail://'],         androidPackage: 'com.google.android.gm',        web: 'https://mail.google.com' },
+  maps:      { label: 'Maps',         schemes: ['geo:0,0'],                androidPackage: 'com.google.android.apps.maps', web: 'https://maps.google.com' },
+  chrome:    { label: 'Chrome',       schemes: ['googlechrome://'],        androidPackage: 'com.android.chrome',           web: 'https://www.google.com' },
+  netflix:   { label: 'Netflix',      schemes: ['nflx://'],                androidPackage: 'com.netflix.mediaclient',      web: 'https://www.netflix.com' },
+  amazon:    { label: 'Amazon',       schemes: ['com.amazon.mobile.shopping://'], androidPackage: 'in.amazon.mShop.android.shopping', web: 'https://www.amazon.in' },
+  flipkart:  { label: 'Flipkart',     schemes: ['flipkart://'],            androidPackage: 'com.flipkart.android',         web: 'https://www.flipkart.com' },
+  paytm:     { label: 'Paytm',        schemes: ['paytmmp://'],             androidPackage: 'net.one97.paytm',              web: 'https://paytm.com' },
+  phonepe:   { label: 'PhonePe',      schemes: ['phonepe://'],             androidPackage: 'com.phonepe.app',              web: 'https://www.phonepe.com' },
+  'google pay': { label: 'Google Pay', schemes: ['tez://'],                androidPackage: 'com.google.android.apps.nbu.paisa.user', web: 'https://pay.google.com' },
+  gpay:      { label: 'Google Pay',   schemes: ['tez://'],                 androidPackage: 'com.google.android.apps.nbu.paisa.user', web: 'https://pay.google.com' },
+  uber:      { label: 'Uber',         schemes: ['uber://'],                androidPackage: 'com.ubercab',                  web: 'https://m.uber.com' },
+  ola:       { label: 'Ola',          schemes: ['olacabs://'],             androidPackage: 'com.olacabs.customer',         web: 'https://book.olacabs.com' },
+  hotstar:   { label: 'Hotstar',      schemes: ['hotstar://'],             androidPackage: 'in.startv.hotstar',            web: 'https://www.hotstar.com' },
+  truecaller:{ label: 'Truecaller',   schemes: ['truecaller://'],          androidPackage: 'com.truecaller',               web: 'https://www.truecaller.com' },
+  photos:    { label: 'Google Photos', schemes: ['googlephotos://'],       androidPackage: 'com.google.android.apps.photos', web: 'https://photos.google.com' },
+  calendar:  { label: 'Calendar',     schemes: ['content://com.android.calendar/time/'], androidPackage: 'com.google.android.calendar', web: 'https://calendar.google.com' },
+  phone:     { label: 'Phone',        schemes: ['tel:'] },
+  messages:  { label: 'Messages',     schemes: ['sms:'] },
+  settings:  { label: 'Settings',     schemes: ['app-settings:'] },
+};
+
+// Aliases that map common ways of saying an app's name onto registry keys.
+const APP_ALIASES: Record<string, string> = {
+  'whats app': 'whatsapp',
+  'whatsup': 'whatsapp',
+  'you tube': 'youtube',
+  'insta': 'instagram',
+  'fb': 'facebook',
+  'google maps': 'maps',
+  'map': 'maps',
+  'mail': 'gmail',
+  'email': 'gmail',
+  'browser': 'chrome',
+  'google chrome': 'chrome',
+  'dialer': 'phone',
+  'messaging': 'messages',
+  'sms': 'messages',
+  'text messages': 'messages',
+  'google photos': 'photos',
+  'gallery': 'photos',
+  'disney hotstar': 'hotstar',
+  'disney plus hotstar': 'hotstar',
+};
+
 class AppLauncherService {
   private lastAction: { type: ActionType; timestamp: number } | null = null;
   private actionCooldown = 2000; // 2 second cooldown between same actions
@@ -125,6 +189,12 @@ class AppLauncherService {
           return { valid: false, error: 'A contact or phone number is required.' };
         }
         break;
+
+      case 'app_open':
+        if (!request.params.appName || !String(request.params.appName).trim()) {
+          return { valid: false, error: 'Which app would you like to open?' };
+        }
+        break;
     }
 
     return { valid: true };
@@ -180,6 +250,8 @@ class AppLauncherService {
         return `Call ${request.params.contact || request.params.phone}?`;
       case 'emergency_call':
         return 'Call emergency services?';
+      case 'app_open':
+        return `Open ${request.params.appName}?`;
       default:
         return `Proceed with ${ACTION_METADATA[request.type]?.displayName || request.type}?`;
     }
@@ -258,6 +330,8 @@ class AppLauncherService {
         return this.openCamera();
       case 'flashlight':
         return this.toggleFlashlight();
+      case 'app_open':
+        return this.openApp(request);
 
       // Health
       case 'emergency_call':
@@ -590,6 +664,112 @@ class AppLauncherService {
       message: 'Opening WhatsApp...',
       action: 'whatsapp',
     };
+  }
+
+  /**
+   * Resolve a spoken app name to a known-registry entry.
+   */
+  private resolveKnownApp(rawName: string): KnownApp | null {
+    const normalized = rawName
+      .toLowerCase()
+      .replace(/\b(the|app|application|my)\b/g, ' ')
+      .replace(/[^a-z0-9 ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return null;
+    const key = APP_ALIASES[normalized] || normalized;
+    return KNOWN_APPS[key] || null;
+  }
+
+  /**
+   * Open any named app ("open Instagram"). Strategy:
+   *  1. Known app → try its URL schemes (try/catch, not canOpenURL — Android 11+
+   *     package-visibility makes canOpenURL lie for schemes not in <queries>).
+   *  2. Android + known package → explicit launcher intent via
+   *     expo-intent-launcher (required lazily: it's native-only).
+   *  3. Known web fallback → open in browser.
+   *  4. Unknown app → guess "<slug>://", then fall back to a store search so
+   *     the user still gets a useful result.
+   */
+  private async openApp(request: ActionRequest): Promise<ActionResult> {
+    const rawName = String(request.params.appName).trim();
+    const known = this.resolveKnownApp(rawName);
+    const label = known?.label || rawName;
+
+    if (known) {
+      for (const scheme of known.schemes) {
+        try {
+          await Linking.openURL(scheme);
+          return { success: true, message: `Opening ${label}...`, action: 'app_open', appOpened: label };
+        } catch {
+          // Scheme not handled — try the next strategy.
+        }
+      }
+      // Schemes failing for a registry app almost always means it isn't
+      // installed. On Android, the Play Store details page is the most useful
+      // next step (one tap to Install/Open). NOTE: an unrestricted
+      // ACTION_MAIN/LAUNCHER intent via expo-intent-launcher must NOT be used
+      // here — packageName alone doesn't constrain it and Android resolves an
+      // arbitrary app (observed on-device: opened the Gallery).
+      if (Platform.OS === 'android' && known.androidPackage) {
+        try {
+          await Linking.openURL(`market://details?id=${known.androidPackage}`);
+          return {
+            success: true,
+            message: `${label} isn't installed, so I'm showing it in the Play Store.`,
+            action: 'app_open',
+            appOpened: 'store',
+          };
+        } catch {
+          // No Play Store — fall through to the web.
+        }
+      }
+      if (known.web) {
+        try {
+          await Linking.openURL(known.web);
+          return {
+            success: true,
+            message: `${label} isn't installed, so I opened it in the browser.`,
+            action: 'app_open',
+            appOpened: 'browser',
+          };
+        } catch {
+          // Fall through to the store search.
+        }
+      }
+    } else {
+      // Unknown app: best-effort scheme guess ("signal" → signal://).
+      const slug = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (slug) {
+        try {
+          await Linking.openURL(`${slug}://`);
+          return { success: true, message: `Opening ${label}...`, action: 'app_open', appOpened: label };
+        } catch {
+          // Fall through to the store search.
+        }
+      }
+    }
+
+    // Last resort: show the app in the store so the user can install/open it.
+    const storeUrl = Platform.OS === 'android'
+      ? `market://search?q=${encodeURIComponent(rawName)}`
+      : `https://apps.apple.com/search?term=${encodeURIComponent(rawName)}`;
+    try {
+      await Linking.openURL(storeUrl);
+      return {
+        success: true,
+        message: `I couldn't find ${label} on this phone, so I'm showing it in the app store.`,
+        action: 'app_open',
+        appOpened: 'store',
+      };
+    } catch {
+      return {
+        success: false,
+        message: `I couldn't open ${label}. It may not be installed on this phone.`,
+        action: 'app_open',
+        error: 'app_not_found',
+      };
+    }
   }
 
   /**

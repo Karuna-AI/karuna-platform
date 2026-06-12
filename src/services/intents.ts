@@ -115,6 +115,20 @@ const INTENT_PATTERNS: IntentPattern[] = [
       message: /(?:saying|that says|with message)\s+(.+?)$/i,
     },
   },
+  // Open any named app — AFTER the app-specific intents above so "open
+  // whatsapp"/"open youtube" keep their richer handlers, BEFORE call/question
+  // so "can you open instagram" doesn't fall through to chat.
+  {
+    type: 'open_app',
+    patterns: [
+      /\b(open|launch|start)\s+(the\s+)?([a-z][a-z0-9 ]{1,30}?)(\s+app)?\s*$/i,
+      /\bopen\s+(up\s+)?([a-z][a-z0-9 ]{1,30}?)(\s+app)?\s+(please|for me)\s*$/i,
+      /\bcan you (open|launch|start)\s+(the\s+)?([a-z][a-z0-9 ]{1,30})/i,
+    ],
+    entityExtractors: {
+      appName: /(?:open|launch|start)\s+(?:up\s+)?(?:the\s+)?(.+?)(?:\s+app)?(?:\s+(?:please|for me|now))?\s*[?.!]*\s*$/i,
+    },
+  },
   // Existing intents
   {
     type: 'call',
@@ -242,11 +256,25 @@ export function isActionableIntent(intent: ParsedIntent): boolean {
     'otp_help',
     'emergency',
     'whatsapp',
+    'open_app',
   ];
 
   // Emergency intents are always actionable
   if (intent.type === 'emergency') {
     return intent.confidence > 0.3;
+  }
+
+  // "Open whatsapp"/"open youtube": the app-specific patterns match first but
+  // extract no entities, which previously dropped the request through to the
+  // AI ("I can't open apps..."). With an open/launch/start verb and no
+  // entities, treat it as a plain app-open — the processors turn it into an
+  // app_open / youtube_play action.
+  if (
+    (intent.type === 'whatsapp' || intent.type === 'youtube') &&
+    Object.keys(intent.entities).length === 0 &&
+    /\b(open|launch|start)\b/i.test(intent.rawText)
+  ) {
+    return intent.confidence > 0.5;
   }
 
   // OTP help is actionable without entities
@@ -314,6 +342,10 @@ export function formatIntentForDisplay(intent: ParsedIntent): string {
       return intent.entities.contact
         ? `WhatsApp to ${intent.entities.contact}`
         : 'Opening WhatsApp';
+    case 'open_app':
+      return intent.entities.appName
+        ? `Opening ${intent.entities.appName}`
+        : 'Opening an app';
     default:
       return 'Processing request';
   }
@@ -341,6 +373,9 @@ export function getIntentSuggestion(intent: ParsedIntent): string | null {
   }
   if (intent.type === 'whatsapp' && !intent.entities.contact) {
     return 'Who would you like to WhatsApp?';
+  }
+  if (intent.type === 'open_app' && !intent.entities.appName) {
+    return 'Which app would you like me to open?';
   }
   return null;
 }

@@ -32,6 +32,13 @@ export default function Layout({ children }: LayoutProps) {
               Dashboard
             </Link>
 
+            <Link
+              to="/account"
+              className={`nav-link ${location.pathname === '/account' ? 'active' : ''}`}
+            >
+              Account
+            </Link>
+
             <span className="text-muted" style={{ padding: '0 0.5rem' }}>|</span>
 
             <span className="text-muted">{user?.name}</span>

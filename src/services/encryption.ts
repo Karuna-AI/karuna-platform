@@ -467,6 +467,71 @@ class EncryptionService {
   }
 
   /**
+   * Build caregiver-assisted recovery escrow material (H3 Phase 2). Wraps the
+   * current DEK under a fresh random recovery key. The device escrows
+   * { wrappedDek, recoveryKey } to the gateway; on an approved recovery the
+   * device fetches it back and calls restoreWithRecovery(). Requires the vault
+   * to be unlocked (DEK loaded). Returns null otherwise.
+   */
+  async buildRecoveryEscrow(): Promise<{ wrappedDek: string; recoveryKey: string } | null> {
+    if (!this.isInitialized || !this.keyBytes) return null;
+    const dekBytes = this.keyBytes;
+    const rkBytes = new Uint8Array(await Crypto.getRandomBytesAsync(32));
+    const recoveryKey = bytesToBase64(rkBytes);
+    // Wrap the DEK under the recovery key, then restore the DEK as the active key.
+    await this.setActiveKey(rkBytes);
+    const wrappedDek = await this.encrypt(bytesToBase64(dekBytes));
+    await this.setActiveKey(dekBytes);
+    return { wrappedDek, recoveryKey };
+  }
+
+  /**
+   * Recover the vault from approved escrow material and re-key to a new PIN
+   * (H3 Phase 3). Unwraps the DEK with the recovery key, verifies it against the
+   * existing key check (so material from a different vault can't corrupt this
+   * one), re-wraps the DEK under the new PIN, and leaves the vault unlocked.
+   */
+  async restoreWithRecovery(wrappedDek: string, recoveryKey: string, newPin: string): Promise<boolean> {
+    try {
+      // Unwrap the DEK using the recovery key.
+      await this.setActiveKey(base64ToBytes(recoveryKey));
+      const dekBytes = base64ToBytes(await this.decrypt(wrappedDek));
+
+      // Integrity guard: the recovered DEK must match this vault's data.
+      const keyCheck = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
+      await this.setActiveKey(dekBytes);
+      if (keyCheck) {
+        try {
+          if (await this.decrypt(keyCheck) !== 'KARUNA_VAULT_KEY_VALID') return false;
+        } catch {
+          return false;
+        }
+      }
+
+      // Re-wrap the DEK under the new PIN (new salt) — data stays under the DEK.
+      const newSalt = await generateSalt(32);
+      const newPinKey = await deriveKey(newPin, newSalt);
+      await this.setActiveKey(newPinKey);
+      const newWrapped = await this.encrypt(bytesToBase64(dekBytes));
+
+      await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, newSalt);
+      await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, newWrapped);
+      this.salt = newSalt;
+
+      // Activate the DEK; ensure a key check exists (new vaults).
+      await this.setActiveKey(dekBytes);
+      if (!keyCheck) {
+        await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK, await this.encrypt('KARUNA_VAULT_KEY_VALID'));
+      }
+      this.isInitialized = true;
+      return true;
+    } catch (error) {
+      console.error('Recovery restore failed:', error);
+      return false;
+    }
+  }
+
+  /**
    * Reset the vault (deletes all encrypted data)
    */
   async resetVault(): Promise<void> {

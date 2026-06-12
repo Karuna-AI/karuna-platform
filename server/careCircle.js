@@ -14,7 +14,12 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
 const db = require('./db');
+const realtime = require('./realtime');
 const router = express.Router();
+
+// Cross-instance realtime: deliver events published by other gateway instances
+// to this instance's WebSocket clients. No-op unless REDIS_URL is configured.
+realtime.init((circleId, event) => deliverToLocalCircle(circleId, event));
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
@@ -227,6 +232,7 @@ const ROLE_PERMISSIONS = {
     canExportData: true,
     canEditCircle: true,
     canDeleteCircle: true,
+    canApproveRecovery: true,
   },
   caregiver: {
     canViewAccounts: true,
@@ -251,6 +257,7 @@ const ROLE_PERMISSIONS = {
     canExportData: true,
     canEditCircle: false,
     canDeleteCircle: false,
+    canApproveRecovery: true,
   },
   viewer: {
     canViewAccounts: false,
@@ -275,6 +282,7 @@ const ROLE_PERMISSIONS = {
     canExportData: false,
     canEditCircle: false,
     canDeleteCircle: false,
+    canApproveRecovery: false,
   },
 };
 
@@ -1015,6 +1023,222 @@ router.get('/auth/me', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to get profile' });
+  }
+});
+
+// ============================================================================
+// GDPR — Data export & account deletion
+// ============================================================================
+
+const gdprRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { error: 'Too many data requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // The export/delete flows are exercised repeatedly by the realdb suite from
+  // one IP; unlike login/registration these can't be seeded around.
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res, next, options) => {
+    console.warn(`[RateLimit] GDPR rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json(options.message);
+  },
+});
+
+// GDPR right of access: download everything we hold about the authenticated
+// user as JSON. Owned circles include full circle data (the owner is the
+// circle's data custodian); for circles where the user is only a member, just
+// the membership and their own authored notes are included. Document file
+// contents are omitted (metadata only) to keep the export portable — files
+// remain downloadable via the documents endpoint.
+router.get('/auth/export', gdprRateLimiter, authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const profileResult = await db.query(
+      `SELECT id, email, name, phone, is_verified, created_at, last_login_at, login_count
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (profileResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const memberships = (await db.query(
+      `SELECT cm.circle_id, cc.name AS circle_name, cc.care_recipient_name, cm.role,
+              cm.relationship, cm.joined_at
+       FROM circle_members cm JOIN care_circles cc ON cc.id = cm.circle_id
+       WHERE cm.user_id = $1`,
+      [userId]
+    )).rows;
+
+    const EXPORT_ROW_CAP = 10000;
+    const ownedCircles = [];
+    for (const m of memberships.filter((row) => row.role === 'owner')) {
+      const circleId = m.circle_id;
+      const q = (sql) => db.query(sql, [circleId]).then((r) => r.rows);
+      const [members, medications, doctors, appointments, contacts, accounts, documents, routines,
+             notes, health, doses, activity, checkins, alerts] = await Promise.all([
+        q(`SELECT u.name, cm.role, cm.relationship, cm.joined_at
+           FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = $1`),
+        q('SELECT * FROM vault_medications WHERE circle_id = $1'),
+        q('SELECT * FROM vault_doctors WHERE circle_id = $1'),
+        q('SELECT * FROM vault_appointments WHERE circle_id = $1'),
+        q('SELECT * FROM vault_contacts WHERE circle_id = $1'),
+        q('SELECT * FROM vault_accounts WHERE circle_id = $1'),
+        q(`SELECT id, title, type, description, file_name, file_type, file_size, expiry_date,
+                  is_sensitive, created_at FROM vault_documents WHERE circle_id = $1`),
+        q('SELECT * FROM vault_routines WHERE circle_id = $1'),
+        q('SELECT * FROM vault_notes WHERE circle_id = $1'),
+        q(`SELECT data_type, value, unit, measured_at, source, notes FROM health_data
+           WHERE circle_id = $1 ORDER BY measured_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT medication_id, scheduled_time, status, taken_at, skipped_reason FROM medication_doses
+           WHERE circle_id = $1 ORDER BY scheduled_time DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT activity_type, details, recorded_at, source FROM activity_logs
+           WHERE circle_id = $1 ORDER BY recorded_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT checkin_type, message, response, response_text, responded_at FROM checkin_logs
+           WHERE circle_id = $1 ORDER BY created_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+        q(`SELECT alert_type, severity, title, message, status, created_at FROM caregiver_alerts
+           WHERE circle_id = $1 ORDER BY created_at DESC LIMIT ${EXPORT_ROW_CAP}`),
+      ]);
+      const circleRow = (await db.query(
+        'SELECT id, name, care_recipient_name, settings, patient_consent, subscription_tier, created_at FROM care_circles WHERE id = $1',
+        [circleId]
+      )).rows[0];
+      ownedCircles.push({
+        circle: circleRow,
+        members,
+        vault: {
+          medications,
+          doctors,
+          appointments,
+          contacts,
+          accounts: accounts.map((a) => ({
+            ...a,
+            account_number: decryptField(a.account_number_encrypted),
+            account_number_encrypted: undefined,
+          })),
+          documents,
+          routines,
+          notes,
+        },
+        health: { measurements: health, medicationDoses: doses },
+        activity,
+        checkins,
+        alerts,
+      });
+    }
+
+    const notesAuthored = (await db.query(
+      `SELECT circle_id, title, content, category, priority, created_at
+       FROM vault_notes WHERE author_id = $1`,
+      [userId]
+    )).rows;
+    const auditTrail = (await db.query(
+      `SELECT action, category, description, created_at FROM audit_logs
+       WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000`,
+      [userId]
+    )).rows;
+
+    db.query(
+      `INSERT INTO audit_logs (user_id, action, category, description, metadata, ip_address, user_agent)
+       VALUES ($1, 'data_exported', 'auth', 'User downloaded a GDPR data export', '{}', $2, $3)`,
+      [userId, req.ip, req.headers['user-agent']]
+    ).catch(() => {});
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Disposition', `attachment; filename="karuna-data-export-${stamp}.json"`);
+    res.json({
+      format: 'karuna-gdpr-export/v1',
+      exportedAt: new Date().toISOString(),
+      profile: profileResult.rows[0],
+      memberships,
+      ownedCircles,
+      notesAuthored,
+      auditTrail,
+      notes: 'Document file contents are not embedded; download them individually from the documents section.',
+    });
+  } catch (error) {
+    console.error('Data export error:', error);
+    res.status(500).json({ error: 'Failed to export data' });
+  }
+});
+
+// GDPR right to erasure: delete the account and everything owned by it.
+// Requires the current password. When the user owns circles, the request must
+// also set confirmDeleteOwnedCircles=true — deleting an owned circle removes
+// that circle's data for every member, which deserves an explicit second step.
+// References from circles the user does NOT own are anonymized, not deleted
+// (the circle's data belongs to its own members).
+router.post('/auth/delete-account', gdprRateLimiter, authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { password, confirmDeleteOwnedCircles } = req.body || {};
+    if (!password) return res.status(400).json({ error: 'Password is required' });
+
+    const userResult = await db.query('SELECT id, email, password_hash FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    if (!(await verifyPassword(password, userResult.rows[0].password_hash, userId))) {
+      return res.status(403).json({ error: 'Incorrect password' });
+    }
+
+    const owned = (await db.query(
+      `SELECT cc.id, cc.name,
+              (SELECT COUNT(*)::int FROM circle_members WHERE circle_id = cc.id) AS member_count
+       FROM care_circles cc JOIN circle_members cm ON cm.circle_id = cc.id
+       WHERE cm.user_id = $1 AND cm.role = 'owner'`,
+      [userId]
+    )).rows;
+
+    if (owned.length > 0 && confirmDeleteOwnedCircles !== true) {
+      return res.status(409).json({
+        error: 'You own care circles. Deleting your account permanently deletes them for all members.',
+        ownedCircles: owned.map((c) => ({ id: c.id, name: c.name, memberCount: c.member_count })),
+        confirmationRequired: 'confirmDeleteOwnedCircles',
+      });
+    }
+
+    await db.transaction(async (client) => {
+      const ownedIds = owned.map((c) => c.id);
+      if (ownedIds.length > 0) {
+        // Cascades wipe all circle-scoped data (vault, health, alerts, sync…).
+        await client.query('DELETE FROM care_circles WHERE id = ANY($1)', [ownedIds]);
+      }
+      // Remaining references from circles the user does not own.
+      await client.query('DELETE FROM invitations WHERE invited_by = $1', [userId]);
+      await client.query('DELETE FROM vault_notes WHERE author_id = $1', [userId]);
+      await client.query('UPDATE vault_notes SET resolved_by = NULL WHERE resolved_by = $1', [userId]);
+      await client.query(
+        "UPDATE sync_changes SET changed_by = NULL, changed_by_name = 'Deleted user' WHERE changed_by = $1",
+        [userId]
+      );
+      await client.query('UPDATE caregiver_alerts SET acknowledged_by = NULL WHERE acknowledged_by = $1', [userId]);
+      await client.query('UPDATE vault_recovery_escrow SET approved_by = NULL WHERE approved_by = $1', [userId]);
+      await client.query('UPDATE ai_usage_logs SET user_id = NULL WHERE user_id = $1', [userId]);
+      await client.query('UPDATE audit_logs SET user_id = NULL WHERE user_id = $1', [userId]);
+      // Cascades remove memberships, sessions, reset tokens, own escrow rows.
+      await client.query('DELETE FROM users WHERE id = $1', [userId]);
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, category, description, metadata, ip_address, user_agent)
+         VALUES (NULL, 'account_deleted', 'auth', 'User account deleted (GDPR request)', $1, $2, $3)`,
+        [JSON.stringify({ ownedCirclesDeleted: ownedIds.length }), req.ip, req.headers['user-agent']]
+      );
+    });
+
+    console.log(`[Security] Account deleted (GDPR): ${userResult.rows[0].email}`);
+    res.clearCookie(AUTH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      path: '/',
+    });
+    res.clearCookie('csrf-token', {
+      httpOnly: false,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      path: '/',
+    });
+    res.json({ success: true, message: 'Your account and data have been deleted.' });
+  } catch (error) {
+    console.error('Account deletion error:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
@@ -1907,1506 +2131,54 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
 });
 
 // ============================================================================
+// Vault PIN Recovery — caregiver-assisted escrow (H3 Phase 2/3)
+// ============================================================================
+// Extracted to ./routes/recovery.js (at-rest crypto helpers + routes moved
+// verbatim). Mounted here so Express route registration order is unchanged.
+
+require('./routes/recovery')(router, { db, authMiddleware, requirePermission, broadcastToCircle });
+
+// ============================================================================
 // Vault CRUD Routes
 // ============================================================================
-
-// Middleware factory: check vault item limit for a given table before create
-function requireVaultCapacity(table) {
-  return async (req, res, next) => {
-    const { circleId } = req.params;
-    const check = await checkVaultLimit(circleId, table);
-    if (!check.allowed) {
-      return res.status(402).json({
-        error: `Vault limit reached for ${check.tier} tier (max ${check.limit} items). Upgrade to add more.`,
-        code: 'VAULT_LIMIT_EXCEEDED',
-        tier: check.tier,
-        limit: check.limit,
-      });
-    }
-    next();
-  };
-}
-
-// --- Medications ---
-
-// Create medication
-router.post('/circles/:circleId/vault/medications', authMiddleware, requirePermission('canEditMedications'), requireVaultCapacity('vault_medications'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { name, dosage, frequency, timing, instructions, prescribingDoctor, pharmacy, refillDate, isActive } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Medication name is required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_medications
-       (circle_id, name, dosage, frequency, timing, instructions, prescribing_doctor, pharmacy, refill_date, is_active, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [circleId, name, dosage, frequency, timing || [], instructions, prescribingDoctor, pharmacy, refillDate, isActive !== false, req.member.name]
-    );
-
-    res.json({ success: true, medication: result.rows[0] });
-  } catch (error) {
-    console.error('Create medication error:', error);
-    res.status(500).json({ error: 'Failed to create medication' });
-  }
-});
-
-// Update medication
-router.put('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requirePermission('canEditMedications'), async (req, res) => {
-  try {
-    const { circleId, medicationId } = req.params;
-    const { name, dosage, frequency, timing, instructions, prescribingDoctor, pharmacy, refillDate, isActive } = req.body;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_medications WHERE id = $1 AND circle_id = $2',
-      [medicationId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Medication not found' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_medications
-       SET name = COALESCE($1, name), dosage = COALESCE($2, dosage),
-           frequency = COALESCE($3, frequency), timing = COALESCE($4, timing),
-           instructions = COALESCE($5, instructions), prescribing_doctor = COALESCE($6, prescribing_doctor),
-           pharmacy = COALESCE($7, pharmacy), refill_date = COALESCE($8, refill_date),
-           is_active = COALESCE($9, is_active), updated_by = $10, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11 AND circle_id = $12
-       RETURNING *`,
-      [name, dosage, frequency, timing, instructions, prescribingDoctor, pharmacy, refillDate, isActive, req.member.name, medicationId, circleId]
-    );
-
-    res.json({ success: true, medication: result.rows[0] });
-  } catch (error) {
-    console.error('Update medication error:', error);
-    res.status(500).json({ error: 'Failed to update medication' });
-  }
-});
-
-// Delete medication
-router.delete('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requirePermission('canEditMedications'), async (req, res) => {
-  try {
-    const { circleId, medicationId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_medications WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [medicationId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Medication not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete medication error:', error);
-    res.status(500).json({ error: 'Failed to delete medication' });
-  }
-});
-
-// --- Doctors ---
-
-// Create doctor
-router.post('/circles/:circleId/vault/doctors', authMiddleware, requirePermission('canEditDoctors'), requireVaultCapacity('vault_doctors'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { name, specialty, hospital, phone, email, address, notes, isPrimary } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Doctor name is required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_doctors
-       (circle_id, name, specialty, hospital, phone, email, address, notes, is_primary, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [circleId, name, specialty, hospital, phone, email, address, notes, isPrimary || false, req.member.name]
-    );
-
-    res.json({ success: true, doctor: result.rows[0] });
-  } catch (error) {
-    console.error('Create doctor error:', error);
-    res.status(500).json({ error: 'Failed to create doctor' });
-  }
-});
-
-// Update doctor
-router.put('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requirePermission('canEditDoctors'), async (req, res) => {
-  try {
-    const { circleId, doctorId } = req.params;
-    const { name, specialty, hospital, phone, email, address, notes, isPrimary } = req.body;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_doctors WHERE id = $1 AND circle_id = $2',
-      [doctorId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Doctor not found' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_doctors
-       SET name = COALESCE($1, name), specialty = COALESCE($2, specialty),
-           hospital = COALESCE($3, hospital), phone = COALESCE($4, phone),
-           email = COALESCE($5, email), address = COALESCE($6, address),
-           notes = COALESCE($7, notes), is_primary = COALESCE($8, is_primary),
-           updated_by = $9, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10 AND circle_id = $11
-       RETURNING *`,
-      [name, specialty, hospital, phone, email, address, notes, isPrimary, req.member.name, doctorId, circleId]
-    );
-
-    res.json({ success: true, doctor: result.rows[0] });
-  } catch (error) {
-    console.error('Update doctor error:', error);
-    res.status(500).json({ error: 'Failed to update doctor' });
-  }
-});
-
-// Delete doctor
-router.delete('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requirePermission('canEditDoctors'), async (req, res) => {
-  try {
-    const { circleId, doctorId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_doctors WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [doctorId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Doctor not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete doctor error:', error);
-    res.status(500).json({ error: 'Failed to delete doctor' });
-  }
-});
-
-// --- Contacts ---
-
-// Create contact
-router.post('/circles/:circleId/vault/contacts', authMiddleware, requirePermission('canEditContacts'), requireVaultCapacity('vault_contacts'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { name, relationship, phone, email, address, isEmergency, notes } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Contact name is required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_contacts
-       (circle_id, name, relationship, phone, email, address, is_emergency, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [circleId, name, relationship, phone, email, address, isEmergency || false, notes, req.member.name]
-    );
-
-    res.json({ success: true, contact: result.rows[0] });
-  } catch (error) {
-    console.error('Create contact error:', error);
-    res.status(500).json({ error: 'Failed to create contact' });
-  }
-});
-
-// Update contact
-router.put('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requirePermission('canEditContacts'), async (req, res) => {
-  try {
-    const { circleId, contactId } = req.params;
-    const { name, relationship, phone, email, address, isEmergency, notes } = req.body;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_contacts WHERE id = $1 AND circle_id = $2',
-      [contactId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_contacts
-       SET name = COALESCE($1, name), relationship = COALESCE($2, relationship),
-           phone = COALESCE($3, phone), email = COALESCE($4, email),
-           address = COALESCE($5, address), is_emergency = COALESCE($6, is_emergency),
-           notes = COALESCE($7, notes), updated_by = $8, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $9 AND circle_id = $10
-       RETURNING *`,
-      [name, relationship, phone, email, address, isEmergency, notes, req.member.name, contactId, circleId]
-    );
-
-    res.json({ success: true, contact: result.rows[0] });
-  } catch (error) {
-    console.error('Update contact error:', error);
-    res.status(500).json({ error: 'Failed to update contact' });
-  }
-});
-
-// Delete contact
-router.delete('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requirePermission('canEditContacts'), async (req, res) => {
-  try {
-    const { circleId, contactId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_contacts WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [contactId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete contact error:', error);
-    res.status(500).json({ error: 'Failed to delete contact' });
-  }
-});
-
-// --- Appointments ---
-
-// Create appointment
-router.post('/circles/:circleId/vault/appointments', authMiddleware, requirePermission('canEditAppointments'), requireVaultCapacity('vault_appointments'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { doctorId, doctorName, purpose, date, time, location, notes, reminder, status } = req.body;
-
-    if (!purpose || !date) {
-      return res.status(400).json({ error: 'Purpose and date are required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_appointments
-       (circle_id, doctor_id, doctor_name, purpose, date, time, location, preparation_notes, reminder_sent, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [circleId, doctorId, doctorName, purpose, date, time, location, notes, reminder || false, status || 'scheduled', req.member.name]
-    );
-
-    res.json({ success: true, appointment: result.rows[0] });
-  } catch (error) {
-    console.error('Create appointment error:', error);
-    res.status(500).json({ error: 'Failed to create appointment' });
-  }
-});
-
-// Update appointment
-router.put('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requirePermission('canEditAppointments'), async (req, res) => {
-  try {
-    const { circleId, appointmentId } = req.params;
-    const { doctorId, doctorName, purpose, date, time, location, notes, reminder, status } = req.body;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_appointments WHERE id = $1 AND circle_id = $2',
-      [appointmentId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_appointments
-       SET doctor_id = COALESCE($1, doctor_id), doctor_name = COALESCE($2, doctor_name),
-           purpose = COALESCE($3, purpose), date = COALESCE($4, date),
-           time = COALESCE($5, time), location = COALESCE($6, location),
-           preparation_notes = COALESCE($7, preparation_notes), reminder_sent = COALESCE($8, reminder_sent),
-           status = COALESCE($9, status), updated_by = $10, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11 AND circle_id = $12
-       RETURNING *`,
-      [doctorId, doctorName, purpose, date, time, location, notes, reminder, status, req.member.name, appointmentId, circleId]
-    );
-
-    res.json({ success: true, appointment: result.rows[0] });
-  } catch (error) {
-    console.error('Update appointment error:', error);
-    res.status(500).json({ error: 'Failed to update appointment' });
-  }
-});
-
-// Delete appointment
-router.delete('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requirePermission('canEditAppointments'), async (req, res) => {
-  try {
-    const { circleId, appointmentId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_appointments WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [appointmentId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete appointment error:', error);
-    res.status(500).json({ error: 'Failed to delete appointment' });
-  }
-});
-
-// --- Accounts ---
-
-// Create account
-router.post('/circles/:circleId/vault/accounts', authMiddleware, requirePermission('canEditAccounts'), requireVaultCapacity('vault_accounts'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { name, type, institution, accountNumber, ifscCode, branch, nominee, notes } = req.body;
-
-    if (!name || !type) {
-      return res.status(400).json({ error: 'Name and type are required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_accounts
-       (circle_id, name, type, institution, account_number_encrypted, ifsc_code, branch, nominee, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [circleId, name, type, institution, encryptField(accountNumber), ifscCode, branch, nominee, notes, req.member.name]
-    );
-
-    res.json({ success: true, account: decryptAccount(result.rows[0]) });
-  } catch (error) {
-    console.error('Create account error:', error);
-    res.status(500).json({ error: 'Failed to create account' });
-  }
-});
-
-// Update account
-router.put('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requirePermission('canEditAccounts'), async (req, res) => {
-  try {
-    const { circleId, accountId } = req.params;
-    const { name, type, institution, accountNumber, ifscCode, branch, nominee, notes } = req.body;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_accounts WHERE id = $1 AND circle_id = $2',
-      [accountId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Account not found' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_accounts
-       SET name = COALESCE($1, name), type = COALESCE($2, type),
-           institution = COALESCE($3, institution), account_number_encrypted = COALESCE($4, account_number_encrypted),
-           ifsc_code = COALESCE($5, ifsc_code), branch = COALESCE($6, branch),
-           nominee = COALESCE($7, nominee), notes = COALESCE($8, notes),
-           updated_by = $9, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10 AND circle_id = $11
-       RETURNING *`,
-      [name, type, institution, accountNumber !== undefined ? encryptField(accountNumber) : undefined, ifscCode, branch, nominee, notes, req.member.name, accountId, circleId]
-    );
-
-    res.json({ success: true, account: decryptAccount(result.rows[0]) });
-  } catch (error) {
-    console.error('Update account error:', error);
-    res.status(500).json({ error: 'Failed to update account' });
-  }
-});
-
-// Delete account
-router.delete('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requirePermission('canEditAccounts'), async (req, res) => {
-  try {
-    const { circleId, accountId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_accounts WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [accountId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Account not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete account error:', error);
-    res.status(500).json({ error: 'Failed to delete account' });
-  }
-});
-
-// --- Documents ---
-
-// Create document
-router.post('/circles/:circleId/vault/documents', authMiddleware, requirePermission('canEditDocuments'), requireVaultCapacity('vault_documents'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { title, name, type, description, fileName, fileType, fileSize, fileData, expiryDate, isSensitive } = req.body;
-    const docTitle = title || name;
-
-    if (!docTitle) {
-      return res.status(400).json({ error: 'Document title is required' });
-    }
-
-    // fileData is base64-encoded file content from the client
-    const encryptedFileData = fileData ? encryptField(fileData) : null;
-
-    const result = await db.query(
-      `INSERT INTO vault_documents
-       (circle_id, title, type, description, file_name, file_type, file_size, file_data_encrypted, expiry_date, is_sensitive, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [circleId, docTitle, type || 'other', description, fileName, fileType, fileSize, encryptedFileData, expiryDate, isSensitive || false, req.member.name]
-    );
-
-    res.json({ success: true, document: stripDocumentFileData(result.rows[0]) });
-  } catch (error) {
-    console.error('Create document error:', error);
-    res.status(500).json({ error: 'Failed to create document' });
-  }
-});
-
-// Update document
-router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
-  try {
-    const { circleId, documentId } = req.params;
-    const { title, name, type, description, fileName, fileType, fileSize, fileData, expiryDate, isSensitive } = req.body;
-    const docTitle = title || name;
-
-    const existing = await db.query(
-      'SELECT id FROM vault_documents WHERE id = $1 AND circle_id = $2',
-      [documentId, circleId]
-    );
-
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const encryptedFileData = fileData !== undefined ? encryptField(fileData) : undefined;
-
-    const result = await db.query(
-      `UPDATE vault_documents
-       SET title = COALESCE($1, title), type = COALESCE($2, type),
-           description = COALESCE($3, description), file_name = COALESCE($4, file_name),
-           file_type = COALESCE($5, file_type), file_size = COALESCE($6, file_size),
-           file_data_encrypted = COALESCE($7, file_data_encrypted),
-           expiry_date = COALESCE($8, expiry_date), is_sensitive = COALESCE($9, is_sensitive),
-           updated_by = $10, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11 AND circle_id = $12
-       RETURNING *`,
-      [docTitle, type, description, fileName, fileType, fileSize, encryptedFileData, expiryDate, isSensitive, req.member.name, documentId, circleId]
-    );
-
-    res.json({ success: true, document: stripDocumentFileData(result.rows[0]) });
-  } catch (error) {
-    console.error('Update document error:', error);
-    res.status(500).json({ error: 'Failed to update document' });
-  }
-});
-
-// Download document file (decrypts file_data_encrypted and returns it)
-router.get('/circles/:circleId/vault/documents/:documentId/file', authMiddleware, requirePermission('canViewDocuments'), async (req, res) => {
-  try {
-    const { circleId, documentId } = req.params;
-
-    const result = await db.query(
-      'SELECT title, file_name, file_type, file_data_encrypted, is_sensitive FROM vault_documents WHERE id = $1 AND circle_id = $2',
-      [documentId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const doc = result.rows[0];
-
-    // Sensitive documents require canViewSensitive permission
-    if (doc.is_sensitive) {
-      const memberResult = await db.query(
-        'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-        [circleId, req.user.id]
-      );
-      const permissions = memberResult.rows.length > 0 ? ROLE_PERMISSIONS[memberResult.rows[0].role] : {};
-      if (!permissions.canViewSensitive) {
-        return res.status(403).json({ error: 'Permission denied: sensitive document' });
-      }
-    }
-
-    if (!doc.file_data_encrypted) {
-      return res.status(404).json({ error: 'No file attached to this document' });
-    }
-
-    const decryptedData = decryptField(doc.file_data_encrypted);
-    res.json({ success: true, fileData: decryptedData, fileName: doc.file_name, fileType: doc.file_type });
-  } catch (error) {
-    console.error('Download document error:', error);
-    res.status(500).json({ error: 'Failed to download document' });
-  }
-});
-
-// Delete document
-router.delete('/circles/:circleId/vault/documents/:documentId', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
-  try {
-    const { circleId, documentId } = req.params;
-
-    const result = await db.query(
-      'DELETE FROM vault_documents WHERE id = $1 AND circle_id = $2 RETURNING id',
-      [documentId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete document error:', error);
-    res.status(500).json({ error: 'Failed to delete document' });
-  }
+// Extracted to ./routes/vaultCrud.js (requireVaultCapacity middleware factory
+// + medications/doctors/contacts/appointments/accounts/documents CRUD).
+
+require('./routes/vaultCrud')(router, {
+  db,
+  authMiddleware,
+  requirePermission,
+  checkVaultLimit,
+  encryptField,
+  decryptField,
+  decryptAccount,
+  stripDocumentFileData,
+  ROLE_PERMISSIONS,
 });
 
 // ============================================================================
 // Notes Routes
 // ============================================================================
+// Extracted to ./routes/notes.js.
 
-// Add a note
-router.post('/circles/:circleId/notes', authMiddleware, async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { title, content, category } = req.body;
-
-    // Check membership
-    const memberResult = await db.query(
-      `SELECT cm.role, u.name
-       FROM circle_members cm
-       JOIN users u ON cm.user_id = u.id
-       WHERE cm.circle_id = $1 AND cm.user_id = $2`,
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const { role, name } = memberResult.rows[0];
-    const permissions = ROLE_PERMISSIONS[role];
-
-    if (!permissions.canAddNotes) {
-      return res.status(403).json({ error: 'Permission denied' });
-    }
-
-    if (!title || !content) {
-      return res.status(400).json({ error: 'Title and content are required' });
-    }
-
-    const result = await db.query(
-      `INSERT INTO vault_notes (circle_id, author_id, author_name, author_role, title, content, category)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [circleId, req.user.id, name, role, title, content, category || 'general']
-    );
-
-    res.json({ success: true, note: result.rows[0] });
-  } catch (error) {
-    console.error('Add note error:', error);
-    res.status(500).json({ error: 'Failed to add note' });
-  }
-});
-
-// Update a note
-router.put('/circles/:circleId/notes/:noteId', authMiddleware, async (req, res) => {
-  try {
-    const { circleId, noteId } = req.params;
-    const { title, content, category } = req.body;
-
-    // Check if note exists and user can edit
-    const noteResult = await db.query(
-      'SELECT author_id FROM vault_notes WHERE id = $1 AND circle_id = $2',
-      [noteId, circleId]
-    );
-
-    if (noteResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Note not found' });
-    }
-
-    // Only author or owner can edit
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const isAuthor = noteResult.rows[0].author_id === req.user.id;
-    const isOwner = memberResult.rows[0].role === 'owner';
-
-    if (!isAuthor && !isOwner) {
-      return res.status(403).json({ error: 'Can only edit your own notes' });
-    }
-
-    const result = await db.query(
-      `UPDATE vault_notes
-       SET title = COALESCE($1, title),
-           content = COALESCE($2, content),
-           category = COALESCE($3, category)
-       WHERE id = $4
-       RETURNING *`,
-      [title, content, category, noteId]
-    );
-
-    res.json({ success: true, note: result.rows[0] });
-  } catch (error) {
-    console.error('Update note error:', error);
-    res.status(500).json({ error: 'Failed to update note' });
-  }
-});
-
-// Delete a note
-router.delete('/circles/:circleId/notes/:noteId', authMiddleware, async (req, res) => {
-  try {
-    const { circleId, noteId } = req.params;
-
-    // Check if note exists and user can delete
-    const noteResult = await db.query(
-      'SELECT author_id FROM vault_notes WHERE id = $1 AND circle_id = $2',
-      [noteId, circleId]
-    );
-
-    if (noteResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Note not found' });
-    }
-
-    // Only author or owner can delete
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const isAuthor = noteResult.rows[0].author_id === req.user.id;
-    const isOwner = memberResult.rows[0].role === 'owner';
-
-    if (!isAuthor && !isOwner) {
-      return res.status(403).json({ error: 'Can only delete your own notes' });
-    }
-
-    await db.query('DELETE FROM vault_notes WHERE id = $1', [noteId]);
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Delete note error:', error);
-    res.status(500).json({ error: 'Failed to delete note' });
-  }
-});
+require('./routes/notes')(router, { db, authMiddleware, ROLE_PERMISSIONS });
 
 // ============================================================================
-// Health Data Routes (Caregiver Dashboard)
+// Health / Adherence / Activity / Alerts / Check-in Routes
 // ============================================================================
-
-// Get health data for a circle
-router.get('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { type, days = 7 } = req.query;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - parseInt(days));
-
-    let query = `
-      SELECT * FROM health_data
-      WHERE circle_id = $1 AND measured_at >= $2
-    `;
-    const params = [circleId, sinceDate];
-
-    if (type) {
-      query += ' AND data_type = $3';
-      params.push(type);
-    }
-
-    query += ' ORDER BY measured_at DESC LIMIT 500';
-
-    const result = await db.query(query, params);
-
-    // Group by type and calculate summaries
-    const healthData = {};
-    const latestByType = {};
-
-    result.rows.forEach(row => {
-      if (!healthData[row.data_type]) {
-        healthData[row.data_type] = [];
-      }
-      healthData[row.data_type].push(row);
-
-      if (!latestByType[row.data_type] || new Date(row.measured_at) > new Date(latestByType[row.data_type].measured_at)) {
-        latestByType[row.data_type] = row;
-      }
-    });
-
-    res.json({
-      data: healthData,
-      latest: latestByType,
-      period: { days: parseInt(days), since: sinceDate },
-    });
-  } catch (error) {
-    console.error('Get health data error:', error);
-    res.status(500).json({ error: 'Failed to get health data' });
-  }
-});
-
-// Sync health data from device
-router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { readings } = req.body;
-
-    if (!Array.isArray(readings)) {
-      return res.status(400).json({ error: 'Readings must be an array' });
-    }
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    // Physiological bounds for health data validation. Keys MUST match validDataTypes
-    // entries. blood_pressure has nested systolic/diastolic bounds because its value
-    // is an object {systolic, diastolic}.
-    const HEALTH_RANGES = {
-      heart_rate:        { min: 20, max: 300 },
-      blood_pressure:    { systolic: { min: 50, max: 300 }, diastolic: { min: 20, max: 200 } },
-      blood_glucose:     { min: 20, max: 600 },
-      weight:            { min: 10, max: 500 },
-      temperature:       { min: 30, max: 45 },
-      oxygen_saturation: { min: 50, max: 100 },
-      steps:             { min: 0, max: 200000 },
-    };
-
-    const validDataTypes = ['heart_rate', 'blood_pressure', 'blood_glucose', 'weight', 'temperature', 'oxygen_saturation', 'steps'];
-
-    let inserted = 0;
-    const skipped = [];
-    for (const reading of readings) {
-      if (!reading.dataType || !validDataTypes.includes(reading.dataType)) {
-        skipped.push({ reading, reason: 'invalid_data_type' });
-        continue;
-      }
-
-      // Validate numeric values against physiological bounds. Composite types
-      // (blood_pressure) check both sub-components; scalar types check the lone value.
-      const range = HEALTH_RANGES[reading.dataType];
-      const rawValue = reading.value;
-      let outOfRange = false;
-      if (range) {
-        if (reading.dataType === 'blood_pressure' && typeof rawValue === 'object' && rawValue !== null) {
-          const sys = rawValue.systolic, dia = rawValue.diastolic;
-          if (typeof sys === 'number' && (sys < range.systolic.min || sys > range.systolic.max)) outOfRange = true;
-          if (typeof dia === 'number' && (dia < range.diastolic.min || dia > range.diastolic.max)) outOfRange = true;
-        } else {
-          const scalar = typeof rawValue === 'object' ? rawValue?.value : rawValue;
-          if (typeof scalar === 'number' && (scalar < range.min || scalar > range.max)) outOfRange = true;
-        }
-      }
-      if (outOfRange) {
-        skipped.push({ reading, reason: 'out_of_range' });
-        continue;
-      }
-
-      await db.query(
-        `INSERT INTO health_data (circle_id, data_type, value, unit, measured_at, source, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [circleId, reading.dataType, JSON.stringify(reading.value), reading.unit, reading.measuredAt, reading.source || 'device', reading.notes]
-      );
-      inserted++;
-
-      try {
-        // Pass full value (object or scalar). checkVitalThreshold dispatches per dataType.
-        await checkVitalThreshold(circleId, reading.dataType, rawValue, reading.unit);
-      } catch (thresholdErr) {
-        console.error('Vital threshold check failed:', thresholdErr);
-      }
-    }
-
-    // Broadcast to caregivers
-    broadcastToCircle(circleId, { type: 'health_update', count: inserted });
-
-    res.json({ success: true, inserted, skipped: skipped.length > 0 ? skipped : undefined });
-  } catch (error) {
-    console.error('Sync health data error:', error);
-    res.status(500).json({ error: 'Failed to sync health data' });
-  }
-});
-
-// ============================================================================
-// Medication Adherence Routes
-// ============================================================================
-
-// Get medication adherence data
-router.get('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { days = 7 } = req.query;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - parseInt(days));
-
-    // Get medications
-    const medicationsResult = await db.query(
-      'SELECT * FROM vault_medications WHERE circle_id = $1 AND is_active = true',
-      [circleId]
-    );
-
-    // Get dose records
-    const dosesResult = await db.query(
-      `SELECT md.*, vm.name as medication_name
-       FROM medication_doses md
-       JOIN vault_medications vm ON md.medication_id = vm.id
-       WHERE md.circle_id = $1 AND md.scheduled_time >= $2
-       ORDER BY md.scheduled_time DESC`,
-      [circleId, sinceDate]
-    );
-
-    // Calculate adherence stats
-    const totalDoses = dosesResult.rows.length;
-    const takenDoses = dosesResult.rows.filter(d => d.status === 'taken').length;
-    const missedDoses = dosesResult.rows.filter(d => d.status === 'missed').length;
-    const skippedDoses = dosesResult.rows.filter(d => d.status === 'skipped').length;
-    const pendingDoses = dosesResult.rows.filter(d => d.status === 'pending').length;
-
-    const adherenceRate = totalDoses > 0 ? Math.round((takenDoses / (totalDoses - pendingDoses)) * 100) : 100;
-
-    // Group by medication
-    const byMedication = {};
-    dosesResult.rows.forEach(dose => {
-      if (!byMedication[dose.medication_id]) {
-        byMedication[dose.medication_id] = {
-          medicationId: dose.medication_id,
-          medicationName: dose.medication_name,
-          doses: [],
-          taken: 0,
-          missed: 0,
-          skipped: 0,
-          pending: 0,
-        };
-      }
-      byMedication[dose.medication_id].doses.push(dose);
-      byMedication[dose.medication_id][dose.status]++;
-    });
-
-    // Get today's doses
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const todaysDoses = dosesResult.rows.filter(d => {
-      const scheduled = new Date(d.scheduled_time);
-      return scheduled >= today && scheduled < tomorrow;
-    });
-
-    res.json({
-      summary: {
-        adherenceRate,
-        totalDoses,
-        takenDoses,
-        missedDoses,
-        skippedDoses,
-        pendingDoses,
-      },
-      medications: medicationsResult.rows,
-      byMedication: Object.values(byMedication),
-      todaysDoses,
-      recentDoses: dosesResult.rows.slice(0, 20),
-      period: { days: parseInt(days), since: sinceDate },
-    });
-  } catch (error) {
-    console.error('Get adherence error:', error);
-    res.status(500).json({ error: 'Failed to get adherence data' });
-  }
-});
-
-// Sync medication doses from device
-router.post('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { doses } = req.body;
-
-    if (!Array.isArray(doses)) {
-      return res.status(400).json({ error: 'Doses must be an array' });
-    }
-
-    let synced = 0;
-    for (const dose of doses) {
-      await db.query(
-        `INSERT INTO medication_doses (circle_id, medication_id, scheduled_time, status, taken_at, skipped_reason, notes, synced_from_device)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-         ON CONFLICT DO NOTHING`,
-        [circleId, dose.medicationId, dose.scheduledTime, dose.status, dose.takenAt, dose.skippedReason, dose.notes]
-      );
-      synced++;
-    }
-
-    // Check for missed medications and create alerts
-    const missedCount = doses.filter(d => d.status === 'missed').length;
-    if (missedCount > 0) {
-      await db.query(
-        `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
-         VALUES ($1, 'missed_medication', $2, $3, $4, $5)`,
-        [
-          circleId,
-          missedCount >= 3 ? 'high' : 'medium',
-          `${missedCount} medication(s) missed`,
-          `${missedCount} scheduled medication dose(s) were missed.`,
-          JSON.stringify({ missedCount, doses: doses.filter(d => d.status === 'missed') })
-        ]
-      );
-
-      broadcastToCircle(circleId, { type: 'alert', alertType: 'missed_medication', count: missedCount });
-    }
-
-    res.json({ success: true, synced });
-  } catch (error) {
-    console.error('Sync adherence error:', error);
-    res.status(500).json({ error: 'Failed to sync adherence data' });
-  }
-});
-
-// ============================================================================
-// Activity Monitoring Routes
-// ============================================================================
-
-// Get activity logs
-router.get('/circles/:circleId/activity', authMiddleware, async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { days = 7 } = req.query;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - parseInt(days));
-
-    // Get activity logs
-    const result = await db.query(
-      `SELECT * FROM activity_logs
-       WHERE circle_id = $1 AND recorded_at >= $2
-       ORDER BY recorded_at DESC
-       LIMIT 500`,
-      [circleId, sinceDate]
-    );
-
-    // Get last activity
-    const lastActivityResult = await db.query(
-      `SELECT * FROM activity_logs
-       WHERE circle_id = $1
-       ORDER BY recorded_at DESC
-       LIMIT 1`,
-      [circleId]
-    );
-
-    const lastActivity = lastActivityResult.rows[0] || null;
-    const lastActiveAt = lastActivity ? lastActivity.recorded_at : null;
-
-    // Calculate inactivity
-    let inactivityMinutes = null;
-    let inactivityStatus = 'unknown';
-    if (lastActiveAt) {
-      inactivityMinutes = Math.floor((Date.now() - new Date(lastActiveAt).getTime()) / 60000);
-      if (inactivityMinutes < 60) {
-        inactivityStatus = 'active';
-      } else if (inactivityMinutes < 240) {
-        inactivityStatus = 'normal';
-      } else if (inactivityMinutes < 480) {
-        inactivityStatus = 'concerning';
-      } else {
-        inactivityStatus = 'alert';
-      }
-    }
-
-    // Group activity by type
-    const byType = {};
-    result.rows.forEach(log => {
-      if (!byType[log.activity_type]) {
-        byType[log.activity_type] = [];
-      }
-      byType[log.activity_type].push(log);
-    });
-
-    // Get daily activity counts
-    const dailyCounts = {};
-    result.rows.forEach(log => {
-      const date = new Date(log.recorded_at).toISOString().split('T')[0];
-      dailyCounts[date] = (dailyCounts[date] || 0) + 1;
-    });
-
-    res.json({
-      lastActivity,
-      lastActiveAt,
-      inactivityMinutes,
-      inactivityStatus,
-      activityLogs: result.rows.slice(0, 50),
-      byType,
-      dailyCounts,
-      period: { days: parseInt(days), since: sinceDate },
-    });
-  } catch (error) {
-    console.error('Get activity error:', error);
-    res.status(500).json({ error: 'Failed to get activity data' });
-  }
-});
-
-// Log activity from device
-router.post('/circles/:circleId/activity', authMiddleware, async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { activities } = req.body;
-
-    if (!Array.isArray(activities)) {
-      return res.status(400).json({ error: 'Activities must be an array' });
-    }
-
-    let logged = 0;
-    for (const activity of activities) {
-      // Support both 'activityType' (camelCase from client) and 'type' (shorthand)
-      const activityType = activity.activityType || activity.type;
-      if (!activityType) {
-        continue; // Skip activities without a type
-      }
-      await db.query(
-        `INSERT INTO activity_logs (circle_id, activity_type, details, recorded_at, source)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [circleId, activityType, JSON.stringify(activity.details || {}), activity.recordedAt || new Date(), activity.source || 'device']
-      );
-      logged++;
-    }
-
-    // Broadcast activity update
-    broadcastToCircle(circleId, { type: 'activity_update', count: logged });
-
-    res.json({ success: true, logged });
-  } catch (error) {
-    console.error('Log activity error:', error);
-    res.status(500).json({ error: 'Failed to log activity' });
-  }
-});
-
-// ============================================================================
-// Caregiver Alerts Routes
-// ============================================================================
-
-// Get alerts for a circle
-router.get('/circles/:circleId/alerts', authMiddleware, async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { status = 'active', limit = 50 } = req.query;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    let query = `
-      SELECT ca.*, u.name as acknowledged_by_name
-      FROM caregiver_alerts ca
-      LEFT JOIN users u ON ca.acknowledged_by = u.id
-      WHERE ca.circle_id = $1
-    `;
-    const params = [circleId];
-
-    if (status !== 'all') {
-      query += ' AND ca.status = $2';
-      params.push(status);
-    }
-
-    query += ' ORDER BY ca.created_at DESC LIMIT $' + (params.length + 1);
-    params.push(parseInt(limit));
-
-    const result = await db.query(query, params);
-
-    // Count by severity
-    const countResult = await db.query(
-      `SELECT severity, COUNT(*) as count
-       FROM caregiver_alerts
-       WHERE circle_id = $1 AND status = 'active'
-       GROUP BY severity`,
-      [circleId]
-    );
-
-    const counts = { low: 0, medium: 0, high: 0, critical: 0 };
-    countResult.rows.forEach(row => {
-      counts[row.severity] = parseInt(row.count);
-    });
-
-    res.json({
-      alerts: result.rows,
-      counts,
-      totalActive: counts.low + counts.medium + counts.high + counts.critical,
-    });
-  } catch (error) {
-    console.error('Get alerts error:', error);
-    res.status(500).json({ error: 'Failed to get alerts' });
-  }
-});
-
-// Acknowledge an alert
-router.post('/circles/:circleId/alerts/:alertId/acknowledge', authMiddleware, async (req, res) => {
-  try {
-    const { circleId, alertId } = req.params;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const result = await db.query(
-      `UPDATE caregiver_alerts
-       SET status = 'acknowledged', acknowledged_by = $1, acknowledged_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND circle_id = $3
-       RETURNING *`,
-      [req.user.id, alertId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Alert not found' });
-    }
-
-    broadcastToCircle(circleId, { type: 'alert_acknowledged', alertId });
-
-    res.json({ success: true, alert: result.rows[0] });
-  } catch (error) {
-    console.error('Acknowledge alert error:', error);
-    res.status(500).json({ error: 'Failed to acknowledge alert' });
-  }
-});
-
-// Dismiss an alert
-router.post('/circles/:circleId/alerts/:alertId/dismiss', authMiddleware, async (req, res) => {
-  try {
-    const { circleId, alertId } = req.params;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const result = await db.query(
-      `UPDATE caregiver_alerts
-       SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND circle_id = $2
-       RETURNING *`,
-      [alertId, circleId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Alert not found' });
-    }
-
-    res.json({ success: true, alert: result.rows[0] });
-  } catch (error) {
-    console.error('Dismiss alert error:', error);
-    res.status(500).json({ error: 'Failed to dismiss alert' });
-  }
-});
-
-// ============================================================================
-// Check-in Logs Routes
-// ============================================================================
-
-// Get check-in logs
-router.get('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { days = 7 } = req.query;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - parseInt(days));
-
-    const result = await db.query(
-      `SELECT * FROM checkin_logs
-       WHERE circle_id = $1 AND created_at >= $2
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      [circleId, sinceDate]
-    );
-
-    // Calculate response rate
-    const total = result.rows.length;
-    const responded = result.rows.filter(c => c.response && c.response !== 'no_response').length;
-    const responseRate = total > 0 ? Math.round((responded / total) * 100) : 0;
-
-    // Group by type
-    const byType = {};
-    result.rows.forEach(checkin => {
-      if (!byType[checkin.checkin_type]) {
-        byType[checkin.checkin_type] = { total: 0, responded: 0 };
-      }
-      byType[checkin.checkin_type].total++;
-      if (checkin.response && checkin.response !== 'no_response') {
-        byType[checkin.checkin_type].responded++;
-      }
-    });
-
-    res.json({
-      checkins: result.rows,
-      summary: {
-        total,
-        responded,
-        responseRate,
-      },
-      byType,
-      period: { days: parseInt(days), since: sinceDate },
-    });
-  } catch (error) {
-    console.error('Get check-ins error:', error);
-    res.status(500).json({ error: 'Failed to get check-in data' });
-  }
-});
-
-// Sync check-ins from device
-router.post('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
-  try {
-    const { circleId } = req.params;
-    const { checkins } = req.body;
-
-    if (!Array.isArray(checkins)) {
-      return res.status(400).json({ error: 'Check-ins must be an array' });
-    }
-
-    let synced = 0;
-    for (const checkin of checkins) {
-      await db.query(
-        `INSERT INTO checkin_logs (circle_id, checkin_type, message, response, response_text, responded_at, triggered_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [circleId, checkin.type, checkin.message, checkin.response, checkin.responseText, checkin.respondedAt, JSON.stringify(checkin.triggeredBy || {})]
-      );
-      synced++;
-    }
-
-    // Check for missed check-ins and create alerts
-    const noResponse = checkins.filter(c => c.response === 'no_response').length;
-    if (noResponse >= 3) {
-      await db.query(
-        `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
-         VALUES ($1, 'missed_checkin', 'medium', $2, $3, $4)`,
-        [
-          circleId,
-          `${noResponse} check-ins unanswered`,
-          `${noResponse} proactive check-ins went unanswered. This may indicate the user needs attention.`,
-          JSON.stringify({ count: noResponse })
-        ]
-      );
-
-      broadcastToCircle(circleId, { type: 'alert', alertType: 'missed_checkin', count: noResponse });
-    }
-
-    res.json({ success: true, synced });
-  } catch (error) {
-    console.error('Sync check-ins error:', error);
-    res.status(500).json({ error: 'Failed to sync check-in data' });
-  }
-});
+// Extracted to ./routes/monitoring.js (Health Data, Medication Adherence,
+// Activity Monitoring, Caregiver Alerts, Check-in Logs sections).
+// VITAL_THRESHOLDS, checkVitalThreshold and fireVitalAlertIfAbnormal moved
+// there as well — only the health sync route uses them.
+
+require('./routes/monitoring')(router, { db, authMiddleware, requireConsent, broadcastToCircle });
 
 // ============================================================================
 // Dashboard Summary Route
 // ============================================================================
+// Extracted to ./routes/dashboard.js (incl. the camelizeRow helper).
 
-// Get comprehensive dashboard data
-// Convert snake_case keys to camelCase so portal/mobile clients can use the
-// fields directly without per-table normalization. Used by /dashboard which
-// returns raw rows from several tables.
-function camelizeRow(row) {
-  if (row == null || typeof row !== 'object') return row;
-  return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v])
-  );
-}
-
-router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
-  try {
-    const { circleId } = req.params;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    // Get all data in parallel
-    const [
-      healthResult,
-      adherenceResult,
-      activityResult,
-      alertsResult,
-      checkinsResult,
-    ] = await Promise.all([
-      // Latest health readings
-      db.query(
-        `SELECT DISTINCT ON (data_type) * FROM health_data
-         WHERE circle_id = $1
-         ORDER BY data_type, measured_at DESC`,
-        [circleId]
-      ),
-      // Today's medication adherence
-      db.query(
-        `SELECT md.status, COUNT(*) as count
-         FROM medication_doses md
-         WHERE md.circle_id = $1 AND md.scheduled_time >= $2
-         GROUP BY md.status`,
-        [circleId, today]
-      ),
-      // Last activity
-      db.query(
-        `SELECT * FROM activity_logs
-         WHERE circle_id = $1
-         ORDER BY recorded_at DESC
-         LIMIT 1`,
-        [circleId]
-      ),
-      // Active alerts
-      db.query(
-        `SELECT * FROM caregiver_alerts
-         WHERE circle_id = $1 AND status = 'active'
-         ORDER BY severity DESC, created_at DESC
-         LIMIT 10`,
-        [circleId]
-      ),
-      // Recent check-in response rate
-      db.query(
-        `SELECT
-           COUNT(*) FILTER (WHERE response IS NOT NULL AND response != 'no_response') as responded,
-           COUNT(*) as total
-         FROM checkin_logs
-         WHERE circle_id = $1 AND created_at >= $2`,
-        [circleId, weekAgo]
-      ),
-    ]);
-
-    // Process adherence
-    const adherence = { taken: 0, missed: 0, skipped: 0, pending: 0 };
-    adherenceResult.rows.forEach(row => {
-      adherence[row.status] = parseInt(row.count);
-    });
-    const totalDoses = adherence.taken + adherence.missed + adherence.skipped;
-    adherence.rate = totalDoses > 0 ? Math.round((adherence.taken / totalDoses) * 100) : 100;
-
-    // Process activity (camelize so the client doesn't need to handle snake_case)
-    const lastActivity = activityResult.rows[0] ? camelizeRow(activityResult.rows[0]) : null;
-    let inactivityMinutes = null;
-    let inactivityStatus = 'unknown';
-    if (lastActivity) {
-      inactivityMinutes = Math.floor((Date.now() - new Date(lastActivity.recordedAt).getTime()) / 60000);
-      if (inactivityMinutes < 60) inactivityStatus = 'active';
-      else if (inactivityMinutes < 240) inactivityStatus = 'normal';
-      else if (inactivityMinutes < 480) inactivityStatus = 'concerning';
-      else inactivityStatus = 'alert';
-    }
-
-    // Process check-ins
-    const checkinStats = checkinsResult.rows[0] || { responded: 0, total: 0 };
-    const checkinResponseRate = checkinStats.total > 0
-      ? Math.round((parseInt(checkinStats.responded) / parseInt(checkinStats.total)) * 100)
-      : 100;
-
-    res.json({
-      health: {
-        latest: healthResult.rows.map(camelizeRow),
-      },
-      adherence: {
-        today: adherence,
-      },
-      activity: {
-        lastActivity,
-        inactivityMinutes,
-        inactivityStatus,
-      },
-      alerts: {
-        active: alertsResult.rows.map(camelizeRow),
-        count: alertsResult.rows.length,
-      },
-      checkins: {
-        responseRate: checkinResponseRate,
-        total: parseInt(checkinStats.total),
-        responded: parseInt(checkinStats.responded),
-      },
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('Get dashboard error:', error);
-    res.status(500).json({ error: 'Failed to get dashboard data' });
-  }
-});
+require('./routes/dashboard')(router, { db, authMiddleware });
 
 // ============================================================================
 // WebSocket Support
@@ -3414,92 +2186,26 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
 
 const wsClients = new Map(); // circleId -> Set of WebSocket connections
 
-// Keys MUST match the dataType values accepted by POST /circles/:id/health
-// (heart_rate, blood_pressure, blood_glucose, weight, temperature, oxygen_saturation, steps).
-// Composite types (blood_pressure) carry nested systolic/diastolic thresholds; each
-// component fires its own alert when out of range.
-const VITAL_THRESHOLDS = {
-  heart_rate:        { low: 50, high: 110, unit: 'bpm',   lowSeverity: 'high',     highSeverity: 'high' },
-  blood_pressure:    {
-    unit: 'mmHg',
-    systolic:  { low: 85, high: 140, lowSeverity: 'high',   highSeverity: 'high' },
-    diastolic: { low: 55, high: 95,  lowSeverity: 'medium', highSeverity: 'medium' },
-  },
-  temperature:       { low: 35.5, high: 38.5, unit: '°C',   lowSeverity: 'medium',  highSeverity: 'high' },
-  blood_glucose:     { low: 60,   high: 180,  unit: 'mg/dL', lowSeverity: 'high',    highSeverity: 'medium' },
-  oxygen_saturation: { low: 90,   high: null, unit: '%',    lowSeverity: 'critical', highSeverity: null },
-  weight:            { low: null, high: null, unit: 'kg',   lowSeverity: null,      highSeverity: null },
-};
-
-async function checkVitalThreshold(circleId, dataType, value, unit) {
-  const threshold = VITAL_THRESHOLDS[dataType];
-  if (!threshold) return;
-
-  // Composite types: dispatch per component.
-  if (dataType === 'blood_pressure' && typeof value === 'object' && value !== null) {
-    const unitToUse = unit || threshold.unit;
-    if (typeof value.systolic === 'number') {
-      await fireVitalAlertIfAbnormal(circleId, dataType, 'systolic', value.systolic, unitToUse, threshold.systolic);
-    }
-    if (typeof value.diastolic === 'number') {
-      await fireVitalAlertIfAbnormal(circleId, dataType, 'diastolic', value.diastolic, unitToUse, threshold.diastolic);
-    }
-    return;
-  }
-
-  // Scalar types: unwrap {value} envelope or accept raw number.
-  const numValue = typeof value === 'object' && value !== null ? value.value : value;
-  if (typeof numValue !== 'number') return;
-  await fireVitalAlertIfAbnormal(circleId, dataType, null, numValue, unit || threshold.unit, threshold);
-}
-
-async function fireVitalAlertIfAbnormal(circleId, dataType, component, numValue, unit, threshold) {
-  let severity = null;
-  let direction = null;
-  if (threshold.low != null && numValue < threshold.low) {
-    severity = threshold.lowSeverity;
-    direction = 'low';
-  } else if (threshold.high != null && numValue > threshold.high) {
-    severity = threshold.highSeverity;
-    direction = 'high';
-  }
-  if (!severity) return;
-
-  const baseLabel = dataType.replace(/_/g, ' ');
-  const label = component ? `${baseLabel} (${component})` : baseLabel;
-  const title = `Abnormal ${label} detected`;
-  const message = direction === 'low'
-    ? `${label} of ${numValue} ${unit} is below the safe threshold of ${threshold.low} ${unit}.`
-    : `${label} of ${numValue} ${unit} is above the safe threshold of ${threshold.high} ${unit}.`;
-
-  const result = await db.query(
-    `INSERT INTO caregiver_alerts (circle_id, alert_type, severity, title, message, data)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id`,
-    [circleId, 'abnormal_vital', severity, title, message,
-     JSON.stringify({ data_type: dataType, component, value: numValue, unit, threshold })]
-  );
-
-  broadcastToCircle(circleId, {
-    type: 'alert',
-    alertType: 'abnormal_vital',
-    alertId: result.rows[0].id,
-    severity,
-    dataType,
-    component,
-  });
-}
-
-function broadcastToCircle(circleId, event) {
-  const clients = wsClients.get(circleId);
-  if (clients) {
-    const message = JSON.stringify(event);
+// Deliver an event to WebSocket clients connected to THIS instance.
+// circleId '*' fans out to every connected circle (system-wide notifications).
+function deliverToLocalCircle(circleId, event) {
+  const targets = circleId === '*' ? [...wsClients.values()] : [wsClients.get(circleId)];
+  const message = JSON.stringify(event);
+  for (const clients of targets) {
+    if (!clients) continue;
     clients.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(message);
       }
     });
   }
+}
+
+// Broadcast to the whole circle: local clients always; other instances via
+// Redis pub/sub when configured (REDIS_URL). See server/realtime.js.
+function broadcastToCircle(circleId, event) {
+  deliverToLocalCircle(circleId, event);
+  realtime.publishCircleEvent(circleId, event);
 }
 
 // Short-lived single-use tickets for WebSocket auth. Clients that cannot set
@@ -3510,14 +2216,21 @@ function broadcastToCircle(circleId, event) {
 const WS_TICKET_TTL_MS = 30 * 1000;
 const wsTickets = new Map();
 
-function issueWsTicket(userId) {
+async function issueWsTicket(userId) {
   const ticket = crypto.randomBytes(32).toString('hex');
-  wsTickets.set(ticket, { userId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  // Shared store first (multi-instance); in-memory fallback otherwise.
+  const shared = await realtime.storeTicket(ticket, userId, WS_TICKET_TTL_MS);
+  if (!shared) {
+    wsTickets.set(ticket, { userId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  }
   return ticket;
 }
 
-function consumeWsTicket(ticket) {
+async function consumeWsTicket(ticket) {
   if (!ticket) return null;
+  // undefined = Redis unavailable → fall through to the in-memory store.
+  const sharedUserId = await realtime.consumeTicket(ticket);
+  if (sharedUserId !== undefined) return sharedUserId;
   const entry = wsTickets.get(ticket);
   if (!entry) return null;
   wsTickets.delete(ticket);
@@ -3540,7 +2253,7 @@ async function handleWebSocket(ws, req) {
 
   // Prefer a single-use ticket (mobile clients). Fall back to cookie /
   // Authorization header for browser/portal clients on the same origin.
-  let userId = consumeWsTicket(url.searchParams.get('ticket'));
+  let userId = await consumeWsTicket(url.searchParams.get('ticket'));
 
   if (!userId) {
     let token = getCookie(req, AUTH_COOKIE_NAME);
@@ -3622,8 +2335,8 @@ async function handleWebSocket(ws, req) {
 
 // Issue a short-lived single-use ticket for the WebSocket. Mobile clients
 // call this with their Bearer token, then put the ticket in the WS URL.
-router.post('/ws-ticket', authMiddleware, (req, res) => {
-  const ticket = issueWsTicket(req.user.id);
+router.post('/ws-ticket', authMiddleware, async (req, res) => {
+  const ticket = await issueWsTicket(req.user.id);
   res.json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
 });
 
@@ -3764,12 +2477,32 @@ async function runArchival() {
   }
 }
 
-// Run archival once at startup (after a short delay) and then every 24 hours
+// Run archival once at startup (after a short delay) and then every 24 hours.
+// With Redis configured, an advisory lock ensures only one instance runs it
+// per cycle; without Redis the lock is a pass-through (single instance).
 const ARCHIVAL_INTERVAL_MS = MS_PER_DAY;
+const ARCHIVAL_LOCK_TTL_MS = 6 * 60 * 60 * 1000; // well under the 24h cycle
+async function runArchivalIfLeader() {
+  if (await realtime.acquireJobLock('archival', ARCHIVAL_LOCK_TTL_MS)) {
+    await runArchival();
+  }
+}
 setTimeout(() => {
-  runArchival().catch(() => {});
-  setInterval(() => runArchival().catch(() => {}), ARCHIVAL_INTERVAL_MS);
+  runArchivalIfLeader().catch(() => {});
+  setInterval(() => runArchivalIfLeader().catch(() => {}), ARCHIVAL_INTERVAL_MS);
 }, 30 * 1000);
+
+// Push delivery for admin notifications (notification_queue). See
+// server/notificationWorker.js — WS push + email for high/urgent, retries,
+// multi-instance safe via the realtime advisory lock.
+const { startNotificationWorker } = require('./notificationWorker');
+startNotificationWorker({
+  db,
+  broadcast: broadcastToCircle,
+  realtime,
+  resend,
+  fromEmail: FROM_EMAIL,
+});
 
 // Admin endpoint to trigger manual archival (used by ops/cron jobs)
 router.post('/admin/archive', authMiddleware, async (req, res) => {

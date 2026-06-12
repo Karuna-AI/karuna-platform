@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { vaultService } from '../services/vault';
+import { careCircleSyncService } from '../services/careCircleSync';
 
 interface VaultScreenProps {
   onClose: () => void;
@@ -39,6 +40,9 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [isCreatingVault, setIsCreatingVault] = useState(false);
+  // Recovery mode: the PIN modal collects a NEW PIN after a care-circle member
+  // approves recovery (H3). Distinct from create/unlock.
+  const [isRecovering, setIsRecovering] = useState(false);
   const [summary, setSummary] = useState<VaultSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +87,8 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
       setPin('');
       const vaultSummary = await vaultService.getVaultSummary();
       setSummary(vaultSummary);
+      // Keep caregiver-assisted recovery escrow current (no-op outside a circle).
+      void careCircleSyncService.ensureRecoveryEscrow();
     } else {
       setError('Incorrect PIN. Please try again.');
     }
@@ -120,6 +126,8 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
         appointments: 0,
       });
       Alert.alert('Success', 'Your secure vault has been created!');
+      // Set up caregiver-assisted recovery for the new vault (no-op outside a circle).
+      void careCircleSyncService.ensureRecoveryEscrow();
     } else {
       setError('Failed to create vault. Please try again.');
     }
@@ -145,7 +153,7 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
     );
   }, []);
 
-  const handleForgotVaultPin = () => {
+  const confirmDeleteVault = () => {
     Alert.alert(
       'Delete Vault',
       'Resetting the vault PIN will permanently delete all vault data. This cannot be undone. Are you sure?',
@@ -165,6 +173,76 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
         },
       ]
     );
+  };
+
+  const handleForgotVaultPin = () => {
+    // In a care circle, offer caregiver-assisted recovery (no data loss) before
+    // the destructive delete. Outside a circle, delete is the only option.
+    if (!careCircleSyncService.isConnected()) {
+      confirmDeleteVault();
+      return;
+    }
+    Alert.alert(
+      'Recover your vault PIN',
+      'Ask a trusted member of your care circle to approve recovering your PIN — your saved information stays safe. Or you can delete the vault and start over.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete instead', style: 'destructive', onPress: confirmDeleteVault },
+        {
+          text: 'Ask my circle',
+          onPress: async () => {
+            const res = await careCircleSyncService.requestRecovery();
+            if (!res.success) {
+              Alert.alert('Could not request recovery', res.error || 'Please try again.');
+              return;
+            }
+            setIsCreatingVault(false);
+            setIsRecovering(true);
+            setPin('');
+            setConfirmPin('');
+            setError(null);
+            setShowPinModal(true);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCompleteRecovery = async () => {
+    if (pin.length < 4) {
+      setError('PIN must be at least 4 digits');
+      return;
+    }
+    if (pin !== confirmPin) {
+      setError('PINs do not match');
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    const res = await careCircleSyncService.completeRecovery(pin);
+    if (res.success) {
+      // completeRecovery re-keys the encryption service, but the vault store
+      // has not loaded any entities yet — run the normal unlock path so the
+      // user sees their data immediately. (Found on-device: without this the
+      // vault appeared EMPTY right after recovery until a manual lock/unlock,
+      // which reads as data loss to an elderly user.)
+      await vaultService.unlock(pin);
+      setIsLoading(false);
+      setIsRecovering(false);
+      setShowPinModal(false);
+      setIsLocked(false);
+      setPin('');
+      setConfirmPin('');
+      const vaultSummary = await vaultService.getVaultSummary();
+      setSummary(vaultSummary);
+      Alert.alert('Vault recovered', 'Your vault is unlocked. Remember your new PIN.');
+    } else if (res.error === 'Recovery not approved yet') {
+      setIsLoading(false);
+      setError('Not approved yet — ask a circle member to approve in their app, then try again.');
+    } else {
+      setIsLoading(false);
+      setError(res.error || 'Recovery failed. Please try again.');
+    }
   };
 
   const openPinModal = (creating: boolean) => {
@@ -320,11 +398,13 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
-              {isCreatingVault ? 'Create Your Vault PIN' : 'Enter Your PIN'}
+              {isRecovering ? 'Recover Your Vault' : isCreatingVault ? 'Create Your Vault PIN' : 'Enter Your PIN'}
             </Text>
 
             <Text style={styles.modalSubtitle}>
-              {isCreatingVault
+              {isRecovering
+                ? 'A circle member must approve your request in their app. Once they do, set a new PIN below and tap Recover.'
+                : isCreatingVault
                 ? 'Choose a 4-6 digit PIN to protect your vault'
                 : 'Enter your PIN to unlock'}
             </Text>
@@ -333,14 +413,14 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
               style={styles.pinInput}
               value={pin}
               onChangeText={setPin}
-              placeholder="Enter PIN"
+              placeholder={isRecovering ? 'New PIN' : 'Enter PIN'}
               keyboardType="number-pad"
               secureTextEntry
               maxLength={6}
               autoFocus
             />
 
-            {isCreatingVault && (
+            {(isCreatingVault || isRecovering) && (
               <TextInput
                 style={styles.pinInput}
                 value={confirmPin}
@@ -372,6 +452,7 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
                   setPin('');
                   setConfirmPin('');
                   setError(null);
+                  setIsRecovering(false);
                 }}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
@@ -379,20 +460,20 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
 
               <TouchableOpacity
                 style={styles.modalConfirmButton}
-                onPress={isCreatingVault ? handleCreateVault : handleUnlock}
+                onPress={isRecovering ? handleCompleteRecovery : isCreatingVault ? handleCreateVault : handleUnlock}
                 disabled={isLoading}
               >
                 {isLoading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.modalConfirmText}>
-                    {isCreatingVault ? 'Create' : 'Unlock'}
+                    {isRecovering ? 'Recover' : isCreatingVault ? 'Create' : 'Unlock'}
                   </Text>
                 )}
               </TouchableOpacity>
             </View>
 
-            {!isCreatingVault && (
+            {!isCreatingVault && !isRecovering && (
               <TouchableOpacity style={styles.forgotPinLink} onPress={handleForgotVaultPin}>
                 <Text style={styles.forgotPinLinkText}>Forgot vault PIN?</Text>
               </TouchableOpacity>

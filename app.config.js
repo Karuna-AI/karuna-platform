@@ -48,7 +48,7 @@ module.exports = {
       jsEngine: 'jsc',
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '29',
+      buildNumber: '30',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -80,7 +80,7 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 9,
+      versionCode: 10,
       targetSdkVersion: 35,
       compileSdkVersion: 35,
       permissions: [
@@ -156,6 +156,10 @@ module.exports = {
             compileSdkVersion: 35,
             targetSdkVersion: 35,
             minSdkVersion: 24,
+            // Device-test builds talk to the local gateway over adb reverse
+            // (http://localhost:3021), which needs cleartext HTTP. Never set
+            // for store builds.
+            ...(process.env.ALLOW_CLEARTEXT === '1' ? { usesCleartextTraffic: true } : {}),
           },
         },
       ],

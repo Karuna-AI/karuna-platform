@@ -126,6 +126,11 @@ beforeAll(async () => {
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@realtest.karuna'");
   await db.query("DELETE FROM password_reset_tokens WHERE true");
   await db.query("DELETE FROM invitations WHERE true");
+  // audit_logs / caregiver_alerts / escrow reference care_circles without ON DELETE
+  // CASCADE (the recovery endpoints write them), so clear them before the circles.
+  await db.query("DELETE FROM audit_logs WHERE true").catch(() => {});
+  await db.query("DELETE FROM caregiver_alerts WHERE true").catch(() => {});
+  await db.query("DELETE FROM vault_recovery_escrow WHERE true").catch(() => {});
   await db.query("DELETE FROM circle_members WHERE true");
   await db.query("DELETE FROM care_circles WHERE name LIKE 'RealTest%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@realtest.karuna'");
@@ -150,6 +155,11 @@ afterAll(async () => {
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@realtest.karuna'");
   await db.query("DELETE FROM password_reset_tokens WHERE true");
   await db.query("DELETE FROM invitations WHERE true");
+  // audit_logs / caregiver_alerts / escrow reference care_circles without ON DELETE
+  // CASCADE (the recovery endpoints write them), so clear them before the circles.
+  await db.query("DELETE FROM audit_logs WHERE true").catch(() => {});
+  await db.query("DELETE FROM caregiver_alerts WHERE true").catch(() => {});
+  await db.query("DELETE FROM vault_recovery_escrow WHERE true").catch(() => {});
   await db.query("DELETE FROM circle_members WHERE true");
   await db.query("DELETE FROM care_circles WHERE name LIKE 'RealTest%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@realtest.karuna'");
@@ -992,4 +1002,328 @@ describe('Login rate limiter (real DB, real rate-limit) — LAST', () => {
     // Rate limiter (5/min) must have triggered at least once
     expect(statuses.some((s) => s === 429)).toBe(true);
   }, 20_000);
+});
+
+// ── Vault PIN recovery escrow (H3) ──────────────────────────────────────────────
+describe('Vault PIN recovery escrow (real DB)', () => {
+  let recOwnerToken: string;
+  let recCircleId: string;
+  let cgToken: string;
+  let cgUserId: string;
+  const stamp = Date.now();
+  const ownerEmail = `rec-owner-${stamp}@realtest.karuna`;
+  const cgEmail = `rec-cg-${stamp}@realtest.karuna`;
+
+  beforeAll(async () => {
+    // The recovery table ships via migration 006; ensure it exists for the test DB.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS vault_recovery_escrow (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        circle_id UUID NOT NULL REFERENCES care_circles(id) ON DELETE CASCADE,
+        wrapped_dek TEXT NOT NULL,
+        recovery_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        requested_at TIMESTAMP WITH TIME ZONE,
+        approved_by UUID REFERENCES users(id),
+        approved_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, circle_id)
+      )`);
+
+    // Seed owner + caregiver + circle directly (HTTP register/login would hit the
+    // registration rate limiter this late in the suite). Mint matching JWTs.
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const hash = bcrypt.hashSync('SeedPass123!', 1);
+    const mkUser = async (email: string, name: string) => {
+      const r = await db.query(
+        'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+        [email, hash, name]
+      );
+      return r.rows[0].id as string;
+    };
+    const ownerId = await mkUser(ownerEmail, 'Rec Owner');
+    cgUserId = await mkUser(cgEmail, 'Rec Caregiver');
+
+    const cr = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['RealTest Recovery Circle', 'Rec Owner']
+    );
+    recCircleId = cr.rows[0].id;
+    await db.query(
+      `INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner'), ($1, $3, 'caregiver')`,
+      [recCircleId, ownerId, cgUserId]
+    );
+
+    const mkTok = (id: string, email: string, name: string) =>
+      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    recOwnerToken = mkTok(ownerId, ownerEmail, 'Rec Owner');
+    cgToken = mkTok(cgUserId, cgEmail, 'Rec Caregiver');
+  });
+
+  function set2(r: any, t: string) { return r.set('Authorization', `Bearer ${t}`); }
+
+  it('full flow: escrow → request → owner approves → one-shot material release', async () => {
+    // Escrow (caregiver stores their wrapped DEK + recovery key)
+    const esc = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/escrow`), cgToken)
+      .send({ wrappedDek: 'WRAPPED-DEK', recoveryKey: 'RK-super-secret' });
+    expect(esc.status).toBe(200);
+
+    // Material before approval → 403
+    const m0 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m0.status).toBe(403);
+
+    // Request recovery
+    const rq = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/request`), cgToken).send({});
+    expect(rq.status).toBe(200);
+    expect(rq.body.status).toBe('pending');
+
+    // Requester cannot approve their own request
+    const self = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/${cgUserId}/approve`), cgToken).send({});
+    expect(self.status).toBe(403);
+
+    // Owner sees the pending request and approves
+    const list = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/requests`), recOwnerToken);
+    expect(list.status).toBe(200);
+    expect(list.body.requests.some((r: any) => r.userId === cgUserId)).toBe(true);
+
+    const ap = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/${cgUserId}/approve`), recOwnerToken).send({});
+    expect(ap.status).toBe(200);
+
+    // Material released and round-trips the escrowed values
+    const m1 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m1.status).toBe(200);
+    expect(m1.body).toEqual({ wrappedDek: 'WRAPPED-DEK', recoveryKey: 'RK-super-secret' });
+
+    // One-shot: a second fetch is denied (status reset to 'active')
+    const m2 = await set2(req.get(`/api/care/circles/${recCircleId}/recovery/material`), cgToken);
+    expect(m2.status).toBe(403);
+  });
+
+  it('stores the recovery key encrypted at rest (not plaintext)', async () => {
+    const row = await db.query(
+      'SELECT recovery_key FROM vault_recovery_escrow WHERE user_id = $1 AND circle_id = $2',
+      [cgUserId, recCircleId]
+    );
+    expect(row.rows[0].recovery_key).not.toContain('RK-super-secret');
+    expect(String(row.rows[0].recovery_key).split('.').length).toBe(3); // iv.tag.ciphertext
+  });
+
+  it('a non-member cannot request recovery', async () => {
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const strangerEmail = `rec-stranger-${stamp}@realtest.karuna`;
+    const sr = await db.query(
+      'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+      [strangerEmail, bcrypt.hashSync('SeedPass123!', 1), 'Stranger']
+    );
+    const strangerToken = jwtLib.sign(
+      { id: sr.rows[0].id, email: strangerEmail, name: 'Stranger' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const r = await set2(req.post(`/api/care/circles/${recCircleId}/recovery/request`), strangerToken).send({});
+    expect(r.status).toBe(403);
+  });
+});
+
+describe('GDPR export & account deletion (real DB)', () => {
+  const stamp = Date.now();
+  const ownerEmail = `gdpr-owner-${stamp}@realtest.karuna`;
+  const cgEmail = `gdpr-cg-${stamp}@realtest.karuna`;
+  const PASSWORD = 'SeedPass123!';
+  let ownerId: string;
+  let cgId: string;
+  let circleId: string;
+  let ownerToken: string;
+  let cgToken: string;
+
+  beforeAll(async () => {
+    const jwtLib = require('../../server/node_modules/jsonwebtoken');
+    const bcrypt = require('../../server/node_modules/bcryptjs');
+    const hash = bcrypt.hashSync(PASSWORD, 1);
+    const mkUser = async (email: string, name: string) => {
+      const r = await db.query(
+        'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+        [email, hash, name]
+      );
+      return r.rows[0].id as string;
+    };
+    ownerId = await mkUser(ownerEmail, 'GDPR Owner');
+    cgId = await mkUser(cgEmail, 'GDPR Caregiver');
+    const cr = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['GDPR Test Circle', 'GDPR Owner']
+    );
+    circleId = cr.rows[0].id;
+    await db.query(
+      `INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner'), ($1, $3, 'caregiver')`,
+      [circleId, ownerId, cgId]
+    );
+    await db.query(
+      `INSERT INTO vault_medications (circle_id, name, dosage, frequency, timing, is_active, created_by)
+       VALUES ($1, 'GDPR Test Med', '10mg', 'daily', '{08:00}', true, $2)`,
+      [circleId, 'GDPR Owner']
+    );
+    // Note authored by the caregiver in the owner's circle — must be deleted
+    // (not orphaned) when the caregiver deletes their account.
+    await db.query(
+      `INSERT INTO vault_notes (circle_id, author_id, author_name, author_role, title, content, category)
+       VALUES ($1, $2, 'GDPR Caregiver', 'caregiver', 'GDPR note', 'authored by caregiver', 'general')`,
+      [circleId, cgId]
+    );
+    const mkTok = (id: string, email: string, name: string) =>
+      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    ownerToken = mkTok(ownerId, ownerEmail, 'GDPR Owner');
+    cgToken = mkTok(cgId, cgEmail, 'GDPR Caregiver');
+  }, 30_000);
+
+  function auth(r: any, t: string) { return r.set('Authorization', `Bearer ${t}`); }
+
+  it('GET /auth/export returns full data for an owner', async () => {
+    const res = await auth(req.get('/api/care/auth/export'), ownerToken);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toContain('karuna-data-export');
+    expect(res.body.profile.email).toBe(ownerEmail);
+    expect(res.body.memberships.some((m: any) => m.circle_id === circleId)).toBe(true);
+    const owned = res.body.ownedCircles.find((c: any) => c.circle.id === circleId);
+    expect(owned).toBeDefined();
+    expect(owned.vault.medications.some((m: any) => m.name === 'GDPR Test Med')).toBe(true);
+    expect(owned.members.length).toBe(2);
+  });
+
+  it('delete requires the correct password', async () => {
+    const noPw = await auth(req.post('/api/care/auth/delete-account'), cgToken).send({});
+    expect(noPw.status).toBe(400);
+    const wrongPw = await auth(req.post('/api/care/auth/delete-account'), cgToken)
+      .send({ password: 'not-the-password' });
+    expect(wrongPw.status).toBe(403);
+  });
+
+  it('owner deletion without confirmation returns 409 listing owned circles', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), ownerToken)
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(409);
+    expect(res.body.ownedCircles.some((c: any) => c.id === circleId)).toBe(true);
+  });
+
+  it('caregiver deletion removes the user and their notes but keeps the circle', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), cgToken)
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(200);
+
+    expect((await db.query('SELECT 1 FROM users WHERE id = $1', [cgId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM vault_notes WHERE author_id = $1', [cgId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM care_circles WHERE id = $1', [circleId])).rows.length).toBe(1);
+    expect((await db.query('SELECT 1 FROM circle_members WHERE user_id = $1', [cgId])).rows.length).toBe(0);
+  });
+
+  it('owner deletion with confirmation removes the user and the owned circle', async () => {
+    const res = await auth(req.post('/api/care/auth/delete-account'), ownerToken)
+      .send({ password: PASSWORD, confirmDeleteOwnedCircles: true });
+    expect(res.status).toBe(200);
+
+    expect((await db.query('SELECT 1 FROM users WHERE id = $1', [ownerId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM care_circles WHERE id = $1', [circleId])).rows.length).toBe(0);
+    expect((await db.query('SELECT 1 FROM vault_medications WHERE circle_id = $1', [circleId])).rows.length).toBe(0);
+  });
+});
+
+describe('Notification queue worker (real DB)', () => {
+  const stamp = Date.now();
+  let userId: string;
+  let circleId: string;
+  let broadcastMock: jest.Mock;
+  let worker: any;
+
+  beforeAll(async () => {
+    // Columns ship via migration 007; ensure they exist for the test DB.
+    await db.query('ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE');
+    await db.query('ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS delivery_error TEXT');
+    await db.query("DELETE FROM notification_queue WHERE title LIKE 'NotifTest%'");
+
+    const u = await db.query(
+      'INSERT INTO users (email, password_hash, name, is_verified) VALUES ($1, $2, $3, true) RETURNING id',
+      [`notif-${stamp}@realtest.karuna`, 'x', 'Notif User']
+    );
+    userId = u.rows[0].id;
+    const c = await db.query(
+      'INSERT INTO care_circles (name, care_recipient_name) VALUES ($1, $2) RETURNING id',
+      ['NotifTest Circle', 'Notif User']
+    );
+    circleId = c.rows[0].id;
+    await db.query(
+      "INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [circleId, userId]
+    );
+
+    worker = require('../../server/notificationWorker');
+    broadcastMock = jest.fn();
+    worker.initNotificationWorker({
+      db,
+      broadcast: broadcastMock,
+      realtime: { acquireJobLock: async () => true },
+      resend: null,
+      fromEmail: 'Karuna <test@karuna>',
+    });
+  }, 30_000);
+
+  it('pushes due circle/user/all notifications exactly once', async () => {
+    const ins = (recipientType: string, recipientId: string | null, title: string, scheduledAt: string | null = null) =>
+      db.query(
+        `INSERT INTO notification_queue (recipient_type, recipient_id, notification_type, title, message, priority, scheduled_at)
+         VALUES ($1, $2, 'system_announcement', $3, 'hello', 'normal', $4) RETURNING id`,
+        [recipientType, recipientId, title, scheduledAt]
+      );
+    await ins('circle', circleId, 'NotifTest circle');
+    await ins('user', userId, 'NotifTest user');
+    await ins('all', null, 'NotifTest all');
+    await ins('circle', circleId, 'NotifTest future', new Date(Date.now() + 3600_000).toISOString());
+
+    const result = await worker.processNotificationQueue({ skipLock: true });
+    expect(result.delivered).toBeGreaterThanOrEqual(3);
+
+    // circle → its circle id; user → each of the user's circles with recipientUserId; all → '*'
+    const calls = broadcastMock.mock.calls;
+    expect(calls.some(([cid, ev]: any) => cid === circleId && ev.title === 'NotifTest circle')).toBe(true);
+    expect(calls.some(([cid, ev]: any) => cid === circleId && ev.title === 'NotifTest user' && ev.recipientUserId === userId)).toBe(true);
+    expect(calls.some(([cid, ev]: any) => cid === '*' && ev.title === 'NotifTest all')).toBe(true);
+    // future-scheduled stays untouched
+    expect(calls.some(([, ev]: any) => ev.title === 'NotifTest future')).toBe(false);
+
+    const delivered = await db.query(
+      "SELECT title, delivered_at FROM notification_queue WHERE title LIKE 'NotifTest%'"
+    );
+    for (const row of delivered.rows) {
+      if (row.title === 'NotifTest future') expect(row.delivered_at).toBeNull();
+      else expect(row.delivered_at).not.toBeNull();
+    }
+
+    // Second cycle: nothing new to push (delivered_at set), future still pending.
+    broadcastMock.mockClear();
+    const second = await worker.processNotificationQueue({ skipLock: true });
+    expect(second.delivered).toBe(0);
+  });
+
+  it('records delivery_error and keeps the row pending for retry', async () => {
+    // circle notification without recipient_id → deliverNotification throws
+    const bad = await db.query(
+      `INSERT INTO notification_queue (recipient_type, recipient_id, notification_type, title, message)
+       VALUES ('circle', NULL, 'system_announcement', 'NotifTest bad', 'x') RETURNING id`
+    );
+    await worker.processNotificationQueue({ skipLock: true });
+    const row = (await db.query(
+      'SELECT status, delivered_at, delivery_error FROM notification_queue WHERE id = $1',
+      [bad.rows[0].id]
+    )).rows[0];
+    expect(row.delivered_at).toBeNull();
+    expect(row.status).toBe('pending'); // retried within the 24h window
+    expect(row.delivery_error).toContain('recipient_id');
+  });
+
+  afterAll(async () => {
+    await db.query("DELETE FROM notification_queue WHERE title LIKE 'NotifTest%'");
+  });
 });

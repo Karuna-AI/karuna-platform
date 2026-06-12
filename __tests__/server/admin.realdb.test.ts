@@ -92,9 +92,12 @@ beforeAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
 
   // ── Clean any leftover test data from prior runs ──────────────────────────
+  // feature_flags must go BEFORE admin_users: stale test flags reference stale
+  // test admins via feature_flags_created_by_fkey, and an aborted prior run
+  // (no afterAll) leaves both behind.
+  await db.query("DELETE FROM feature_flags WHERE name LIKE 'test_flag_%'");
   await db.query("DELETE FROM admin_audit_logs WHERE admin_email LIKE '%@admintest.karuna'");
   await db.query("DELETE FROM admin_users WHERE email LIKE '%@admintest.karuna'");
-  await db.query("DELETE FROM feature_flags WHERE name LIKE 'test_flag_%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@admintest.karuna'");
 
   // ── Create one super_admin for all tests ─────────────────────────────────
@@ -119,11 +122,12 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  // Flags reference the admin via created_by — delete them first.
+  await db.query("DELETE FROM feature_flags WHERE name LIKE 'test_flag_%'");
   if (adminId) {
     await db.query("DELETE FROM admin_audit_logs WHERE admin_id = $1", [adminId]);
     await db.query("DELETE FROM admin_users WHERE id = $1", [adminId]);
   }
-  await db.query("DELETE FROM feature_flags WHERE name LIKE 'test_flag_%'");
   await db.query("DELETE FROM users WHERE email LIKE '%@admintest.karuna'");
   await db.close();
 }, 15_000);

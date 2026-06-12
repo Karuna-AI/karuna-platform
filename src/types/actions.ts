@@ -43,6 +43,7 @@ export type ActionType =
   | 'reminder_set'
   | 'camera_open'
   | 'flashlight'
+  | 'app_open'
   // Health
   | 'emergency_call'
   | 'pharmacy_nearby'
@@ -289,6 +290,7 @@ export const ACTION_METADATA: Record<ActionType, {
   reminder_set: { displayName: 'Set Reminder', icon: '🔔', category: 'utility', requiresConfirmation: true, requiresInternet: false },
   camera_open: { displayName: 'Open Camera', icon: '📷', category: 'utility', requiresConfirmation: false, requiresInternet: false },
   flashlight: { displayName: 'Flashlight', icon: '🔦', category: 'utility', requiresConfirmation: false, requiresInternet: false },
+  app_open: { displayName: 'Open App', icon: '📲', category: 'utility', requiresConfirmation: true, requiresInternet: false },
 
   // Health
   emergency_call: { displayName: 'Emergency Call', icon: '🚨', category: 'health', requiresConfirmation: true, requiresInternet: false },

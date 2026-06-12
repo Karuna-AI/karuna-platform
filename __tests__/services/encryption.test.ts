@@ -402,4 +402,44 @@ describe('EncryptionService', () => {
       }
     });
   });
+
+  // ── Caregiver-assisted recovery (H3 Phase 2/3) ──────────────────────────────
+  describe('recovery escrow', () => {
+    it('round-trips: build escrow → restore with new PIN → data readable, old PIN dead', async () => {
+      await encryptionService.initialize('pin-1');
+      const cipher = await encryptionService.encrypt('vault-secret');
+
+      const escrow = await encryptionService.buildRecoveryEscrow();
+      expect(escrow).toBeTruthy();
+      expect(escrow!.wrappedDek).toBeTruthy();
+      expect(escrow!.recoveryKey).toBeTruthy();
+
+      // Simulate forgot-PIN: lock, then recover with the escrow material + a new PIN.
+      encryptionService.lock();
+      const ok = await encryptionService.restoreWithRecovery(escrow!.wrappedDek, escrow!.recoveryKey, 'pin-2');
+      expect(ok).toBe(true);
+
+      // Data encrypted before recovery is still readable (same DEK).
+      expect(await encryptionService.decrypt(cipher)).toBe('vault-secret');
+
+      // New PIN unlocks after a lock; the old PIN no longer works.
+      encryptionService.lock();
+      expect(await encryptionService.initialize('pin-2')).toBe(true);
+      expect(await encryptionService.decrypt(cipher)).toBe('vault-secret');
+      encryptionService.lock();
+      expect(await encryptionService.initialize('pin-1')).toBe(false);
+    });
+
+    it('buildRecoveryEscrow returns null when the vault is locked', async () => {
+      encryptionService.lock();
+      expect(await encryptionService.buildRecoveryEscrow()).toBeNull();
+    });
+
+    it('rejects recovery material that does not match this vault', async () => {
+      await encryptionService.initialize('pin-1');
+      const zeros = Buffer.alloc(32).toString('base64'); // a 32-byte recovery key that wraps nothing valid
+      const ok = await encryptionService.restoreWithRecovery('bogus-ciphertext', zeros, 'pin-2');
+      expect(ok).toBe(false);
+    });
+  });
 });

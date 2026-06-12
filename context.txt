@@ -1,0 +1,203 @@
+﻿KARUNA PLATFORM â€” LIVE FIX CONTEXT
+===================================
+Branch: fix/security-audit-21-issues
+Started: 2026-06-11
+Purpose: Track the 7 platform-level fixes identified in the full-codebase analysis.
+This file is updated after every fix lands (frontend, backend, DB noted per item).
+
+ISSUE LIST & STATUS
+-------------------
+1. [DONE 2026-06-11] H3 vault PIN recovery Phases 2â€“3 (escrow + caregiver approval)
+   - Phase 1 (DEK model) was committed earlier (840d2dd).
+   - Phases 2â€“3 completed and committed:
+     DB: migration 006_vault_recovery_escrow.sql (applied to dev DB).
+     Backend: 6 recovery endpoints in server/careCircle.js (escrow/request/status/
+       requests/approve/material); recovery key AES-256-GCM at rest; approver must be
+       a different member with canApproveRecovery; one-shot material release; audited.
+     Frontend (portal): RecoveryRequests.tsx approval card on dashboard, live via
+       recovery_request WS event.
+     Frontend (mobile): encryption.buildRecoveryEscrow/restoreWithRecovery;
+       careCircleSync recovery client; VaultScreen "Ask my circle" flow with new-PIN modal.
+   - BUG FOUND+FIXED during review: alert insert used severity='warning' which violates
+     caregiver_alerts CHECK (low/medium/high/critical) and failed silently â†’ now 'high'.
+   - Tests: encryption 39/39; server real-DB 123/123 (full recovery flow covered);
+     caregiver portal tsc+vite build clean.
+   - Pending: on-device verification on next build (noted in QA findings).
+
+2. [DONE 2026-06-11] Deploy gate skips server tests (.github/workflows/deploy.yml)
+   - deploy.yml test gate now has postgres:16-alpine service, schema init,
+     migrations (run.js), and npm run test:server â€” mirrors test.yml.
+   - BONUS: both workflows now run the migration runner, so a broken migration
+     fails CI instead of failing at prod deploy. Verified all 6 migrations apply
+     cleanly to a fresh schema locally; YAML validated with js-yaml.
+
+3. [DONE 2026-06-11] WebSocket state in-memory only (no horizontal scaling)
+   - NEW server/realtime.js: optional Redis adapter (REDIS_URL env). Provides:
+     cross-instance circle broadcasts (pub/sub + instance-id self-suppression),
+     shared WS-ticket store (TTL + atomic Lua GET+DEL consume), advisory job
+     lock for archival. Without REDIS_URL: identical single-instance behavior.
+   - careCircle.js: broadcastToCircle = local delivery + publish; tickets
+     async w/ shared-store-first; archival gated by acquireJobLock.
+   - ioredis added to server deps; REDIS_URL documented in .env.production.example.
+   - VERIFIED live against real Redis (2 simulated instances, 9/9 checks) â€”
+     caught+fixed a subscribe-before-ready bug. Server suite 123/123 w/o Redis.
+   - ALSO FIXED: admin.realdb.test.ts cleanup order (FK: feature_flags â†’
+     admin_users) which wedged the suite after aborted runs.
+   - NOTE: intermittent test timeouts on this machine are container disk-I/O
+     stalls (Postgres checkpoint fsyncs up to 21s/file) â€” environmental.
+   - Remaining acceptable: /metrics per-instance; session cleanup idempotent.
+
+4. [CLOSED 2026-06-11 â€” NOT A BUG] Password-reset tokens stored raw in DB
+   - Verified false: careCircle.js generateToken() (32-byte CSPRNG) +
+     hashToken() (SHA-256) â€” INSERT stores the hash (line ~943), lookup
+     compares hashes (line ~974). One-shot delete, 1h expiry, enumeration-safe.
+   - Covered by realdb test "stores a hashed token in DB". The original
+     analysis read migration 003's schema, not the handlers. No change needed.
+
+5. [DONE 2026-06-11] No GDPR data export / account deletion
+   - Backend (server/careCircle.js):
+     GET /api/care/auth/export â€” JSON download (profile, memberships, owned
+       circles w/ full vault [accounts decrypted, document metadata only],
+       health/doses/activity/checkins/alerts capped 10k rows, notes authored,
+       audit trail). Audit-logged. Rate-limited 5/h (skipped in NODE_ENV=test).
+     POST /api/care/auth/delete-account â€” password-confirmed; owning circles
+       requires confirmDeleteOwnedCircles=true (409 lists them first);
+       transaction: deletes owned circles (cascade), deletes authored
+       notes + sent invitations, anonymizes refs in others' circles
+       (sync_changes/alerts/audit/ai_usage/escrow approved_by), deletes user
+       (cascades memberships/sessions/tokens), audit row, clears cookies.
+   - Frontend (caregiver-portal): new /account page (profile, Download my
+     data, Delete account w/ owned-circle double-confirm), nav link, api.ts
+     exportMyData()/deleteAccount(). Build clean.
+   - Tests: 5 new realdb tests (export contents, password gate, 409 confirm
+     flow, caregiver delete keeps circle + removes notes, owner delete
+     cascades). api.realdb suite 59/59 green.
+   - Caught during testing: GDPR limiter 429'd the suite â†’ skip in test env.
+
+6. [DONE 2026-06-12 — server+portal; mobile deferred] Monolith refactors
+   - Backend: careCircle.js 4,252 → 2,531 lines. Extracted into server/routes/
+     via deps-injection mount functions called at the original positions
+     (preserves Express route order — statically verified, 75 routes
+     identical): recovery.js (208), vaultCrud.js (584), notes.js (151),
+     monitoring.js (758, incl. vital thresholds), dashboard.js (151).
+     Route bodies moved byte-identically. Server suite 130/130 green.
+   - Portal: CareCircleDetail.tsx 1,244 → 588 lines. New
+     components/circle/: MembersTab (210), NotesTab (323), VaultTab (181),
+     OverviewTab (30), shared utils + barrel. Dashboard tab stayed in the
+     parent (WebSocket-wired). tsc strict + vite build clean. One accepted
+     nuance: unsubmitted modal draft text now resets when leaving a tab.
+   - DEFERRED (deliberate): mobile refactors — 6 vault editor screens
+     consolidation + intentActions/appLauncher confirmation dedup. Reason:
+     those screens have no component-test coverage, so a pure refactor can't
+     be verified without on-device QA; this repo's own M1/M2 history shows
+     UI regressions slip exactly this way. Tracked for a pass that pairs the
+     refactor with adding component tests first.
+
+7. [DONE 2026-06-12] notification_queue has no worker
+   - Discovery: pull delivery already existed (GET /api/care/notifications +
+     read marker). Missing piece was PUSH delivery + scheduled_at handling.
+   - DB: migration 007_notification_delivery.sql — delivered_at +
+     delivery_error columns + partial index (applied to dev DB).
+   - Backend: NEW server/notificationWorker.js — 60s cycle (gated by the
+     Redis advisory lock from #3, single-runner in multi-instance):
+     recipient 'circle' → WS to that circle; 'user' → WS to user's circles
+     w/ recipientUserId + Resend email when priority high/urgent; 'all' →
+     '*' wildcard broadcast (deliverToLocalCircle now fans '*' to every
+     connected circle, works cross-instance via realtime pub/sub).
+     delivered_at = push-once marker; status stays 'pending' so pull clients
+     still see it until read. Failures keep delivery_error, retried 24h,
+     then marked 'failed'. Worker not auto-started under NODE_ENV=test.
+   - Frontend (caregiver-portal): CareCircleDetail subscribes to
+     'notification' WS events → toast (urgent = error style; user-targeted
+     filtered by recipientUserId). Build clean.
+   - Tests: 2 new realdb tests (push-once for circle/user/all + scheduled
+     future stays queued + second-cycle no-op; failure records error and
+     stays pending for retry). api.realdb suite 61/61 green.
+
+8. [DONE 2026-06-11] Chat must open any named app (user request)
+   - Gap: only WhatsApp/YouTube/maps/music had intents; "open instagram" fell
+     through to the AI, which refused.
+   - Added end-to-end 'open_app' intent â†’ 'app_open' action:
+     src/services/intents.ts (patterns + appName extractor, placed after
+       app-specific intents so whatsapp/youtube keep their richer flows),
+     src/types (IntentType + ActionType + metadata, confirmation required),
+     src/services/appLauncher.ts (KNOWN_APPS registry ~25 apps incl. Indian
+       apps paytm/phonepe/gpay/hotstar + aliases; resolution chain: URL scheme
+       â†’ Android explicit launcher intent by package â†’ web fallback â†’ store
+       search; iOS + Android),
+     src/services/intentActions.ts (processOpenAppIntent + executeOpenApp),
+     src/context/AppStateContext.tsx (confirm-modal dispatch case).
+   - Tests: __tests__/services/openApp.test.ts â€” 17 cases (parsing incl.
+     non-hijack of whatsapp/youtube/questions, alias resolution, scheme/web/
+     store fallbacks, confirmation gating, cooldown-aware). All green.
+   - Full mobile suite after change: 1235/1235 across 47 suites.
+
+ON-DEVICE E2E (2026-06-12, Galaxy A21s + local stack via adb reverse)
+----------------------------------------------------------------------
+Stack: gateway 3021 (branch code), portals 3030/3040 (dev), Postgres 5437.
+APK: devicetest profile (API_URL=http://localhost:3021, cleartext).
+
+PASS:
+- Onboarding (fresh install): role/language/permissions/quick-setup.
+- AI chat round-trip via local gateway; correct date (H2 fix live);
+  ai_usage_logs row written (470 tokens).
+- Care circle: portal register → create circle → invite; device joined by
+  code; Connected + sync. (Invite code surfaced from gateway log — Resend
+  not configured locally.)
+- Vault create (PIN) → ESCROW AUTO-DEPOSITED (vault_recovery_escrow row,
+  recovery key encrypted at rest). H3 Phase 2 verified live.
+- Vault CRUD sync: Dr. Mehta → vault_doctors row → portal VaultTab shows it.
+- H3 RECOVERY FULL FLOW: Forgot PIN → "Ask my circle" → escrow 'pending' +
+  HIGH caregiver alert (severity fix verified) → portal RecoveryRequests
+  card appeared LIVE via WS → Approve → device set NEW PIN → unlocked.
+  Old PIN dead, new PIN works, data intact. One-shot release + re-escrow
+  under fresh recovery key verified in DB.
+- Health: manual heart-rate 150 → health_data row + auto "Abnormal heart
+  rate" HIGH alert (200ms) → portal dashboard alert + live vitals card →
+  Acknowledge worked.
+- Notifications: admin POST → worker pushed in 35s (delivered_at set,
+  status stays pending for pull clients) → pull endpoint returns it.
+- GDPR export: full structured JSON (profile/memberships/owned circle w/
+  vault+health+alerts), attachment header.
+- open_app intent: "open instagram" → confirmation modal → action ran.
+
+BUGS FOUND ON-DEVICE (all fixed + committed, in APK build 3):
+1. "open whatsapp"/"open youtube" fell through to the AI (app-specific
+   intent matched with no entities → not actionable). Fixed: open-verb +
+   no entities = plain app-open (42d6e05).
+2. Confirming open of a NOT-INSTALLED app opened the GALLERY —
+   expo-intent-launcher ACTION_MAIN with packageName doesn't constrain
+   the intent. Fixed: Play Store details page fallback (42d6e05).
+3. After PIN recovery the vault rendered EMPTY (encryption re-keyed but
+   vault store never loaded) until manual lock/unlock. Data was intact.
+   Fixed: run normal unlock path after recovery (152f475).
+
+FIX VERIFICATION ROUND 2 (APK build 3, commit 152f475):
+- "open whatsapp" → "Open WhatsApp?" modal → confirmed → WhatsApp launched
+  (logcat: START VIEW whatsapp://send → com.whatsapp). PASS.
+- "open instagram" (not installed) → store chooser → Google Play opened
+  DIRECTLY on Instagram's install page (Gallery bug gone). PASS.
+- Recovery round 2 (5678 → 4321): full request/approve/recover cycle —
+  "Doctors 1 item" visible IMMEDIATELY after recovery (reload fix). PASS.
+
+UX NOTES (not fixed, tracked):
+- Device join with an invite for an email WITHOUT an account fails with
+  "Password required for new account" — app ignores needsPassword:true
+  and offers no password prompt. Workaround: pre-register the account.
+- PIN-setup warning still says "no way to recover this PIN" — outdated
+  now that circle-connected vaults have caregiver-assisted recovery.
+- Doctors list renders "Dr. Dr. Mehta" (prepends honorific to a name
+  that already has it).
+- Intent modal and AI reply both fire for the same message (N4 pattern).
+
+CHANGELOG
+---------
+2026-06-11: context.txt created. Task list registered. Starting issue #1 (H3).
+2026-06-11: #1 H3 done (24584c6 + 84b14d2). #2 deploy gate done (e685577).
+2026-06-11: #3 Redis realtime adapter done (5715ab8). #4 closed as not-a-bug.
+2026-06-11: #5 GDPR export/deletion done (6ce9999).
+2026-06-11: #8 chat open-any-app done (9be1bb7) — user-requested mid-session.
+2026-06-12: #7 notification push worker done (07e7458).
+2026-06-12: #6 monolith refactors done (3cc992b) — server+portal split;
+            mobile pieces deferred until component tests exist.
+ALL 8 ITEMS CLOSED. Branch ready for push/PR + on-device QA of H3 & open-app.

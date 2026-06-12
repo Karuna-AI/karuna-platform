@@ -68,6 +68,8 @@ class IntentActionsService {
         return this.processEmergencyIntent(intent);
       case 'whatsapp':
         return this.processWhatsAppIntent(intent);
+      case 'open_app':
+        return this.processOpenAppIntent(intent);
       default:
         return {
           success: false,
@@ -790,6 +792,24 @@ class IntentActionsService {
     const messageContent = intent.entities.message || '';
 
     if (!contactName) {
+      // "Open whatsapp" (no contact): launch the app itself instead of asking
+      // who to message. Tag the intent so the confirm handler's app_open
+      // branch knows which app to launch (it reads entities.appName).
+      if (/\b(open|launch|start)\b/i.test(intent.rawText)) {
+        intent.entities.appName = 'WhatsApp';
+        const request: ActionRequest = {
+          type: 'app_open',
+          params: { appName: 'WhatsApp' },
+          source: 'voice',
+          timestamp: new Date().toISOString(),
+        };
+        return {
+          success: true,
+          message: 'Ready to open WhatsApp',
+          requiresConfirmation: true,
+          actionConfirmation: appLauncherService.buildConfirmation(request),
+        };
+      }
       return {
         success: false,
         message: "Who would you like to WhatsApp?",
@@ -860,6 +880,36 @@ class IntentActionsService {
     };
   }
 
+  /**
+   * Process "open <app>" intent — confirm, then launch any named app.
+   */
+  private async processOpenAppIntent(intent: ParsedIntent): Promise<IntentActionResult> {
+    const appName = intent.entities.appName;
+
+    if (!appName) {
+      return {
+        success: false,
+        message: 'Which app would you like me to open?',
+      };
+    }
+
+    const request: ActionRequest = {
+      type: 'app_open',
+      params: { appName },
+      source: 'voice',
+      timestamp: new Date().toISOString(),
+    };
+
+    const confirmation = appLauncherService.buildConfirmation(request);
+
+    return {
+      success: true,
+      message: `Ready to open ${appName}`,
+      requiresConfirmation: true,
+      actionConfirmation: confirmation,
+    };
+  }
+
   // ========================================
   // Phase 13: New Action Executors
   // ========================================
@@ -924,6 +974,21 @@ class IntentActionsService {
     const request: ActionRequest = {
       type: 'spotify_play',
       params: { query: query || '', artist },
+      source: 'voice',
+      timestamp: new Date().toISOString(),
+    };
+
+    return appLauncherService.executeAction(request);
+  }
+
+  /**
+   * Execute open-app action (after the user confirmed in the modal).
+   */
+  async executeOpenApp(appName: string): Promise<ActionResult> {
+    const request: ActionRequest = {
+      type: 'app_open',
+      // confirmed: the IntentActionModal already showed the confirmation.
+      params: { appName, confirmed: true },
       source: 'voice',
       timestamp: new Date().toISOString(),
     };
