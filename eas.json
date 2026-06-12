@@ -34,6 +34,20 @@
         "PREVIEW_API_URL": "https://karuna-gateway-production.up.railway.app"
       }
     },
+    "devicetest": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "remote",
+        "withoutCredentials": true
+      },
+      "env": {
+        "APP_ENV": "preview",
+        "API_URL": "http://localhost:3021",
+        "PREVIEW_API_URL": "http://localhost:3021",
+        "ALLOW_CLEARTEXT": "1"
+      }
+    },
     "production": {
       "distribution": "store",
       "ios": {

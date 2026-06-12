@@ -156,6 +156,10 @@ module.exports = {
             compileSdkVersion: 35,
             targetSdkVersion: 35,
             minSdkVersion: 24,
+            // Device-test builds talk to the local gateway over adb reverse
+            // (http://localhost:3021), which needs cleartext HTTP. Never set
+            // for store builds.
+            ...(process.env.ALLOW_CLEARTEXT === '1' ? { usesCleartextTraffic: true } : {}),
           },
         },
       ],
