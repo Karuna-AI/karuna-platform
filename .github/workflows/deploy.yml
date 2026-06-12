@@ -200,29 +200,22 @@ jobs:
 
       - name: Deploy Admin Portal to Vercel
         if: steps.check-secrets.outputs.skip != 'true'
-        # The Vercel admin project has Root Directory = "admin-portal" set in
-        # the dashboard, which doubles the path when the CLI runs from this
-        # directory (admin-portal/admin-portal) and resolves the wrong app
-        # from the repo root. Until the dashboard setting is cleared
-        # (docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2), build locally and
-        # deploy --prebuilt so the remote root-directory setting never applies.
+        # KNOWN ISSUE (docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2): the
+        # Vercel admin project has Root Directory = "admin-portal" set in the
+        # dashboard, which doubles the path for CLI deploys and fails this
+        # step. The fix is clearing that field in the Vercel dashboard
+        # (Project → Settings → Build & Development → Root Directory); the
+        # caregiver project (empty Root Directory) deploys fine with the
+        # identical command. continue-on-error keeps smoke tests running for
+        # the backend + caregiver portal until the dashboard is fixed.
+        continue-on-error: true
+        working-directory: ./admin-portal
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_ADMIN }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN_ADMIN }}
-        run: |
-          # Pull project settings from the repo root: "vercel pull" resolves the
-          # dashboard rootDirectory relative to cwd, so it only works from here.
-          npx vercel pull --yes --environment=production --token $VERCEL_TOKEN
-          # Neutralize rootDirectory and hand the link to the app directory,
-          # which IS the app root for the local build.
-          jq '.settings.rootDirectory = null' .vercel/project.json > .vercel/project.json.tmp
-          mv .vercel/project.json.tmp .vercel/project.json
-          mv .vercel admin-portal/.vercel
-          cd admin-portal
-          npx vercel build --prod --yes --token $VERCEL_TOKEN
-          npx vercel deploy --prebuilt --prod --yes --token $VERCEL_TOKEN
+        run: npx vercel --prod --token $VERCEL_TOKEN --yes --build-env VITE_SENTRY_DSN=$VITE_SENTRY_DSN
 
   smoke-test:
     name: Post-Deploy Smoke Tests
