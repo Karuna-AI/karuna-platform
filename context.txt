@@ -225,3 +225,14 @@ PUBLISH PIPELINE (2026-06-12 evening)
   Android: eas submit needs ./google-service-account.json (not on this
        machine, not on EAS servers) - provide the key or upload the AAB
        in Play Console manually.
+
+STORE SUBMISSION DIAGNOSIS (2026-06-12 23:00)
+- iOS: Apple ASC returned 403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED
+  ("A required agreement is missing or has expired"). USER ACTION: Account
+  Holder signs in at appstoreconnect.apple.com -> Business (Agreements, Tax,
+  and Banking) -> accept/renew the pending agreement. Then resubmit:
+  eas submit -p ios --id 6b42c11d-d1d6-456f-a7cc-530c52bd0183
+- Android: still needs google-service-account.json (or manual AAB upload in
+  Play Console; AAB = EAS build 723b9a30-586f-4eab-afee-51a4bf623c6b).
+- NOTE: no rebuild required - all commits since the production builds are
+  CI/docs only; artifacts match current master app code.
