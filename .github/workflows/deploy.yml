@@ -200,16 +200,26 @@ jobs:
 
       - name: Deploy Admin Portal to Vercel
         if: steps.check-secrets.outputs.skip != 'true'
-        # Run from the repo root: the Vercel admin project has Root Directory
-        # set to "admin-portal", so cd-ing in doubles the path
-        # (admin-portal/admin-portal) and the deploy fails. See
-        # docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2.
+        # The Vercel admin project has Root Directory = "admin-portal" set in
+        # the dashboard, which doubles the path when the CLI runs from this
+        # directory (admin-portal/admin-portal) and resolves the wrong app
+        # from the repo root. Until the dashboard setting is cleared
+        # (docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2), build locally and
+        # deploy --prebuilt so the remote root-directory setting never applies.
+        working-directory: ./admin-portal
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_ADMIN }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN_ADMIN }}
-        run: npx vercel --prod --token $VERCEL_TOKEN --yes --build-env VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+        run: |
+          npx vercel pull --yes --environment=production --token $VERCEL_TOKEN
+          # Neutralize the root-directory project setting for the local build:
+          # this directory already IS the app root.
+          jq '.settings.rootDirectory = null' .vercel/project.json > .vercel/project.json.tmp
+          mv .vercel/project.json.tmp .vercel/project.json
+          npx vercel build --prod --token $VERCEL_TOKEN
+          npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN
 
   smoke-test:
     name: Post-Deploy Smoke Tests
