@@ -132,6 +132,56 @@ ISSUE LIST & STATUS
      store fallbacks, confirmation gating, cooldown-aware). All green.
    - Full mobile suite after change: 1235/1235 across 47 suites.
 
+ON-DEVICE E2E (2026-06-12, Galaxy A21s + local stack via adb reverse)
+----------------------------------------------------------------------
+Stack: gateway 3021 (branch code), portals 3030/3040 (dev), Postgres 5437.
+APK: devicetest profile (API_URL=http://localhost:3021, cleartext).
+
+PASS:
+- Onboarding (fresh install): role/language/permissions/quick-setup.
+- AI chat round-trip via local gateway; correct date (H2 fix live);
+  ai_usage_logs row written (470 tokens).
+- Care circle: portal register → create circle → invite; device joined by
+  code; Connected + sync. (Invite code surfaced from gateway log — Resend
+  not configured locally.)
+- Vault create (PIN) → ESCROW AUTO-DEPOSITED (vault_recovery_escrow row,
+  recovery key encrypted at rest). H3 Phase 2 verified live.
+- Vault CRUD sync: Dr. Mehta → vault_doctors row → portal VaultTab shows it.
+- H3 RECOVERY FULL FLOW: Forgot PIN → "Ask my circle" → escrow 'pending' +
+  HIGH caregiver alert (severity fix verified) → portal RecoveryRequests
+  card appeared LIVE via WS → Approve → device set NEW PIN → unlocked.
+  Old PIN dead, new PIN works, data intact. One-shot release + re-escrow
+  under fresh recovery key verified in DB.
+- Health: manual heart-rate 150 → health_data row + auto "Abnormal heart
+  rate" HIGH alert (200ms) → portal dashboard alert + live vitals card →
+  Acknowledge worked.
+- Notifications: admin POST → worker pushed in 35s (delivered_at set,
+  status stays pending for pull clients) → pull endpoint returns it.
+- GDPR export: full structured JSON (profile/memberships/owned circle w/
+  vault+health+alerts), attachment header.
+- open_app intent: "open instagram" → confirmation modal → action ran.
+
+BUGS FOUND ON-DEVICE (all fixed + committed, in APK build 3):
+1. "open whatsapp"/"open youtube" fell through to the AI (app-specific
+   intent matched with no entities → not actionable). Fixed: open-verb +
+   no entities = plain app-open (42d6e05).
+2. Confirming open of a NOT-INSTALLED app opened the GALLERY —
+   expo-intent-launcher ACTION_MAIN with packageName doesn't constrain
+   the intent. Fixed: Play Store details page fallback (42d6e05).
+3. After PIN recovery the vault rendered EMPTY (encryption re-keyed but
+   vault store never loaded) until manual lock/unlock. Data was intact.
+   Fixed: run normal unlock path after recovery (152f475).
+
+UX NOTES (not fixed, tracked):
+- Device join with an invite for an email WITHOUT an account fails with
+  "Password required for new account" — app ignores needsPassword:true
+  and offers no password prompt. Workaround: pre-register the account.
+- PIN-setup warning still says "no way to recover this PIN" — outdated
+  now that circle-connected vaults have caregiver-assisted recovery.
+- Doctors list renders "Dr. Dr. Mehta" (prepends honorific to a name
+  that already has it).
+- Intent modal and AI reply both fire for the same message (N4 pattern).
+
 CHANGELOG
 ---------
 2026-06-11: context.txt created. Task list registered. Starting issue #1 (H3).
