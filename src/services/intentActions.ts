@@ -792,6 +792,24 @@ class IntentActionsService {
     const messageContent = intent.entities.message || '';
 
     if (!contactName) {
+      // "Open whatsapp" (no contact): launch the app itself instead of asking
+      // who to message. Tag the intent so the confirm handler's app_open
+      // branch knows which app to launch (it reads entities.appName).
+      if (/\b(open|launch|start)\b/i.test(intent.rawText)) {
+        intent.entities.appName = 'WhatsApp';
+        const request: ActionRequest = {
+          type: 'app_open',
+          params: { appName: 'WhatsApp' },
+          source: 'voice',
+          timestamp: new Date().toISOString(),
+        };
+        return {
+          success: true,
+          message: 'Ready to open WhatsApp',
+          requiresConfirmation: true,
+          actionConfirmation: appLauncherService.buildConfirmation(request),
+        };
+      }
       return {
         success: false,
         message: "Who would you like to WhatsApp?",

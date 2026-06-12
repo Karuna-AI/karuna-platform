@@ -705,17 +705,23 @@ class AppLauncherService {
           // Scheme not handled — try the next strategy.
         }
       }
+      // Schemes failing for a registry app almost always means it isn't
+      // installed. On Android, the Play Store details page is the most useful
+      // next step (one tap to Install/Open). NOTE: an unrestricted
+      // ACTION_MAIN/LAUNCHER intent via expo-intent-launcher must NOT be used
+      // here — packageName alone doesn't constrain it and Android resolves an
+      // arbitrary app (observed on-device: opened the Gallery).
       if (Platform.OS === 'android' && known.androidPackage) {
         try {
-          const IntentLauncher = require('expo-intent-launcher');
-          await IntentLauncher.startActivityAsync('android.intent.action.MAIN', {
-            category: 'android.intent.category.LAUNCHER',
-            packageName: known.androidPackage,
-            flags: 0x10000000, // FLAG_ACTIVITY_NEW_TASK
-          });
-          return { success: true, message: `Opening ${label}...`, action: 'app_open', appOpened: label };
+          await Linking.openURL(`market://details?id=${known.androidPackage}`);
+          return {
+            success: true,
+            message: `${label} isn't installed, so I'm showing it in the Play Store.`,
+            action: 'app_open',
+            appOpened: 'store',
+          };
         } catch {
-          // Not installed (or launcher refused) — fall through.
+          // No Play Store — fall through to the web.
         }
       }
       if (known.web) {

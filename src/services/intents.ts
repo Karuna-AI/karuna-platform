@@ -264,6 +264,19 @@ export function isActionableIntent(intent: ParsedIntent): boolean {
     return intent.confidence > 0.3;
   }
 
+  // "Open whatsapp"/"open youtube": the app-specific patterns match first but
+  // extract no entities, which previously dropped the request through to the
+  // AI ("I can't open apps..."). With an open/launch/start verb and no
+  // entities, treat it as a plain app-open — the processors turn it into an
+  // app_open / youtube_play action.
+  if (
+    (intent.type === 'whatsapp' || intent.type === 'youtube') &&
+    Object.keys(intent.entities).length === 0 &&
+    /\b(open|launch|start)\b/i.test(intent.rawText)
+  ) {
+    return intent.confidence > 0.5;
+  }
+
   // OTP help is actionable without entities
   if (intent.type === 'otp_help') {
     return intent.confidence > 0.5;

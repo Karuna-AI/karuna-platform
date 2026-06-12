@@ -47,6 +47,13 @@ describe('open_app intent parsing', () => {
     expect(parseIntent('open youtube').type).toBe('youtube');
   });
 
+  it('"open whatsapp"/"open youtube" are actionable without entities (plain app-open)', () => {
+    expect(isActionableIntent(parseIntent('open whatsapp'))).toBe(true);
+    expect(isActionableIntent(parseIntent('open youtube'))).toBe(true);
+    // but a bare mention without an open verb still defers to clarification
+    expect(isActionableIntent(parseIntent('whatsapp'))).toBe(false);
+  });
+
   it('does not hijack ordinary questions', () => {
     expect(parseIntent('what is the weather today?').type).not.toBe('open_app');
     expect(parseIntent('how do I get to the market').type).toBe('navigation');
