@@ -509,7 +509,7 @@ class EncryptionService {
       }
 
       // Re-wrap the DEK under the new PIN (new salt) — data stays under the DEK.
-      const newSalt = await generateSalt(32);
+      const newSalt = await generateSalt();
       const newPinKey = await deriveKey(newPin, newSalt);
       await this.setActiveKey(newPinKey);
       const newWrapped = await this.encrypt(bytesToBase64(dekBytes));

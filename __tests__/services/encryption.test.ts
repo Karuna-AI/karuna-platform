@@ -441,5 +441,46 @@ describe('EncryptionService', () => {
       const ok = await encryptionService.restoreWithRecovery('bogus-ciphertext', zeros, 'pin-2');
       expect(ok).toBe(false);
     });
+
+    it('writes a fresh key check when none exists (vault recovered before first check)', async () => {
+      await encryptionService.initialize('pin-1');
+      const cipher = await encryptionService.encrypt('vault-secret');
+      const escrow = await encryptionService.buildRecoveryEscrow();
+      expect(escrow).toBeTruthy();
+
+      await AsyncStorage.removeItem(KEY_CHECK_KEY);
+      encryptionService.lock();
+
+      const ok = await encryptionService.restoreWithRecovery(escrow!.wrappedDek, escrow!.recoveryKey, 'pin-2');
+      expect(ok).toBe(true);
+      // A new key check was created and the DEK still decrypts old data.
+      expect(mockStore[KEY_CHECK_KEY]).toBeTruthy();
+      expect(await encryptionService.decrypt(cipher)).toBe('vault-secret');
+    });
+
+    it('returns false when the stored key check cannot be decrypted', async () => {
+      await encryptionService.initialize('pin-1');
+      const escrow = await encryptionService.buildRecoveryEscrow();
+      expect(escrow).toBeTruthy();
+
+      mockStore[KEY_CHECK_KEY] = 'not-a-valid-ciphertext!!';
+      encryptionService.lock();
+
+      const ok = await encryptionService.restoreWithRecovery(escrow!.wrappedDek, escrow!.recoveryKey, 'pin-2');
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('changePin defensive branches', () => {
+    it('returns false if the DEK is missing after old-PIN verification', async () => {
+      await encryptionService.initialize('1111');
+      encryptionService.lock(); // keyBytes now null
+      // Force the unreachable-in-practice state: initialize "succeeds" without
+      // loading a DEK. changePin must bail rather than wrap a missing key.
+      const spy = jest.spyOn(encryptionService, 'initialize').mockResolvedValueOnce(true);
+      const ok = await encryptionService.changePin('1111', '2222');
+      expect(ok).toBe(false);
+      spy.mockRestore();
+    });
   });
 });
