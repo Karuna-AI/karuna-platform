@@ -200,7 +200,10 @@ jobs:
 
       - name: Deploy Admin Portal to Vercel
         if: steps.check-secrets.outputs.skip != 'true'
-        working-directory: ./admin-portal
+        # Run from the repo root: the Vercel admin project has Root Directory
+        # set to "admin-portal", so cd-ing in doubles the path
+        # (admin-portal/admin-portal) and the deploy fails. See
+        # docs/PROD_DEPLOY_FIXES_2026-05-31.md issue 2.
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
