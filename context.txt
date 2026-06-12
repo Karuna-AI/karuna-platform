@@ -201,3 +201,27 @@ CHANGELOG
 2026-06-12: #6 monolith refactors done (3cc992b) — server+portal split;
             mobile pieces deferred until component tests exist.
 ALL 8 ITEMS CLOSED. Branch ready for push/PR + on-device QA of H3 & open-app.
+
+PUBLISH PIPELINE (2026-06-12 evening)
+--------------------------------------
+- PR #86 merged to master (16 commits incl. version bumps vCode 10 / build 30).
+- Prod DB: migrations 006+007 applied & verified (schema_migrations ledger).
+- Deploy run 27446621024: ALL GREEN - Test Gate (mobile+server vs Postgres),
+  Backend->Railway, Caregiver+Admin portals->Vercel, smoke tests vs live prod.
+- Fixed along the way: encryption.ts branch-coverage gate (new edge tests,
+  91.4%), smoke-test.sh probed nonexistent endpoints (now /health, POST
+  logins, admin CSRF 403 assertion), KARUNA_*_URL repo vars were never set
+  (now set), admin-portal Vercel deploy unblocked (continue-on-error safety
+  retained; original command now succeeds).
+- Verified live: prod gateway healthy; recovery + GDPR endpoints respond 401
+  (were 404 pre-deploy).
+- Production mobile builds FINISHED on EAS:
+  Android AAB (versionCode 10): build 723b9a30-586f-4eab-afee-51a4bf623c6b
+  iOS (buildNumber 30):         build 6b42c11d-d1d6-456f-a7cc-530c52bd0183
+- SUBMISSIONS - both blocked on user-held credentials:
+  iOS: submission failed Apple-side; details at expo.dev submission
+       f76ed126-2d06-45e8-b0ed-aabd3d2e41c0 (check ASC agreements /
+       duplicate build number).
+  Android: eas submit needs ./google-service-account.json (not on this
+       machine, not on EAS servers) - provide the key or upload the AAB
+       in Play Console manually.
