@@ -220,8 +220,14 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
     setIsLoading(true);
     setError(null);
     const res = await careCircleSyncService.completeRecovery(pin);
-    setIsLoading(false);
     if (res.success) {
+      // completeRecovery re-keys the encryption service, but the vault store
+      // has not loaded any entities yet — run the normal unlock path so the
+      // user sees their data immediately. (Found on-device: without this the
+      // vault appeared EMPTY right after recovery until a manual lock/unlock,
+      // which reads as data loss to an elderly user.)
+      await vaultService.unlock(pin);
+      setIsLoading(false);
       setIsRecovering(false);
       setShowPinModal(false);
       setIsLocked(false);
@@ -231,8 +237,10 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
       setSummary(vaultSummary);
       Alert.alert('Vault recovered', 'Your vault is unlocked. Remember your new PIN.');
     } else if (res.error === 'Recovery not approved yet') {
+      setIsLoading(false);
       setError('Not approved yet — ask a circle member to approve in their app, then try again.');
     } else {
+      setIsLoading(false);
       setError(res.error || 'Recovery failed. Please try again.');
     }
   };
