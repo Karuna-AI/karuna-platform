@@ -9,16 +9,29 @@ interface IntentPattern {
 }
 
 const INTENT_PATTERNS: IntentPattern[] = [
-  // Emergency - check first for safety
+  // Emergency - check first for safety.
+  // NOTE: keep these patterns DISTRESS-SPECIFIC. A bare "help me" used to be an
+  // emergency trigger, but it matched everyday requests like "can you help me
+  // with my phone" / "what can you help me with" and popped a 911 confirmation —
+  // dangerous and confusing for elderly users. Generic help now routes to the
+  // 'help' assistance intent instead. "having" was also dropped (it matched
+  // "I'm having lunch"). Real cries ("help!", "somebody help") are kept.
   {
     type: 'emergency',
     patterns: [
-      /\b(emergency|help me|i('m| am) (hurt|injured|dying|having|falling))\b/i,
-      /\bcall\s+(911|ambulance|police|fire|emergency)\b/i,
+      /\bemergency\b/i,
+      /\bcall\s+(an?\s+|the\s+)?(911|999|112|ambulance|police|fire|emergency)\b/i,
       /\bi need (an? )?ambulance\b/i,
+      /\bi('m| am) (hurt|injured|dying|bleeding)\b/i,
       /\bi('m| am) not (okay|ok|feeling well)\b/i,
+      /\b(chest pain|can'?t breathe|cannot breathe)\b/i,
       /\bsomething('s| is) wrong\b/i,
       /\bi('ve| have) fallen\b/i,
+      // Distress cries only — require an exclamation or "somebody/someone help"
+      // so everyday "can you help me with X" never triggers a 911 confirmation.
+      /\bhelp\s*!/i,
+      /\bhelp me\s*!/i,
+      /\b(somebody|someone)\s+help\b/i,
     ],
   },
   // Ride requests - Uber, Ola, Lyft

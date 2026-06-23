@@ -69,6 +69,41 @@ describe('open_app intent parsing', () => {
   });
 });
 
+describe('emergency intent — no false positives (safety)', () => {
+  // Regression: "help me" / "having" used to trigger an emergency 911
+  // confirmation on everyday phrases. Found on-device 2026-06-23.
+  it.each([
+    'what can you help me with today?',
+    'can you help me with my phone',
+    'help me understand this',
+    'help me find my glasses',
+    "i'm having lunch",
+    "i'm having a good day",
+    'please help me set a reminder',
+  ])('does NOT classify "%s" as emergency', (text) => {
+    expect(parseIntent(text).type).not.toBe('emergency');
+  });
+
+  it.each([
+    'this is an emergency',
+    'call 911',
+    'call an ambulance',
+    'i need an ambulance',
+    "i'm hurt",
+    "i'm not feeling well",
+    'i have chest pain',
+    "i can't breathe",
+    "something's wrong",
+    "i've fallen",
+    'help!',
+    'somebody help',
+  ])('still classifies genuine distress "%s" as emergency', (text) => {
+    const intent = parseIntent(text);
+    expect(intent.type).toBe('emergency');
+    expect(isActionableIntent(intent)).toBe(true);
+  });
+});
+
 describe('appLauncher app_open action', () => {
   // The launcher enforces a 2s same-action cooldown via Date.now(); advance a
   // fake clock between tests so consecutive app_open calls aren't rejected.

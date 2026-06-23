@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Message, OpenAIMessage } from '../types';
 import { chatWithRetry, updateSystemPromptWithMemory } from '../services/openai';
-import { parseIntent, isActionableIntent } from '../services/intents';
+import { parseIntent, isActionableIntent, formatIntentForDisplay } from '../services/intents';
 import { storageService } from '../services/storage';
 import { memoryService } from '../services/memory';
 import { detectVaultQuery, executeVaultQuery, getVaultContextForAI } from '../services/vaultTools';
@@ -29,6 +29,14 @@ interface UseChatReturn {
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
+
+// Intents the device fulfils directly (confirmation modal + system action).
+// These short-circuit the LLM so the chat never contradicts the action taken.
+// 'question' and 'help' are intentionally excluded — those belong to the AI.
+const APP_HANDLED_INTENTS = new Set([
+  'call', 'message', 'reminder', 'ride_request', 'navigation',
+  'youtube', 'music', 'otp_help', 'emergency', 'whatsapp', 'open_app',
+]);
 
 /**
  * Build the current-date context injected into every chat turn. The model has
@@ -134,11 +142,25 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       });
 
       const intent = parseIntent(text);
-      if (onIntentDetected && isActionableIntent(intent)) {
+      const actionable = isActionableIntent(intent);
+      if (onIntentDetected && actionable) {
         onIntentDetected(intent);
       }
 
       addMessage('user', text);
+
+      // App-handled intents are fulfilled by the device itself (a confirmation
+      // modal + a system action like opening an app, placing a call, setting a
+      // reminder). They must NOT also be sent to the language model: doing so
+      // produced replies that flatly contradicted the action the app was taking
+      // ("I can't open apps for you" while the Open-App modal opened it; "I
+      // can't set reminders" while the reminder modal appeared — QA finding N4).
+      // Acknowledge briefly to match the modal and skip the AI round-trip.
+      if (actionable && APP_HANDLED_INTENTS.has(intent.type)) {
+        addMessage('assistant', formatIntentForDisplay(intent));
+        return;
+      }
+
       setIsLoading(true);
 
       try {

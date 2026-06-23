@@ -32,6 +32,21 @@ function normalizeCareCircle(row: any): CareCircle {
   };
 }
 
+// The notes API returns raw snake_case rows (author_name, created_at, author_id),
+// and the create/update endpoints wrap the row as { success, note }. The UI reads
+// camelCase (authorName, createdAt, authorId), so without this a freshly added
+// note rendered as "By  on Invalid Date" with no title. Normalize both shapes.
+function normalizeNote(raw: any): VaultNote {
+  const row = raw?.note ?? raw;
+  return {
+    ...row,
+    authorId:   row.authorId   ?? row.author_id,
+    authorName: row.authorName ?? row.author_name,
+    createdAt:  row.createdAt  ?? row.created_at,
+    updatedAt:  row.updatedAt  ?? row.updated_at,
+  };
+}
+
 class ApiService {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -328,7 +343,12 @@ class ApiService {
   async getSyncData(circleId: string): Promise<ApiResponse<SyncData>> {
     try {
       const response = await this.client.get(`/care/circles/${circleId}/sync`);
-      return { success: true, data: response.data };
+      const data = response.data;
+      // Notes come back snake_case; normalize so author/date fields render.
+      if (data && Array.isArray(data.notes)) {
+        data.notes = data.notes.map(normalizeNote);
+      }
+      return { success: true, data };
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
       return {
@@ -363,7 +383,7 @@ class ApiService {
   ): Promise<ApiResponse<VaultNote>> {
     try {
       const response = await this.client.post(`/care/circles/${circleId}/notes`, note);
-      return { success: true, data: response.data };
+      return { success: true, data: normalizeNote(response.data) };
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
       return {
@@ -383,7 +403,7 @@ class ApiService {
         `/care/circles/${circleId}/notes/${noteId}`,
         data
       );
-      return { success: true, data: response.data };
+      return { success: true, data: normalizeNote(response.data) };
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
       return {
