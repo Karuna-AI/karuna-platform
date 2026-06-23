@@ -48,7 +48,7 @@ module.exports = {
       jsEngine: 'jsc',
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '30',
+      buildNumber: '31',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
