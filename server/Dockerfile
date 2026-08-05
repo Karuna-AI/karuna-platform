@@ -2,7 +2,7 @@
 # Multi-stage build for smaller production image
 
 # Build stage
-FROM node:25-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Production stage
-FROM node:25-alpine AS production
+FROM node:26-alpine AS production
 
 # Add labels
 LABEL maintainer="Karuna Team"
