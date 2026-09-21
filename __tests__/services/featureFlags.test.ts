@@ -3,7 +3,6 @@
  * Tests for flag initialization, cache loading, server refresh, and context-based evaluation
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   jest.requireActual('../../src/web/async-storage-mock')

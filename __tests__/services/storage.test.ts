@@ -25,7 +25,7 @@ jest.mock('../../src/services/encryptedDatabase', () => ({
 }));
 
 import { storageService } from '../../src/services/storage';
-import type { UserMemory, AppSettings, KeyPerson } from '../../src/services/storage';
+import type { UserMemory, AppSettings } from '../../src/services/storage';
 
 // The async-storage mock delegates to the global localStorage mock (setupTests.ts).
 // We cast it for direct spying.

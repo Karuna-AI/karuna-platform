@@ -276,7 +276,6 @@ describe('VaultFormInput Component', () => {
   });
 
   it('should render password input with toggle', () => {
-    const _inputType2 = 'password';
     let showPassword = false;
 
     showPassword = true;

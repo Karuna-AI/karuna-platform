@@ -101,7 +101,7 @@ export async function deleteCalendarAsync(_id: string): Promise<void> {
 }
 
 export async function getEventsAsync(
-  calendarIds: string[],
+  _calendarIds: string[],
   startDate: Date,
   endDate: Date
 ): Promise<any[]> {

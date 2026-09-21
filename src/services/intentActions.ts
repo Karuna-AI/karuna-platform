@@ -7,6 +7,9 @@ import { telemetryService } from './telemetry';
 import { appLauncherService } from './appLauncher';
 import { otpAssistantService } from './otpAssistant';
 import { ActionRequest, ActionResult, ActionConfirmation } from '../types/actions';
+import { logger } from './logger';
+
+const log = logger.create('Reminders');
 
 export interface IntentActionResult {
   success: boolean;
@@ -452,7 +455,7 @@ class IntentActionsService {
           reminder.notificationId = notificationId;
         }
       } catch (notifError) {
-        console.warn('[Reminders] Native notification scheduling failed:', notifError);
+        log.warn(`[Reminders] Native notification scheduling failed: ${notifError}`);
       }
 
       this.pendingReminders.push(reminder);
@@ -843,17 +846,6 @@ class IntentActionsService {
         message: `${contact.name} doesn't have a phone number saved.`,
       };
     }
-
-    const _request: ActionRequest = {
-      type: 'whatsapp',
-      params: {
-        phone: phoneNumber,
-        message: messageContent,
-        contactName: contact.name,
-      },
-      source: 'voice',
-      timestamp: new Date().toISOString(),
-    };
 
     const confirmation: ActionConfirmation = {
       type: 'whatsapp',

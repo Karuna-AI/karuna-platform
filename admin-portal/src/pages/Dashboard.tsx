@@ -1,19 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
-
-interface DashboardMetrics {
-  users: { total: number; active: number; new_last_month: number; active_last_week: number };
-  circles: { total: number; avg_members: number };
-  alerts: { active: number; critical: number; high: number };
-  activity: { total_activities: number; active_circles: number };
-  timestamp: string;
-}
+import type { DashboardMetricsPayload } from '../types';
 
 const REFRESH_INTERVAL_MS = 30_000;
 
 export default function Dashboard() {
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [metrics, setMetrics] = useState<DashboardMetricsPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);

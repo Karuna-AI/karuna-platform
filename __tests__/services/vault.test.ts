@@ -113,6 +113,7 @@ const apptFixture = () => ({
 const docFixture = () => ({
   name: 'Aadhaar Card',
   category: 'id_proof' as const,
+  isEncrypted: false,
 });
 
 const routineFixture = () => ({
@@ -124,11 +125,12 @@ const routineFixture = () => ({
 });
 
 const noteFixture = () => ({
+  title: 'Daily reminder',
   content: 'Take BP reading daily',
-  category: 'health',
+  author: 'caregiver',
+  category: 'observation' as const,
   visibleToUser: true,
-  addedBy: 'caregiver' as const,
-  tags: [] as string[],
+  visibleToCaregivers: true,
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -612,7 +614,7 @@ describe('VaultService – documents CRUD', () => {
 
   it('getDocuments(category) filters by category', async () => {
     await vaultService.addDocument(docFixture());
-    await vaultService.addDocument({ name: 'PAN Card', category: 'bank' as const });
+    await vaultService.addDocument({ name: 'PAN Card', category: 'bank' as const, isEncrypted: false });
     expect(await vaultService.getDocuments('id_proof')).toHaveLength(1);
     expect(await vaultService.getDocuments('bank')).toHaveLength(1);
   });
@@ -779,7 +781,7 @@ describe('VaultService – AI lookup helpers', () => {
   });
 
   it('lookupDocumentLocation() finds document by name', async () => {
-    await vaultService.addDocument({ name: 'Passport', category: 'id_proof' as const, physicalLocation: 'Locker' });
+    await vaultService.addDocument({ name: 'Passport', category: 'id_proof' as const, physicalLocation: 'Locker', isEncrypted: false });
     const result = await vaultService.lookupDocumentLocation('Passport');
     expect(result.found).toBe(true);
     expect((result.data as any).physicalLocation).toBe('Locker');
@@ -858,13 +860,13 @@ describe('VaultService – search', () => {
   });
 
   it('search() finds matching document by name', async () => {
-    await vaultService.addDocument({ name: 'PAN Card', category: 'id_proof' as const, physicalLocation: 'Drawer' });
+    await vaultService.addDocument({ name: 'PAN Card', category: 'id_proof' as const, physicalLocation: 'Drawer', isEncrypted: false });
     const results = await vaultService.search('PAN');
     expect(results.some(r => r.type === 'document')).toBe(true);
   });
 
   it('search() finds matching document by physicalLocation', async () => {
-    await vaultService.addDocument({ name: 'Land Deed', category: 'property' as const, physicalLocation: 'Bank Locker' });
+    await vaultService.addDocument({ name: 'Land Deed', category: 'property' as const, physicalLocation: 'Bank Locker', isEncrypted: false });
     const results = await vaultService.search('Bank Locker');
     expect(results.some(r => r.type === 'document')).toBe(true);
   });

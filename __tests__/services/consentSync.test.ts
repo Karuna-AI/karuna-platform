@@ -38,7 +38,8 @@ describe('consent → server sync', () => {
     expect(res.success).toBe(true);
 
     expect(pushConsent).toHaveBeenCalled();
-    const arg = pushConsent.mock.calls[pushConsent.mock.calls.length - 1][0] as any;
+    const allCalls = pushConsent.mock.calls as unknown as any[][];
+    const arg = allCalls[allCalls.length - 1]![0] as any;
     expect(arg.globalDataSharing).toBe(true);
     expect(arg.consents.some((c: any) => c.category === 'health_data' && c.grantee === 'caregiver_member' && !c.revokedAt)).toBe(true);
   });

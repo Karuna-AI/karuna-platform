@@ -252,8 +252,6 @@ class OTPAssistantService {
    * Validate that we're not being asked for sensitive info
    */
   validateRequest(request: string): { safe: boolean; warning?: string } {
-    const _lowerRequest = request.toLowerCase();
-
     // Never ask for passwords
     if (/password/i.test(request)) {
       return {

@@ -62,7 +62,6 @@ class WeatherService {
   private apiKey: string;
   private cache: WeatherCache | null = null;
   private locationCache: LocationData | null = null;
-  private isInitialized: boolean = false;
 
   constructor() {
     // Load API key from app config (optional - Open-Meteo is used as primary, no key needed)

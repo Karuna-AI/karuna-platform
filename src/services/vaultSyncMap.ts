@@ -25,11 +25,27 @@ export type VaultEntityKind =
 /** Server entity types that the sync endpoint accepts (singular). */
 export type SyncEntityType = 'medication' | 'doctor' | 'appointment' | 'contact';
 
+/** Concrete vault entity for each syncable kind. */
+export interface SyncEntityMap {
+  doctor: VaultDoctor;
+  medication: VaultMedication;
+  appointment: VaultAppointment;
+  contact: VaultContact;
+}
+
 const SUPPORTED: SyncEntityType[] = ['medication', 'doctor', 'appointment', 'contact'];
 
 export function isSyncSupported(kind: VaultEntityKind): kind is SyncEntityType {
   return (SUPPORTED as string[]).includes(kind);
 }
+
+import type {
+  VaultDoctor,
+  VaultMedication,
+  VaultAppointment,
+  VaultContact,
+  VaultEntity,
+} from '../types/vault';
 
 /** Drop undefined/null values so we never send empty columns the server would reject. */
 function compact(obj: Record<string, unknown>): Record<string, unknown> {
@@ -38,7 +54,7 @@ function compact(obj: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
-function mapDoctor(e: Record<string, any>): Record<string, unknown> {
+function mapDoctor(e: VaultDoctor): Record<string, unknown> {
   const phones: string[] = Array.isArray(e.phoneNumbers) ? e.phoneNumbers : [];
   return compact({
     name: e.name,
@@ -51,7 +67,7 @@ function mapDoctor(e: Record<string, any>): Record<string, unknown> {
   });
 }
 
-function mapMedication(e: Record<string, any>): Record<string, unknown> {
+function mapMedication(e: VaultMedication): Record<string, unknown> {
   const timing = Array.isArray(e.times) && e.times.length ? e.times.join(', ') : e.customSchedule;
   return compact({
     name: e.name,
@@ -66,7 +82,7 @@ function mapMedication(e: Record<string, any>): Record<string, unknown> {
   });
 }
 
-function mapAppointment(e: Record<string, any>): Record<string, unknown> {
+function mapAppointment(e: VaultAppointment): Record<string, unknown> {
   return compact({
     doctor_name: e.withPerson,
     date: e.date,
@@ -78,7 +94,7 @@ function mapAppointment(e: Record<string, any>): Record<string, unknown> {
   });
 }
 
-function mapContact(e: Record<string, any>): Record<string, unknown> {
+function mapContact(e: VaultContact): Record<string, unknown> {
   const nums: { number?: string }[] = Array.isArray(e.phoneNumbers) ? e.phoneNumbers : [];
   return compact({
     name: e.name,
@@ -91,7 +107,7 @@ function mapContact(e: Record<string, any>): Record<string, unknown> {
   });
 }
 
-const MAPPERS: Record<SyncEntityType, (e: Record<string, any>) => Record<string, unknown>> = {
+const MAPPERS: { [K in SyncEntityType]: (e: SyncEntityMap[K]) => Record<string, unknown> } = {
   doctor: mapDoctor,
   medication: mapMedication,
   appointment: mapAppointment,
@@ -105,10 +121,14 @@ const MAPPERS: Record<SyncEntityType, (e: Record<string, any>) => Record<string,
  */
 export function toSyncPayload(
   kind: VaultEntityKind,
-  entity: Record<string, unknown>
+  entity: VaultEntity
 ): { entityType: SyncEntityType; data: Record<string, unknown> } | null {
   if (!isSyncSupported(kind)) return null;
-  const data = MAPPERS[kind](entity);
+  // The vault change listener only ever emits the entity matching `kind`, so
+  // this dispatch is type-safe by construction; the assertion bridges the
+  // base VaultEntity the listener signature carries.
+  const map = MAPPERS[kind] as (e: VaultEntity) => Record<string, unknown>;
+  const data = map(entity);
   if (Object.keys(data).length === 0) return null;
   return { entityType: kind, data };
 }

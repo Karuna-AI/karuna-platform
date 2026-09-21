@@ -20,7 +20,7 @@ import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
 
 import { ParsedIntent } from '../types';
-import { formatIntentForDisplay, getIntentSuggestion, isActionableIntent } from '../services/intents';
+import { isActionableIntent } from '../services/intents';
 import { intentActionsService, ConfirmationData } from '../services/intentActions';
 import { contactsService, Contact, ContactSearchResult } from '../services/contacts';
 import { ActionConfirmation } from '../types/actions';
@@ -42,6 +42,9 @@ import { parseKarunaUrl } from '../services/incomingLinks';
 import { CheckIn } from '../types/proactive';
 
 import Constants from 'expo-constants';
+import { logger } from '../services/logger';
+
+const log = logger.create('AppState');
 
 const GATEWAY_URL =
   (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
@@ -123,7 +126,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const safetyTimeout = setTimeout(() => {
-      console.warn('[AppState] Initialization timed out after 10s');
+      log.warn('[AppState] Initialization timed out after 10s');
       setIsSecurityInitialized(true);
     }, 10000);
 
@@ -136,7 +139,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
+            // shouldShowAlert is deprecated in expo-notifications ≥54;
+            // banner + list together reproduce the old alert behaviour.
+            shouldShowBanner: true,
+            shouldShowList: true,
             shouldPlaySound: true,
             shouldSetBadge: true,
           }),

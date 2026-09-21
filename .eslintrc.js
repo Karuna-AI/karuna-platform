@@ -29,7 +29,9 @@ module.exports = {
         'plugin:@typescript-eslint/recommended',
       ],
       rules: {
-        '@typescript-eslint/no-explicit-any': 'off',
+        // Downgraded from 'off' → 'warn' (2026-09-21): new `any`s are flagged;
+        // burn down the existing ~130 matches over time. See code-quality review.
+        '@typescript-eslint/no-explicit-any': 'warn',
         '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
         '@typescript-eslint/no-require-imports': 'off',
         'prefer-const': 'warn',
@@ -44,13 +46,13 @@ module.exports = {
     'android/',
     'ios/',
     'coverage/',
-    'server/',
-    'caregiver-portal/',
-    'admin-portal/',
+    // NOTE: 'server/' intentionally linted (0 errors, 5 unused-var warnings as of
+    // 2026-09-21 — left for the security track that owns server/). The portals
+    // were un-ignored on the same date; keep them lint-clean.
     'webpack.config.js',
   ],
   rules: {
-    'no-console': 'off',
+    'no-console': 'warn',
     'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     'no-empty': 'warn',
     'no-case-declarations': 'warn',

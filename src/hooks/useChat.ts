@@ -8,6 +8,9 @@ import { detectVaultQuery, executeVaultQuery, getVaultContextForAI } from '../se
 import { vaultService } from '../services/vault';
 import { detectHealthQuery, executeHealthQuery, getHealthContextForAI } from '../services/healthChatTools';
 import { weatherService } from '../services/weather';
+import { logger } from '../services/logger';
+
+const log = logger.create('Usechat');
 
 interface UseChatOptions {
   onResponse?: (response: string) => void;
@@ -77,14 +80,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         const savedMessages = await storageService.loadMessages();
         if (savedMessages.length > 0) {
           setMessages(savedMessages);
-          console.debug(`Loaded ${savedMessages.length} messages from storage`);
+          log.debug(`Loaded ${savedMessages.length} messages from storage`);
         }
 
         // Load memory and update system prompt
         const memoryContext = await memoryService.formatMemoryForPrompt();
         if (memoryContext) {
           updateSystemPromptWithMemory(memoryContext);
-          console.debug('Memory context loaded into system prompt');
+          log.debug('Memory context loaded into system prompt');
         }
       } catch (err) {
         console.error('Error loading chat history:', err);
@@ -271,7 +274,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     setLastUserMessage(null);
     // Clear storage but keep memory
     await storageService.clearMessages();
-    console.debug('Chat history cleared');
+    log.debug('Chat history cleared');
   }, []);
 
   const retryLastMessage = useCallback(async () => {

@@ -1,4 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from './logger';
+
+const log = logger.create('AuditLog');
 
 const STORAGE_KEY = '@karuna_audit_log';
 const LAST_PRUNE_KEY = '@karuna_audit_log_last_prune';
@@ -113,7 +116,7 @@ class AuditLogService {
       this.lastPruneTime = lastPruneRaw ? parseInt(lastPruneRaw, 10) : 0;
       await this.pruneOldEntries();
       this.isInitialized = true;
-      console.debug('[AuditLog] Initialized with', this.logs.length, 'entries');
+      log.debug(`[AuditLog] Initialized with ${this.logs.length} entries`);
     } catch (error) {
       console.error('[AuditLog] Initialization error:', error);
       this.logs = [];
@@ -382,7 +385,7 @@ class AuditLogService {
     this.lastPruneTime = Date.now();
 
     if (this.logs.length < originalCount) {
-      console.debug('[AuditLog] Pruned', originalCount - this.logs.length, 'old entries');
+      log.debug(`[AuditLog] Pruned ${originalCount - this.logs.length} old entries`);
     }
 
     await Promise.all([

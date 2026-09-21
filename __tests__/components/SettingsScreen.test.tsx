@@ -122,7 +122,6 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should change font size', () => {
-      const _fontSizes = ['small', 'medium', 'large', 'extra-large'];
       let currentSize = 'medium';
 
       currentSize = 'large';
@@ -167,7 +166,6 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should set notification sound', () => {
-      const _sounds = ['default', 'gentle', 'urgent', 'none'];
       let selectedSound = 'default';
 
       selectedSound = 'gentle';
@@ -186,7 +184,6 @@ describe('SettingsScreen Component', () => {
     });
 
     it('should set auto-lock timeout', () => {
-      const _timeouts = [1, 5, 15, 30, 60]; // minutes
       let selectedTimeout = 5;
 
       selectedTimeout = 15;

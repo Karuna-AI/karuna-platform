@@ -4,6 +4,9 @@
  * Real PostgreSQL integration tests for the Karuna server API.
  * Connects to a real karuna_test database — no mocks for DB or rate limiters.
  *
+ * GATED: this suite only runs with RUN_REALDB_TESTS=1 (see jest.config.js).
+ * Without it, Jest does not load this file at all.
+ *
  * Prerequisites:
  *   1. PostgreSQL running on localhost:5437
  *   2. karuna_test database created and migrated:

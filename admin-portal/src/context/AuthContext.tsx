@@ -1,16 +1,9 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../services/api';
-
-interface Admin {
-  id: string;
-  email: string;
-  name: string;
-  role: 'super_admin' | 'admin' | 'support';
-  permissions: Record<string, boolean>;
-}
+import type { AdminSession } from '../types';
 
 interface AuthContextType {
-  admin: Admin | null;
+  admin: AdminSession | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -19,7 +12,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [admin, setAdmin] = useState<Admin | null>(null);
+  const [admin, setAdmin] = useState<AdminSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

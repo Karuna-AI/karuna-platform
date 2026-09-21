@@ -13,6 +13,9 @@ import {
   isRTLLanguage,
   LANGUAGE_GROUPS,
 } from '../i18n/languages';
+import { logger } from './logger';
+
+const log = logger.create('Languageservice');
 
 export interface VoicePipelineConfig {
   sttLanguage: string;          // Whisper language code
@@ -37,8 +40,9 @@ class LanguageService {
    * Initialize language service with device locale
    */
   async initialize(): Promise<LanguageCode> {
-    // Get device locale
-    const deviceLocale = Localization.locale || 'en-US';
+    // Get device locale (expo-localization ≥15 exposes getLocales(); the
+    // legacy `Localization.locale` getter no longer exists)
+    const deviceLocale = Localization.getLocales()[0]?.languageTag || 'en-US';
     const languageCode = this.parseLocaleToLanguageCode(deviceLocale);
 
     this.currentLanguage = languageCode;
@@ -46,7 +50,7 @@ class LanguageService {
     // Load available TTS voices
     await this.loadAvailableTTSVoices();
 
-    console.debug(`[LanguageService] Initialized with language: ${languageCode}`);
+    log.debug(`[LanguageService] Initialized with language: ${languageCode}`);
     return languageCode;
   }
 
@@ -108,9 +112,9 @@ class LanguageService {
   setLanguage(code: LanguageCode): void {
     if (code in LANGUAGES) {
       this.currentLanguage = code;
-      console.debug(`[LanguageService] Language set to: ${code}`);
+      log.debug(`[LanguageService] Language set to: ${code}`);
     } else {
-      console.warn(`[LanguageService] Unknown language code: ${code}`);
+      log.warn(`[LanguageService] Unknown language code: ${code}`);
     }
   }
 

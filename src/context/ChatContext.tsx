@@ -68,7 +68,7 @@ interface ChatProviderProps {
 export function ChatProvider({
   children,
   onIntentDetected,
-}: ChatProviderProps): JSX.Element {
+}: ChatProviderProps): React.JSX.Element {
   const { settings } = useSettings();
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [pendingTranscript, setPendingTranscript] = useState<string | null>(null);

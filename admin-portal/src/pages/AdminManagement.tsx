@@ -3,14 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-
-interface AdminAccount {
-  id: string;
-  name: string;
-  email: string;
-  role: 'super_admin' | 'admin' | 'support';
-  created_at: string;
-}
+import type { AdminAccount } from '../types';
 
 interface CreateAdminForm {
   name: string;
@@ -48,7 +41,7 @@ export default function AdminManagement() {
     const result = await api.getAdmins();
     if (abortRef.current?.signal.aborted) return;
     if (result.success) {
-      setAdmins(result.data.admins ?? result.data ?? []);
+      setAdmins(result.data.admins ?? []);
     } else {
       setLoadError(result.error || 'Failed to load admins');
     }

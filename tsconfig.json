@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "module": "commonjs",
+    // module/moduleResolution intentionally inherited from expo/tsconfig.base
+    // (preserve/bundler). Overriding them here previously caused TS5098, which
+    // made `tsc --noEmit` silently check nothing.
     "lib": [
       "es2019"
     ],
@@ -10,7 +12,8 @@
     "noEmit": true,
     "isolatedModules": true,
     "strict": true,
-    "moduleResolution": "node",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "baseUrl": "./",
     "paths": {
       "@/*": [

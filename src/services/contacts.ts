@@ -1,5 +1,8 @@
 import { Platform } from 'react-native';
 import * as ExpoContacts from 'expo-contacts';
+import { logger } from './logger';
+
+const log = logger.create('Contacts');
 
 export interface Contact {
   id: string;
@@ -82,7 +85,7 @@ class ContactsService {
         }));
 
       this.isLoaded = true;
-      console.log('[Contacts] Loaded', this.contacts.length, 'contacts from device');
+      log.info(`[Contacts] Loaded ${this.contacts.length} contacts from device`);
       return this.contacts;
     } catch (error) {
       console.error('Error loading contacts:', error);

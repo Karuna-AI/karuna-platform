@@ -5,6 +5,9 @@ import { Platform } from 'react-native';
 import { auditLogService } from './auditLog';
 import { consentService } from './consent';
 import { MedicalRecord, MedicalRecordType, MEDICAL_RECORD_CATEGORIES } from '../types/health';
+import { logger } from './logger';
+
+const log = logger.create('MedicalRecords');
 
 const STORAGE_KEYS = {
   RECORDS: '@karuna_medical_records',
@@ -39,7 +42,7 @@ class MedicalRecordsService {
       }
 
       this.isInitialized = true;
-      console.log('[MedicalRecords] Initialized with', this.records.length, 'records');
+      log.info(`[MedicalRecords] Initialized with ${this.records.length} records`);
     } catch (error) {
       console.error('[MedicalRecords] Initialization error:', error);
       this.isInitialized = true;

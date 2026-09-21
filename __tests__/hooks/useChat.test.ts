@@ -237,10 +237,6 @@ describe('Chat Tools Integration', () => {
   });
 
   it('should execute tool and return result', async () => {
-    const _toolCall = {
-      name: 'get_health_data',
-      arguments: { type: 'vitals', limit: 1 },
-    };
 
     const result = {
       success: true,

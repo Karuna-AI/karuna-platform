@@ -97,3 +97,122 @@ export interface Pagination {
   total: number;
   pages: number;
 }
+
+// ---------------------------------------------------------------------------
+// Admin API response payloads (mirror server/admin.js response shapes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated result: `data` is defined whenever `success` is true, so
+ * `if (result.success) { result.data... }` narrows without extra checks.
+ */
+export type ApiResult<T> =
+  | { success: true; data: T; error?: undefined }
+  | { success: false; data?: undefined; error?: string };
+
+export type AdminRole = 'super_admin' | 'admin' | 'support';
+
+export interface AdminAccount {
+  id: string;
+  name: string;
+  email: string;
+  role: AdminRole;
+  created_at: string;
+}
+
+export interface AdminSession {
+  id: string;
+  email: string;
+  name: string;
+  role: AdminRole;
+  permissions: Record<string, boolean>;
+}
+
+// Auth
+export interface LoginPayload {
+  success: boolean;
+  token: string;
+  admin: AdminSession;
+}
+
+// Users
+export interface UsersListPayload {
+  users: AdminUser[];
+  pagination: Pagination;
+}
+
+export interface UserDetailPayload {
+  user: AdminUser;
+  circles: AdminCircle[];
+  recentActivity: AuditLogEntry[];
+}
+
+export interface CreateUserPayload {
+  success: boolean;
+  user?: AdminUser;
+  // NOTE: server also returns the plaintext temp password here (security
+  // finding M4, owned by the security track). Typed as optional so call sites
+  // don't depend on it.
+  tempPassword?: string;
+}
+
+// Circles
+export interface CirclesListPayload {
+  circles: AdminCircle[];
+  pagination: Pagination;
+}
+
+export interface CirclePayload {
+  circle: AdminCircle;
+}
+
+export interface CircleDetailPayload {
+  circle: AdminCircle;
+  members: CircleMember[];
+  stats: CircleStats;
+}
+
+// Dashboard
+export interface DashboardMetricsPayload {
+  users: { total: number; active: number; new_last_month: number; active_last_week: number };
+  circles: { total: number; avg_members: number };
+  alerts: { active: number; critical: number; high: number };
+  activity: { total_activities: number; active_circles: number };
+  timestamp: string;
+}
+
+// Feature flags
+export interface FeatureFlagsPayload {
+  flags: FeatureFlag[];
+}
+
+export interface FeatureFlagPayload {
+  flag: FeatureFlag;
+}
+
+// Audit logs
+export interface AuditLogsPayload {
+  logs: AuditLogEntry[];
+  pagination?: Pagination;
+}
+
+// Settings — GET /settings returns rows grouped by category
+// (server/admin.js groups system_settings by row.category).
+export interface SettingsPayload {
+  settings: Record<string, SystemSetting[]>;
+}
+
+// Admin management
+export interface AdminsPayload {
+  admins: AdminAccount[];
+}
+
+export interface CreateAdminPayload {
+  success: boolean;
+  admin: AdminAccount;
+}
+
+/** Generic shape for mutation endpoints that return `{ success: true }`. */
+export interface MutationPayload {
+  success: boolean;
+}

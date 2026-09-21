@@ -10,10 +10,12 @@ import {
   VitalReading,
   VitalSummary,
   StepsData,
-  HeartRateData,
   HealthSyncStatus,
   VITAL_TYPE_INFO,
 } from '../types/health';
+import { logger } from './logger';
+
+const log = logger.create('HealthData');
 
 const STORAGE_KEYS = {
   VITALS: '@karuna_health_vitals',
@@ -99,7 +101,7 @@ class HealthDataService {
       }
 
       this.isInitialized = true;
-      console.debug('[HealthData] Initialized with', this.vitals.length, 'readings');
+      log.debug(`[HealthData] Initialized with ${this.vitals.length} readings`);
     } catch (error) {
       console.error('[HealthData] Initialization error:', error);
       // Do NOT set isInitialized=true here — allow the next call to retry
@@ -281,7 +283,7 @@ class HealthDataService {
 
         const result = await Pedometer.getStepCountAsync(start, end);
 
-        console.debug('[HealthData] Pedometer steps:', result.steps);
+        log.debug(`[HealthData] Pedometer steps: ${result.steps}`);
 
         // Estimate distance and calories based on steps
         // Average stride length ~0.75m, ~0.04 calories per step
@@ -297,29 +299,13 @@ class HealthDataService {
         };
       }
     } catch (error) {
-      console.warn('[HealthData] Pedometer error, using simulated data:', error);
+      log.warn(`[HealthData] Pedometer error, using simulated data: ${error}`);
     }
 
     // On web, return null (no pedometer available)
     // On native without pedometer, return null - user can manually log
-    console.debug('[HealthData] Pedometer not available, steps require manual entry');
+    log.debug('[HealthData] Pedometer not available, steps require manual entry');
     return null;
-  }
-
-  /**
-   * Fetch heart rate via platform health adapter (HealthKit / Health Connect)
-   */
-  private async fetchHeartRateFromPlatform(): Promise<HeartRateData | null> {
-    try {
-      const now = new Date();
-      const dayStart = new Date(now);
-      dayStart.setHours(0, 0, 0, 0);
-      const sample = await healthAdapter.getHeartRate(dayStart, now);
-      if (!sample) return null;
-      return { bpm: sample.value, timestamp: sample.startDate };
-    } catch {
-      return null;
-    }
   }
 
   /**
@@ -352,12 +338,12 @@ class HealthDataService {
           .pushHealthReadings([serverReading])
           .then((r) => {
             if (!r.success) {
-              console.warn('[HealthData] vital upload failed:', r.error);
+              log.warn(`[HealthData] vital upload failed: ${r.error}`);
               this.notifySyncError(r.error || 'Upload failed');
             }
           })
           .catch((e) => {
-            console.warn('[HealthData] vital upload error:', e);
+            log.warn(`[HealthData] vital upload error: ${e}`);
             this.notifySyncError('Network error');
           });
       }

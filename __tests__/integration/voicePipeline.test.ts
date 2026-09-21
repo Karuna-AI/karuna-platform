@@ -28,7 +28,6 @@ describe('Voice Pipeline Integration', () => {
     });
 
     it('should handle language-specific pipeline', async () => {
-      const _language = 'hi';
 
       // STT should use Hindi language hint
       const sttConfig = { language: 'hi', model: 'whisper-1' };
@@ -113,7 +112,6 @@ describe('Voice Pipeline Integration', () => {
     });
 
     it('should handle network errors', async () => {
-      const _networkError = { code: 'NETWORK_ERROR' };
       const retryAvailable = true;
 
       expect(retryAvailable).toBe(true);

@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('LocalAuthentication');
+
 /**
  * Web mock for expo-local-authentication
  * Web doesn't have native biometric auth - always falls back to PIN
@@ -46,7 +50,7 @@ export async function authenticateAsync(_options?: {
 }> {
   // On web, we can't do biometric auth
   // Return a message suggesting to use PIN instead
-  console.warn('[LocalAuthentication] Biometric auth not available on web, use PIN');
+  log.warn('[LocalAuthentication] Biometric auth not available on web, use PIN');
 
   return {
     success: false,

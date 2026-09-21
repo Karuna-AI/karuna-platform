@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Message } from '../types';
 import { LanguageCode } from '../i18n/languages';
 import { encryptedDatabaseService } from './encryptedDatabase';
+import { logger } from './logger';
+
+const log = logger.create('Storage');
 
 // Storage keys — settings and metadata stay in plain AsyncStorage (non-sensitive).
 // Messages and memory are encrypted via encryptedDatabaseService.
@@ -31,12 +34,12 @@ async function _ensureEncryptedDb(): Promise<boolean> {
     const result = await encryptedDatabaseService.open();
     _encDbReady = result.success;
     if (!result.success) {
-      console.warn('[Storage] Encrypted DB unavailable, falling back to plaintext:', result.error);
+      log.warn(`[Storage] Encrypted DB unavailable, falling back to plaintext: ${result.error}`);
     }
     return _encDbReady;
   } catch (err) {
     _encDbReady = false;
-    console.warn('[Storage] Encrypted DB open error, falling back to plaintext:', err);
+    log.warn(`[Storage] Encrypted DB open error, falling back to plaintext: ${err}`);
     return false;
   }
 }
@@ -53,9 +56,9 @@ async function _migrateIfNeeded<T>(storageKey: string, collectionName: string): 
     }
     await encryptedDatabaseService.saveCollection(collectionName, data);
     await AsyncStorage.removeItem(storageKey);
-    console.debug(`[Storage] Migrated ${storageKey} → encrypted:${collectionName} (${data.length} items)`);
+    log.debug(`[Storage] Migrated ${storageKey} → encrypted:${collectionName} (${data.length} items)`);
   } catch (err) {
-    console.warn(`[Storage] Migration failed for ${storageKey}:`, err);
+    log.warn(`${`[Storage] Migration failed for ${storageKey}:`} ${err}`);
   }
 }
 
@@ -259,7 +262,7 @@ class StorageService {
           const plainMemory = JSON.parse(plainRaw) as UserMemory;
           await encryptedDatabaseService.saveCollection(ENC_COLLECTION.MEMORY, [plainMemory]);
           await AsyncStorage.removeItem(STORAGE_KEYS.MEMORY);
-          console.debug('[Storage] Migrated @karuna/memory → encrypted:user_memory');
+          log.debug('[Storage] Migrated @karuna/memory → encrypted:user_memory');
         }
         const items = await encryptedDatabaseService.getCollection<UserMemory>(ENC_COLLECTION.MEMORY);
         const memory = items.length > 0 ? items[0] : { ...DEFAULT_MEMORY };

@@ -12,7 +12,10 @@ jest.mock('../../src/services/openai', () => ({
   sendChatMessage: jest.fn(),
 }));
 
-import { transcribeAudio, streamChat, sendChatMessage } from '../../src/services/openai';
+import { transcribeAudio } from '../../src/services/openai';
+// streamChat/sendChatMessage were removed from the service; the mock below
+// still provides them, so pull them from the mocked module instead.
+const { streamChat, sendChatMessage } = jest.requireMock('../../src/services/openai');
 
 describe('OpenAI Service', () => {
   beforeEach(() => {
@@ -65,7 +68,7 @@ describe('OpenAI Service', () => {
       ];
       const mockCallback = jest.fn();
 
-      (streamChat as jest.Mock).mockImplementation(async (msgs, cb) => {
+      (streamChat as jest.Mock).mockImplementation(async (_msgs, cb) => {
         cb('Hello');
         cb(' there');
         cb('!');
@@ -95,7 +98,7 @@ describe('OpenAI Service', () => {
         arguments: { type: 'vitals' },
       };
 
-      (streamChat as jest.Mock).mockImplementation(async (msgs, cb) => {
+      (streamChat as jest.Mock).mockImplementation(async (_msgs, cb) => {
         cb({ toolCall: mockToolCall });
         return { toolCall: mockToolCall };
       });

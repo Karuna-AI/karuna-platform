@@ -3,6 +3,10 @@
  * Parses karuna:// URLs and maps them to internal screens
  */
 
+import { logger } from './logger';
+
+const log = logger.create('DeepLinks');
+
 export type DeepLinkScreen =
   | 'chat'
   | 'vault'
@@ -82,7 +86,7 @@ export function parseKarunaUrl(url: string): ParsedDeepLink | null {
 
     const screen = SCREEN_MAP[path];
     if (!screen) {
-      console.debug(`[DeepLinks] Unknown path: ${path}`);
+      log.debug(`[DeepLinks] Unknown path: ${path}`);
       return null;
     }
 

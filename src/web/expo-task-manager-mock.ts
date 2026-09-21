@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('ExpoTaskManagerMock');
+
 /**
  * Web mock for expo-task-manager
  * Task manager is not supported on web, so these are no-ops
@@ -10,7 +14,7 @@ export function defineTask(
   taskExecutor: (body: { data: any; error: any }) => any
 ): void {
   registeredTasks.set(taskName, taskExecutor);
-  console.warn(`[TaskManager] Task "${taskName}" defined but won't run on web`);
+  log.warn(`[TaskManager] Task "${taskName}" defined but won't run on web`);
 }
 
 export async function isTaskRegisteredAsync(taskName: string): Promise<boolean> {
