@@ -12,10 +12,30 @@ if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
 }
 
 // Support DATABASE_URL (Railway/cloud) or individual DB_* vars (local/Docker)
+//
+// TLS: when DB_CA_CERT is set (PEM of the DB server's CA), connections verify
+// the server certificate against it. Otherwise the previous compatibility
+// behavior is kept (rejectUnauthorized:false in production) but a loud
+// warning is emitted — unverified TLS is vulnerable to MITM.
+function buildSslConfig() {
+  if (process.env.DB_CA_CERT) {
+    return { rejectUnauthorized: true, ca: process.env.DB_CA_CERT };
+  }
+  if (process.env.NODE_ENV === 'production') {
+    console.warn(
+      '[DB] WARNING: DB_CA_CERT is not set — connecting to PostgreSQL without ' +
+      'verifying the server certificate. Set DB_CA_CERT to the PEM-encoded CA ' +
+      'certificate to enable verified TLS.'
+    );
+    return { rejectUnauthorized: false };
+  }
+  return false;
+}
+
 const dbConfig = process.env.DATABASE_URL
   ? {
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: buildSslConfig(),
     }
   : {
       host: process.env.DB_HOST || 'localhost',
@@ -23,7 +43,7 @@ const dbConfig = process.env.DATABASE_URL
       database: process.env.DB_NAME || 'karuna',
       user: process.env.DB_USER || 'karuna',
       password: process.env.DB_PASSWORD,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: buildSslConfig(),
     };
 
 const config = {

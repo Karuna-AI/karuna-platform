@@ -10,7 +10,7 @@ module.exports = {
 
   // Use ts-jest for TypeScript
   transform: {
-    '^.+\\.(ts|tsx)$': ['ts-jest', {
+    '^.+\.(ts|tsx)$': ['ts-jest', {
       tsconfig: {
         jsx: 'react',
         esModuleInterop: true,
@@ -18,11 +18,19 @@ module.exports = {
         moduleResolution: 'node',
         target: 'ES2020',
         module: 'commonjs',
-        strict: false,
+        // Compile tests under the same strict rules as the app (tsconfig.json).
+        // Previously `strict: false` here let type errors in tested code pass silently.
+        strict: true,
+        noUnusedLocals: true,
+        noUnusedParameters: true,
+        // The root tsconfig sets isolatedModules: true (needed for Metro), but
+        // ts-jest inherits it and silently switches to transpile-only mode with
+        // NO semantic type checking. Force it off so tests are actually type-checked.
+        isolatedModules: false,
         skipLibCheck: true,
       },
     }],
-    '^.+\\.(js|jsx)$': 'babel-jest',
+    '^.+\.(js|jsx)$': 'babel-jest',
   },
 
   moduleNameMapper: {
@@ -68,7 +76,7 @@ module.exports = {
 
   // Don't transform node_modules except specific packages
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native-web|expo-.*|@expo/.*|@react-native|react-native)/)',
+    'node_modules/(?!(react-native-web/|expo-.*/|@expo/.*/|@react-native/|react-native/|@noble/))',
   ],
 
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],

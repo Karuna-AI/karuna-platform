@@ -3,14 +3,54 @@
  *
  * Extracted verbatim from server/careCircle.js. careCircle.js mounts this at
  * the original section position so Express route registration order is
- * unchanged. The at-rest crypto helpers live here; JWT_SECRET is read from
- * process.env at call time (matches the original).
+ * unchanged.
+ *
+ * At-rest encryption uses a DEDICATED key-encryption key (RECOVERY_KEK env
+ * var, >= 32 bytes), NOT the JWT signing secret: a signing secret must not
+ * double as a data-encryption key (different rotation, different blast
+ * radius). See docs/VAULT_PIN_RECOVERY_DESIGN.md.
  */
 
 const crypto = require('crypto');
 
 module.exports = function mountRecoveryRoutes(router, deps) {
-const { db, authMiddleware, requirePermission, broadcastToCircle } = deps;
+const { db, authMiddleware, requireVerifiedEmail, requirePermission, broadcastToCircle } = deps;
+
+// Decode RECOVERY_KEK: accepts hex (>=64 chars), base64, or a raw string.
+function decodeKek(raw) {
+  const s = String(raw).trim();
+  if (/^[0-9a-fA-F]{64,}$/.test(s)) return Buffer.from(s, 'hex');
+  if (/^[A-Za-z0-9+/]{43,}={0,2}$/.test(s)) {
+    const b = Buffer.from(s, 'base64');
+    if (b.length >= 32) return b;
+  }
+  return Buffer.from(s, 'utf8');
+}
+
+const RECOVERY_KEK = (() => {
+  const raw = process.env.RECOVERY_KEK;
+  if (raw) {
+    const bytes = decodeKek(raw);
+    if (bytes.length >= 32) return bytes.subarray(0, 32);
+    const msg = 'RECOVERY_KEK is set but decodes to fewer than 32 bytes.';
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[Recovery] FATAL: ${msg}`);
+      process.exit(1);
+    }
+    console.warn(`[Recovery] WARNING: ${msg} Using an ephemeral dev key.`);
+    return crypto.randomBytes(32);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[Recovery] FATAL: RECOVERY_KEK environment variable is required in production.');
+    process.exit(1);
+  }
+  console.warn(
+    '[Recovery] WARNING: RECOVERY_KEK is not set — using an ephemeral in-memory key. ' +
+    'Escrowed recovery material cannot be decrypted after a restart. ' +
+    'Set a persistent 32-byte RECOVERY_KEK for any real deployment.'
+  );
+  return crypto.randomBytes(32);
+})();
 
 // ============================================================================
 // Vault PIN Recovery — caregiver-assisted escrow (H3 Phase 2/3)
@@ -18,11 +58,12 @@ const { db, authMiddleware, requirePermission, broadcastToCircle } = deps;
 // The device wraps its vault DEK under a random recovery key and escrows
 // { wrapped_dek, recovery_key } here. Recovery requires approval by ANOTHER
 // circle member (canApproveRecovery) before the gateway releases the material.
-// The recovery key is encrypted at rest (AES-256-GCM under a JWT_SECRET-derived
-// key) so a DB dump alone doesn't reveal it. See docs/VAULT_PIN_RECOVERY_DESIGN.md.
+// The recovery key is encrypted at rest (AES-256-GCM under the dedicated
+// RECOVERY_KEK) so a DB dump alone doesn't reveal it.
+// See docs/VAULT_PIN_RECOVERY_DESIGN.md.
 
 function recoveryAtRestKey() {
-  return crypto.createHash('sha256').update(`vault-recovery:${process.env.JWT_SECRET || ''}`).digest();
+  return RECOVERY_KEK;
 }
 function encryptAtRest(plaintext) {
   const iv = crypto.randomBytes(12);
@@ -42,7 +83,7 @@ async function getMemberRole(circleId, userId) {
 }
 
 // 1) Store/refresh this user's recovery escrow for the circle.
-router.post('/circles/:circleId/recovery/escrow', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/recovery/escrow', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     const { wrappedDek, recoveryKey } = req.body;
@@ -69,7 +110,7 @@ router.post('/circles/:circleId/recovery/escrow', authMiddleware, async (req, re
 });
 
 // 2) Request recovery (the user who forgot their PIN). Notifies approvers.
-router.post('/circles/:circleId/recovery/request', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/recovery/request', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     if (!(await getMemberRole(circleId, req.user.id))) {
@@ -109,7 +150,7 @@ router.post('/circles/:circleId/recovery/request', authMiddleware, async (req, r
 });
 
 // 3) Poll recovery status (requesting user).
-router.get('/circles/:circleId/recovery/status', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/recovery/status', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     const r = await db.query(
@@ -124,7 +165,7 @@ router.get('/circles/:circleId/recovery/status', authMiddleware, async (req, res
 });
 
 // 4) List pending recovery requests (approvers only).
-router.get('/circles/:circleId/recovery/requests', authMiddleware, requirePermission('canApproveRecovery'), async (req, res) => {
+router.get('/circles/:circleId/recovery/requests', authMiddleware, requireVerifiedEmail, requirePermission('canApproveRecovery'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const result = await db.query(
@@ -142,7 +183,7 @@ router.get('/circles/:circleId/recovery/requests', authMiddleware, requirePermis
 });
 
 // 5) Approve a pending recovery request (approver must differ from requester).
-router.post('/circles/:circleId/recovery/:requesterId/approve', authMiddleware, requirePermission('canApproveRecovery'), async (req, res) => {
+router.post('/circles/:circleId/recovery/:requesterId/approve', authMiddleware, requireVerifiedEmail, requirePermission('canApproveRecovery'), async (req, res) => {
   try {
     const { circleId, requesterId } = req.params;
     if (requesterId === req.user.id) {
@@ -172,7 +213,7 @@ router.post('/circles/:circleId/recovery/:requesterId/approve', authMiddleware, 
 });
 
 // 6) Fetch recovery material once approved (requesting user). One-shot → resets to 'active'.
-router.get('/circles/:circleId/recovery/material', authMiddleware, async (req, res) => {
+router.get('/circles/:circleId/recovery/material', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     if (!(await getMemberRole(circleId, req.user.id))) {

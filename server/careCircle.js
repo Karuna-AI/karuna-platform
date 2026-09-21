@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
 const db = require('./db');
 const realtime = require('./realtime');
+const { escapeHtml } = require('./utils');
 const router = express.Router();
 
 // Cross-instance realtime: deliver events published by other gateway instances
@@ -127,6 +128,20 @@ async function checkMemberLimit(circleId) {
 }
 
 async function checkVaultLimit(circleId, table) {
+  // Table names can't be parameterized — whitelist them. This function is only
+  // ever called with fixed vault table names from the route handlers below;
+  // anything else is a programming error, not a user input.
+  const VAULT_TABLES = new Set([
+    'vault_medications',
+    'vault_doctors',
+    'vault_appointments',
+    'vault_contacts',
+    'vault_accounts',
+    'vault_documents',
+  ]);
+  if (!VAULT_TABLES.has(table)) {
+    throw new Error(`checkVaultLimit: unexpected table "${table}"`);
+  }
   const tier = await getCircleTier(circleId);
   const limits = TIER_LIMITS[tier] || TIER_LIMITS.free;
   if (limits.maxVaultItemsPerCategory === Infinity) return { allowed: true };
@@ -184,6 +199,42 @@ const invitationRateLimiter = rateLimit({
   },
 });
 
+// Per-account failed-login throttling (complements the IP-based
+// loginRateLimiter, which a distributed attacker can sidestep). In-memory map
+// keyed by lowercase email: { count, windowStart }. After 5 failures inside a
+// 15-minute window, each further failure response is delayed 2^excess seconds
+// (excess = failures beyond 5). A successful login resets the counter.
+// Only existing accounts are tracked — unknown emails aren't per-account state.
+const FAILED_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const FAILED_LOGIN_FREE_ATTEMPTS = 5;
+const failedLogins = new Map();
+
+function recordFailedLogin(emailKey) {
+  const now = Date.now();
+  // Lazy sweep so the map can't grow unboundedly from enumeration attempts.
+  if (failedLogins.size > 10000) {
+    for (const [key, entry] of failedLogins) {
+      if (now - entry.windowStart > FAILED_LOGIN_WINDOW_MS) failedLogins.delete(key);
+    }
+  }
+  const entry = failedLogins.get(emailKey);
+  if (!entry || now - entry.windowStart > FAILED_LOGIN_WINDOW_MS) {
+    failedLogins.set(emailKey, { count: 1, windowStart: now });
+    return 0;
+  }
+  entry.count += 1;
+  const excess = entry.count - FAILED_LOGIN_FREE_ATTEMPTS;
+  return excess > 0 ? Math.pow(2, excess) : 0;
+}
+
+function clearFailedLogins(emailKey) {
+  failedLogins.delete(emailKey);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Password reset rate limiter: 3 attempts per hour per IP
 const passwordResetRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -233,6 +284,7 @@ const ROLE_PERMISSIONS = {
     canEditCircle: true,
     canDeleteCircle: true,
     canApproveRecovery: true,
+    canManageAlerts: true,
   },
   caregiver: {
     canViewAccounts: true,
@@ -258,6 +310,7 @@ const ROLE_PERMISSIONS = {
     canEditCircle: false,
     canDeleteCircle: false,
     canApproveRecovery: true,
+    canManageAlerts: true,
   },
   viewer: {
     canViewAccounts: false,
@@ -283,6 +336,7 @@ const ROLE_PERMISSIONS = {
     canEditCircle: false,
     canDeleteCircle: false,
     canApproveRecovery: false,
+    canManageAlerts: false,
   },
 };
 
@@ -303,7 +357,7 @@ async function sendVerificationEmail(email, name, verificationUrl) {
     console.warn('[Email] RESEND_API_KEY not set — skipping verification email to:', email);
     return;
   }
-  const firstName = name.split(' ')[0];
+  const firstName = escapeHtml(name.split(' ')[0]);
   await resend.emails.send({
     from: FROM_EMAIL,
     to: email,
@@ -317,7 +371,7 @@ async function sendVerificationEmail(email, name, verificationUrl) {
       Thank you for joining Karuna — your personal AI care companion. Please verify
       your email address to activate your account.
     </p>
-    <a href="${verificationUrl}"
+    <a href="${escapeHtml(verificationUrl)}"
        style="display:inline-block;margin:24px 0;padding:14px 28px;background:#2563eb;
               color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
       Verify Email Address
@@ -341,7 +395,7 @@ async function sendPasswordResetEmail(email, name, resetUrl) {
     console.warn('[Email] RESEND_API_KEY not set — skipping password reset email to:', email);
     return;
   }
-  const firstName = name.split(' ')[0];
+  const firstName = escapeHtml(name.split(' ')[0]);
   await resend.emails.send({
     from: FROM_EMAIL,
     to: email,
@@ -355,7 +409,7 @@ async function sendPasswordResetEmail(email, name, resetUrl) {
       Hi ${firstName}, we received a request to reset your Karuna account password.
       Click the button below to choose a new password.
     </p>
-    <a href="${resetUrl}"
+    <a href="${escapeHtml(resetUrl)}"
        style="display:inline-block;margin:24px 0;padding:14px 28px;background:#dc2626;
               color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
       Reset Password
@@ -418,7 +472,10 @@ async function verifyPassword(password, hash, userId = null) {
 
 function createJWT(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, name: user.name },
+    // tv = token_version from the users row; bumping it invalidates all
+    // previously issued tokens (password change/reset). Defaults to 1 for
+    // rows created before the token_version migration ran.
+    { id: user.id, email: user.email, name: user.name, tv: user.token_version ?? 1 },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
@@ -426,7 +483,9 @@ function createJWT(user) {
 
 function verifyJWT(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    // Pin the algorithm: without this, jwt.verify would accept tokens signed
+    // with any algorithm the library supports (algorithm-confusion attacks).
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch (error) {
     // Log JWT verification failures for security monitoring
     if (error.name === 'TokenExpiredError') {
@@ -468,7 +527,7 @@ function getCookie(req, name) {
 // Authentication Middleware
 // ============================================================================
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   // Prefer httpOnly cookie; fall back to Bearer header for mobile/API clients
   let token = getCookie(req, AUTH_COOKIE_NAME);
   if (!token) {
@@ -488,7 +547,37 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  req.user = decoded;
+  // Session revocation: the JWT carries the user's token_version at issue
+  // time. Password changes/resets bump the stored version, which must reject
+  // previously issued tokens. Fail closed: a token without a tv claim
+  // (pre-hardening, or forged without knowledge of the scheme) is rejected.
+  try {
+    const userResult = await db.query(
+      'SELECT id, email, name, is_verified, is_active, token_version FROM users WHERE id = $1',
+      [decoded.id]
+    );
+    if (userResult.rows.length === 0 || userResult.rows[0].is_active === false) {
+      return res.status(401).json({ error: 'Account no longer exists or is deactivated' });
+    }
+    const user = userResult.rows[0];
+    if (decoded.tv !== user.token_version) {
+      return res.status(401).json({ error: 'Session revoked. Please sign in again.' });
+    }
+    req.user = user;
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    return res.status(500).json({ error: 'Authentication failed' });
+  }
+  next();
+}
+
+// Require a verified email for sensitive writes/reads. Reads
+// req.user.is_verified from the DB row loaded by authMiddleware — no second
+// DB lookup. Verification endpoints themselves are never gated by this.
+function requireVerifiedEmail(req, res, next) {
+  if (!req.user || req.user.is_verified !== true) {
+    return res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' });
+  }
   next();
 }
 
@@ -668,6 +757,29 @@ function requireConsent(category) {
   };
 }
 
+// Non-middleware version of requireConsent for section-level gating (e.g. the
+// dashboard health section). Same logic, fails closed (false on any error).
+async function hasCategoryConsent(circleId, userId, category) {
+  try {
+    const memberResult = await db.query(
+      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
+      [circleId, userId]
+    );
+    if (memberResult.rows.length === 0) return false;
+    const { role } = memberResult.rows[0];
+    if (role === 'owner') return true;
+    const circleResult = await db.query(
+      'SELECT patient_consent FROM care_circles WHERE id = $1',
+      [circleId]
+    );
+    const consentData = circleResult.rows[0]?.patient_consent || {};
+    return checkConsent(consentData, role, category);
+  } catch (error) {
+    console.error('Consent check error:', error);
+    return false;
+  }
+}
+
 // ============================================================================
 // Global CSRF enforcement for all mutating routes
 // ============================================================================
@@ -718,7 +830,7 @@ router.post('/auth/register', registrationRateLimiter, async (req, res) => {
     const result = await db.query(
       `INSERT INTO users (email, password_hash, name, phone, is_verified, email_verification_token_hash, email_verification_expires_at)
        VALUES ($1, $2, $3, $4, false, $5, $6)
-       RETURNING id, email, name`,
+       RETURNING id, email, name, token_version`,
       [email.toLowerCase(), passwordHash, name, phone, hashToken(verificationToken), verificationExpiresAt]
     );
 
@@ -767,11 +879,16 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, name, password_hash, is_verified, is_active FROM users WHERE email = $1',
+      'SELECT id, email, name, password_hash, is_verified, is_active, token_version FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
     if (result.rows.length === 0) {
+      // Track failures for unknown emails as well: the progressive delay
+      // must apply identically whether or not the account exists, otherwise
+      // response timing becomes an account-enumeration oracle.
+      const delaySec = recordFailedLogin(email.toLowerCase());
+      if (delaySec > 0) await sleep(delaySec * 1000);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -783,8 +900,15 @@ router.post('/auth/login', loginRateLimiter, async (req, res) => {
 
     const passwordValid = await verifyPassword(password, user.password_hash, user.id);
     if (!passwordValid) {
+      // Progressive per-account delay after repeated failures (credential
+      // stuffing / password spraying mitigation).
+      const delaySec = recordFailedLogin(email.toLowerCase());
+      if (delaySec > 0) await sleep(delaySec * 1000);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+
+    // Successful login: reset the per-account failure counter.
+    clearFailedLogins(email.toLowerCase());
 
     // Upgrade legacy hash to bcrypt on successful login
     if (!user.password_hash.startsWith('$2b$') && !user.password_hash.startsWith('$2a$')) {
@@ -947,8 +1071,9 @@ router.post('/auth/forgot-password', passwordResetRateLimiter, async (req, res) 
     await sendPasswordResetEmail(user.email, user.name, resetUrl);
 
     const response = { success: true, message: 'If that email is registered, you will receive a reset link.' };
-    // Expose token in non-production so it can be used without email
-    if (process.env.NODE_ENV !== 'production') {
+    // Expose the token only when explicitly enabled (local dev/testing).
+    // Never in production: the token is a credential-equivalent.
+    if (process.env.EXPOSE_RESET_TOKENS === 'true') {
       response.resetToken = resetToken;
       response.resetUrl = resetUrl;
     }
@@ -981,7 +1106,9 @@ router.post('/auth/reset-password', passwordResetRateLimiter, async (req, res) =
     const { user_id, email } = result.rows[0];
     const passwordHash = await hashPassword(password);
 
-    await db.query('UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [passwordHash, user_id]);
+    // Bump token_version so every session issued before this reset is
+    // rejected by authMiddleware (session revocation on credential change).
+    await db.query('UPDATE users SET password_hash = $1, token_version = token_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [passwordHash, user_id]);
     await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user_id]);
 
     console.log(`[Security] Password reset completed for: ${email}`);
@@ -1247,7 +1374,7 @@ router.post('/auth/delete-account', gdprRateLimiter, authMiddleware, async (req,
 // ============================================================================
 
 // Create a new care circle
-router.post('/circles', authMiddleware, async (req, res) => {
+router.post('/circles', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { name, elderlyName } = req.body;
 
@@ -1373,7 +1500,7 @@ router.get('/circles/:circleId', authMiddleware, async (req, res) => {
 });
 
 // Update care circle
-router.put('/circles/:circleId', authMiddleware, requirePermission('canEditCircle'), async (req, res) => {
+router.put('/circles/:circleId', authMiddleware, requireVerifiedEmail, requirePermission('canEditCircle'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { name, elderlyName } = req.body;
@@ -1412,7 +1539,7 @@ router.put('/circles/:circleId', authMiddleware, requirePermission('canEditCircl
 });
 
 // Delete care circle
-router.delete('/circles/:circleId', authMiddleware, requirePermission('canDeleteCircle'), async (req, res) => {
+router.delete('/circles/:circleId', authMiddleware, requireVerifiedEmail, requirePermission('canDeleteCircle'), async (req, res) => {
   try {
     const { circleId } = req.params;
 
@@ -1437,7 +1564,7 @@ router.delete('/circles/:circleId', authMiddleware, requirePermission('canDelete
 // ============================================================================
 
 // Invite a member
-router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canInviteMembers'), async (req, res) => {
+router.post('/circles/:circleId/invite', authMiddleware, requireVerifiedEmail, requirePermission('canInviteMembers'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { email, role } = req.body;
@@ -1497,7 +1624,9 @@ router.post('/circles/:circleId/invite', authMiddleware, requirePermission('canI
 
     const invitation = result.rows[0];
 
-    console.log(`Invitation created for ${email}: /invite/${token}`);
+    // Log the invitation id/email only — the raw token is a bearer credential
+    // and must never appear in logs (it grants circle membership).
+    console.log(`Invitation created: id=${invitation.id} email=${email}`);
 
     res.json({
       success: true,
@@ -1544,15 +1673,50 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
       return res.status(400).json({ error: 'Invitation has expired' });
     }
 
-    // Check if user exists or create new
+    // Check if user exists or create new. Case-insensitive match: a stored
+    // address with different casing is still the same account and must take
+    // the authenticated existing-user path below, not the new-user path.
+    // is_active is selected here so the active-account check below needs no
+    // second query.
     let user;
     const existingUser = await db.query(
-      'SELECT id, email, name FROM users WHERE email = $1',
+      'SELECT id, email, name, token_version, is_active FROM users WHERE LOWER(email) = LOWER($1)',
       [invitation.email]
     );
 
     if (existingUser.rows.length > 0) {
-      user = existingUser.rows[0];
+      // Existing account: the invitation token alone must NOT mint a session
+      // for it — anyone holding the link could otherwise impersonate the
+      // invitee. The requester must already be signed in as that account, with
+      // a current (non-revoked) session whose email matches the invitation.
+      const authHeader = req.headers.authorization;
+      const bearer = authHeader && authHeader.startsWith('Bearer ')
+        ? authHeader.substring(7)
+        : getCookie(req, AUTH_COOKIE_NAME);
+      const authed = bearer ? verifyJWT(bearer) : null;
+      const invitee = existingUser.rows[0];
+      const authedEmail = typeof authed?.email === 'string' ? authed.email.trim().toLowerCase() : '';
+      const invitationEmail = String(invitation.email).trim().toLowerCase();
+      if (
+        !authed ||
+        authed.id !== invitee.id ||
+        authedEmail !== invitationEmail ||
+        authed.tv !== invitee.token_version
+      ) {
+        return res.status(401).json({
+          error: 'This invitation is for an existing account. Please sign in as that account, then accept the invitation again.',
+          needsSignIn: true,
+        });
+      }
+      // The JWT is only as fresh as its issue time — confirm the account is
+      // still active before minting a new session for it.
+      if (invitee.is_active === false) {
+        return res.status(401).json({
+          error: 'This invitation is for an existing account. Please sign in as that account, then accept the invitation again.',
+          needsSignIn: true,
+        });
+      }
+      user = invitee;
     } else {
       if (!password) {
         return res.status(400).json({ error: 'Password required for new account', needsPassword: true });
@@ -1562,7 +1726,7 @@ router.post('/invitations/:token/accept', invitationRateLimiter, async (req, res
       const newUserResult = await db.query(
         `INSERT INTO users (email, password_hash, name, is_verified)
          VALUES ($1, $2, $3, true)
-         RETURNING id, email, name`,
+         RETURNING id, email, name, token_version`,
         [invitation.email, newPasswordHash, invitation.name]
       );
       user = newUserResult.rows[0];
@@ -1652,7 +1816,7 @@ router.get('/invitations/:token', invitationRateLimiter, async (req, res) => {
 // ============================================================================
 
 // Remove member
-router.delete('/circles/:circleId/members/:memberId', authMiddleware, requirePermission('canRemoveMembers'), async (req, res) => {
+router.delete('/circles/:circleId/members/:memberId', authMiddleware, requireVerifiedEmail, requirePermission('canRemoveMembers'), async (req, res) => {
   try {
     const { circleId, memberId } = req.params;
 
@@ -1683,7 +1847,7 @@ router.delete('/circles/:circleId/members/:memberId', authMiddleware, requirePer
 });
 
 // Update member role
-router.put('/circles/:circleId/members/:memberId', authMiddleware, requirePermission('canChangeRoles'), async (req, res) => {
+router.put('/circles/:circleId/members/:memberId', authMiddleware, requireVerifiedEmail, requirePermission('canChangeRoles'), async (req, res) => {
   try {
     const { circleId, memberId } = req.params;
     const { role } = req.body;
@@ -1735,7 +1899,7 @@ function parsePagination(query, defaultLimit = 100) {
 // ============================================================================
 
 // Sync patient consent preferences from device to server (owner only)
-router.put('/circles/:circleId/consent', authMiddleware, requirePermission('canEditCircle'), async (req, res) => {
+router.put('/circles/:circleId/consent', authMiddleware, requireVerifiedEmail, requirePermission('canEditCircle'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { consent } = req.body;
@@ -1932,15 +2096,15 @@ function vaultListRoute(table, permissionKey, transform) {
   };
 }
 
-router.get('/circles/:circleId/vault/medications',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_medications',  'canViewMedications', null));
-router.get('/circles/:circleId/vault/doctors',        authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_doctors',       'canViewDoctors',    null));
-router.get('/circles/:circleId/vault/appointments',   authMiddleware, requireConsent('health_data'),        vaultListRoute('vault_appointments',  'canViewAppointments', null));
-router.get('/circles/:circleId/vault/contacts',       authMiddleware, requireConsent('contact_info'),       vaultListRoute('vault_contacts',      'canViewContacts',   null));
-router.get('/circles/:circleId/vault/accounts',       authMiddleware, requireConsent('financial_data'),     vaultListRoute('vault_accounts',      'canViewAccounts',   decryptAccount));
-router.get('/circles/:circleId/vault/documents',      authMiddleware, requireConsent('personal_documents'), vaultListRoute('vault_documents',     'canViewDocuments',  stripDocumentFileData));
+router.get('/circles/:circleId/vault/medications',   authMiddleware, requireVerifiedEmail, requireConsent('health_data'),        vaultListRoute('vault_medications',  'canViewMedications', null));
+router.get('/circles/:circleId/vault/doctors',        authMiddleware, requireVerifiedEmail, requireConsent('health_data'),        vaultListRoute('vault_doctors',       'canViewDoctors',    null));
+router.get('/circles/:circleId/vault/appointments',   authMiddleware, requireVerifiedEmail, requireConsent('health_data'),        vaultListRoute('vault_appointments',  'canViewAppointments', null));
+router.get('/circles/:circleId/vault/contacts',       authMiddleware, requireVerifiedEmail, requireConsent('contact_info'),       vaultListRoute('vault_contacts',      'canViewContacts',   null));
+router.get('/circles/:circleId/vault/accounts',       authMiddleware, requireVerifiedEmail, requireConsent('financial_data'),     vaultListRoute('vault_accounts',      'canViewAccounts',   decryptAccount));
+router.get('/circles/:circleId/vault/documents',      authMiddleware, requireVerifiedEmail, requireConsent('personal_documents'), vaultListRoute('vault_documents',     'canViewDocuments',  stripDocumentFileData));
 
 // Sync changes from device (bidirectional sync)
-router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/sync', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     const { changes } = req.body;
@@ -2136,7 +2300,7 @@ router.post('/circles/:circleId/sync', authMiddleware, async (req, res) => {
 // Extracted to ./routes/recovery.js (at-rest crypto helpers + routes moved
 // verbatim). Mounted here so Express route registration order is unchanged.
 
-require('./routes/recovery')(router, { db, authMiddleware, requirePermission, broadcastToCircle });
+require('./routes/recovery')(router, { db, authMiddleware, requireVerifiedEmail, requirePermission, broadcastToCircle });
 
 // ============================================================================
 // Vault CRUD Routes
@@ -2147,6 +2311,7 @@ require('./routes/recovery')(router, { db, authMiddleware, requirePermission, br
 require('./routes/vaultCrud')(router, {
   db,
   authMiddleware,
+  requireVerifiedEmail,
   requirePermission,
   checkVaultLimit,
   encryptField,
@@ -2171,14 +2336,14 @@ require('./routes/notes')(router, { db, authMiddleware, ROLE_PERMISSIONS });
 // VITAL_THRESHOLDS, checkVitalThreshold and fireVitalAlertIfAbnormal moved
 // there as well — only the health sync route uses them.
 
-require('./routes/monitoring')(router, { db, authMiddleware, requireConsent, broadcastToCircle });
+require('./routes/monitoring')(router, { db, authMiddleware, requireVerifiedEmail, requirePermission, requireConsent, broadcastToCircle });
 
 // ============================================================================
 // Dashboard Summary Route
 // ============================================================================
 // Extracted to ./routes/dashboard.js (incl. the camelizeRow helper).
 
-require('./routes/dashboard')(router, { db, authMiddleware });
+require('./routes/dashboard')(router, { db, authMiddleware, hasCategoryConsent });
 
 // ============================================================================
 // WebSocket Support
@@ -2385,11 +2550,18 @@ router.post('/notifications/:notificationId/read', authMiddleware, async (req, r
   try {
     const { notificationId } = req.params;
 
-    await db.query(
+    // Scope to the caller's own notifications: without the recipient check,
+    // any signed-in user could mark (or probe the existence of) another
+    // user's notifications by id.
+    const result = await db.query(
       `UPDATE notification_queue SET status = 'sent', sent_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [notificationId]
+       WHERE id = $1 AND recipient_type = 'user' AND recipient_id = $2`,
+      [notificationId, req.user.id]
     );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -2496,6 +2668,10 @@ setTimeout(() => {
 // server/notificationWorker.js — WS push + email for high/urgent, retries,
 // multi-instance safe via the realtime advisory lock.
 const { startNotificationWorker } = require('./notificationWorker');
+// Admin JWT middleware for the global ops endpoints below (archival). The
+// archive route used to accept any circle-owner care JWT — a global,
+// cross-circle data operation must require an admin session instead.
+const { adminAuthMiddleware, requirePermission: requireAdminPermission } = require('./admin');
 startNotificationWorker({
   db,
   broadcast: broadcastToCircle,
@@ -2504,18 +2680,12 @@ startNotificationWorker({
   fromEmail: FROM_EMAIL,
 });
 
-// Admin endpoint to trigger manual archival (used by ops/cron jobs)
-router.post('/admin/archive', authMiddleware, async (req, res) => {
+// Admin endpoint to trigger manual archival (used by ops/cron jobs).
+// Global cross-circle data operation: requires an admin JWT with the
+// system-maintenance permission — a care JWT (even a circle owner's) is not
+// sufficient.
+router.post('/admin/archive', adminAuthMiddleware, requireAdminPermission('canManageSettings'), async (req, res) => {
   try {
-    // Only circle owners can trigger archival
-    const memberResult = await db.query(
-      `SELECT cm.role FROM circle_members cm WHERE cm.user_id = $1 LIMIT 1`,
-      [req.user.id]
-    );
-    if (memberResult.rows.length === 0 || memberResult.rows[0].role !== 'owner') {
-      return res.status(403).json({ error: 'Permission denied' });
-    }
-
     const rows = await runArchival();
     res.json({ success: true, archived: rows });
   } catch (error) {

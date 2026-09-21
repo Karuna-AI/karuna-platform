@@ -12,6 +12,7 @@ module.exports = function mountVaultCrudRoutes(router, deps) {
 const {
   db,
   authMiddleware,
+  requireVerifiedEmail,
   requirePermission,
   checkVaultLimit,
   encryptField,
@@ -45,7 +46,7 @@ function requireVaultCapacity(table) {
 // --- Medications ---
 
 // Create medication
-router.post('/circles/:circleId/vault/medications', authMiddleware, requirePermission('canEditMedications'), requireVaultCapacity('vault_medications'), async (req, res) => {
+router.post('/circles/:circleId/vault/medications', authMiddleware, requireVerifiedEmail, requirePermission('canEditMedications'), requireVaultCapacity('vault_medications'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { name, dosage, frequency, timing, instructions, prescribingDoctor, pharmacy, refillDate, isActive } = req.body;
@@ -70,7 +71,7 @@ router.post('/circles/:circleId/vault/medications', authMiddleware, requirePermi
 });
 
 // Update medication
-router.put('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requirePermission('canEditMedications'), async (req, res) => {
+router.put('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requireVerifiedEmail, requirePermission('canEditMedications'), async (req, res) => {
   try {
     const { circleId, medicationId } = req.params;
     const { name, dosage, frequency, timing, instructions, prescribingDoctor, pharmacy, refillDate, isActive } = req.body;
@@ -104,7 +105,7 @@ router.put('/circles/:circleId/vault/medications/:medicationId', authMiddleware,
 });
 
 // Delete medication
-router.delete('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requirePermission('canEditMedications'), async (req, res) => {
+router.delete('/circles/:circleId/vault/medications/:medicationId', authMiddleware, requireVerifiedEmail, requirePermission('canEditMedications'), async (req, res) => {
   try {
     const { circleId, medicationId } = req.params;
 
@@ -127,7 +128,7 @@ router.delete('/circles/:circleId/vault/medications/:medicationId', authMiddlewa
 // --- Doctors ---
 
 // Create doctor
-router.post('/circles/:circleId/vault/doctors', authMiddleware, requirePermission('canEditDoctors'), requireVaultCapacity('vault_doctors'), async (req, res) => {
+router.post('/circles/:circleId/vault/doctors', authMiddleware, requireVerifiedEmail, requirePermission('canEditDoctors'), requireVaultCapacity('vault_doctors'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { name, specialty, hospital, phone, email, address, notes, isPrimary } = req.body;
@@ -152,7 +153,7 @@ router.post('/circles/:circleId/vault/doctors', authMiddleware, requirePermissio
 });
 
 // Update doctor
-router.put('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requirePermission('canEditDoctors'), async (req, res) => {
+router.put('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requireVerifiedEmail, requirePermission('canEditDoctors'), async (req, res) => {
   try {
     const { circleId, doctorId } = req.params;
     const { name, specialty, hospital, phone, email, address, notes, isPrimary } = req.body;
@@ -186,7 +187,7 @@ router.put('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, require
 });
 
 // Delete doctor
-router.delete('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requirePermission('canEditDoctors'), async (req, res) => {
+router.delete('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requireVerifiedEmail, requirePermission('canEditDoctors'), async (req, res) => {
   try {
     const { circleId, doctorId } = req.params;
 
@@ -209,7 +210,7 @@ router.delete('/circles/:circleId/vault/doctors/:doctorId', authMiddleware, requ
 // --- Contacts ---
 
 // Create contact
-router.post('/circles/:circleId/vault/contacts', authMiddleware, requirePermission('canEditContacts'), requireVaultCapacity('vault_contacts'), async (req, res) => {
+router.post('/circles/:circleId/vault/contacts', authMiddleware, requireVerifiedEmail, requirePermission('canEditContacts'), requireVaultCapacity('vault_contacts'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { name, relationship, phone, email, address, isEmergency, notes } = req.body;
@@ -234,7 +235,7 @@ router.post('/circles/:circleId/vault/contacts', authMiddleware, requirePermissi
 });
 
 // Update contact
-router.put('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requirePermission('canEditContacts'), async (req, res) => {
+router.put('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requireVerifiedEmail, requirePermission('canEditContacts'), async (req, res) => {
   try {
     const { circleId, contactId } = req.params;
     const { name, relationship, phone, email, address, isEmergency, notes } = req.body;
@@ -267,7 +268,7 @@ router.put('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requi
 });
 
 // Delete contact
-router.delete('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requirePermission('canEditContacts'), async (req, res) => {
+router.delete('/circles/:circleId/vault/contacts/:contactId', authMiddleware, requireVerifiedEmail, requirePermission('canEditContacts'), async (req, res) => {
   try {
     const { circleId, contactId } = req.params;
 
@@ -290,7 +291,7 @@ router.delete('/circles/:circleId/vault/contacts/:contactId', authMiddleware, re
 // --- Appointments ---
 
 // Create appointment
-router.post('/circles/:circleId/vault/appointments', authMiddleware, requirePermission('canEditAppointments'), requireVaultCapacity('vault_appointments'), async (req, res) => {
+router.post('/circles/:circleId/vault/appointments', authMiddleware, requireVerifiedEmail, requirePermission('canEditAppointments'), requireVaultCapacity('vault_appointments'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { doctorId, doctorName, purpose, date, time, location, notes, reminder, status } = req.body;
@@ -315,7 +316,7 @@ router.post('/circles/:circleId/vault/appointments', authMiddleware, requirePerm
 });
 
 // Update appointment
-router.put('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requirePermission('canEditAppointments'), async (req, res) => {
+router.put('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requireVerifiedEmail, requirePermission('canEditAppointments'), async (req, res) => {
   try {
     const { circleId, appointmentId } = req.params;
     const { doctorId, doctorName, purpose, date, time, location, notes, reminder, status } = req.body;
@@ -349,7 +350,7 @@ router.put('/circles/:circleId/vault/appointments/:appointmentId', authMiddlewar
 });
 
 // Delete appointment
-router.delete('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requirePermission('canEditAppointments'), async (req, res) => {
+router.delete('/circles/:circleId/vault/appointments/:appointmentId', authMiddleware, requireVerifiedEmail, requirePermission('canEditAppointments'), async (req, res) => {
   try {
     const { circleId, appointmentId } = req.params;
 
@@ -372,7 +373,7 @@ router.delete('/circles/:circleId/vault/appointments/:appointmentId', authMiddle
 // --- Accounts ---
 
 // Create account
-router.post('/circles/:circleId/vault/accounts', authMiddleware, requirePermission('canEditAccounts'), requireVaultCapacity('vault_accounts'), async (req, res) => {
+router.post('/circles/:circleId/vault/accounts', authMiddleware, requireVerifiedEmail, requirePermission('canEditAccounts'), requireVaultCapacity('vault_accounts'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { name, type, institution, accountNumber, ifscCode, branch, nominee, notes } = req.body;
@@ -397,7 +398,7 @@ router.post('/circles/:circleId/vault/accounts', authMiddleware, requirePermissi
 });
 
 // Update account
-router.put('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requirePermission('canEditAccounts'), async (req, res) => {
+router.put('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requireVerifiedEmail, requirePermission('canEditAccounts'), async (req, res) => {
   try {
     const { circleId, accountId } = req.params;
     const { name, type, institution, accountNumber, ifscCode, branch, nominee, notes } = req.body;
@@ -431,7 +432,7 @@ router.put('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requi
 });
 
 // Delete account
-router.delete('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requirePermission('canEditAccounts'), async (req, res) => {
+router.delete('/circles/:circleId/vault/accounts/:accountId', authMiddleware, requireVerifiedEmail, requirePermission('canEditAccounts'), async (req, res) => {
   try {
     const { circleId, accountId } = req.params;
 
@@ -454,7 +455,7 @@ router.delete('/circles/:circleId/vault/accounts/:accountId', authMiddleware, re
 // --- Documents ---
 
 // Create document
-router.post('/circles/:circleId/vault/documents', authMiddleware, requirePermission('canEditDocuments'), requireVaultCapacity('vault_documents'), async (req, res) => {
+router.post('/circles/:circleId/vault/documents', authMiddleware, requireVerifiedEmail, requirePermission('canEditDocuments'), requireVaultCapacity('vault_documents'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { title, name, type, description, fileName, fileType, fileSize, fileData, expiryDate, isSensitive } = req.body;
@@ -483,7 +484,7 @@ router.post('/circles/:circleId/vault/documents', authMiddleware, requirePermiss
 });
 
 // Update document
-router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
+router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, requireVerifiedEmail, requirePermission('canEditDocuments'), async (req, res) => {
   try {
     const { circleId, documentId } = req.params;
     const { title, name, type, description, fileName, fileType, fileSize, fileData, expiryDate, isSensitive } = req.body;
@@ -521,7 +522,7 @@ router.put('/circles/:circleId/vault/documents/:documentId', authMiddleware, req
 });
 
 // Download document file (decrypts file_data_encrypted and returns it)
-router.get('/circles/:circleId/vault/documents/:documentId/file', authMiddleware, requirePermission('canViewDocuments'), async (req, res) => {
+router.get('/circles/:circleId/vault/documents/:documentId/file', authMiddleware, requireVerifiedEmail, requirePermission('canViewDocuments'), async (req, res) => {
   try {
     const { circleId, documentId } = req.params;
 
@@ -561,7 +562,7 @@ router.get('/circles/:circleId/vault/documents/:documentId/file', authMiddleware
 });
 
 // Delete document
-router.delete('/circles/:circleId/vault/documents/:documentId', authMiddleware, requirePermission('canEditDocuments'), async (req, res) => {
+router.delete('/circles/:circleId/vault/documents/:documentId', authMiddleware, requireVerifiedEmail, requirePermission('canEditDocuments'), async (req, res) => {
   try {
     const { circleId, documentId } = req.params;
 

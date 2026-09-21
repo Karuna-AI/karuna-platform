@@ -271,7 +271,7 @@ describe('User Management', () => {
   });
 
   describe('POST /api/admin/users', () => {
-    it('creates a user and returns tempPassword', async () => {
+    it('creates a user with a setup link and no tempPassword', async () => {
       const newEmail = `provisioned-${uniqueSuffix}@admintest.karuna`;
       const res = await req.post('/api/admin/users')
         .set('Authorization', `Bearer ${adminJwt}`)
@@ -283,9 +283,8 @@ describe('User Management', () => {
       expect(res.body.user).toBeDefined();
       expect(res.body.user.email).toBe(newEmail);
       expect(res.body.user.is_verified).toBe(true);
-      expect(res.body.tempPassword).toBeDefined();
-      expect(typeof res.body.tempPassword).toBe('string');
-      expect(res.body.tempPassword.length).toBeGreaterThanOrEqual(12);
+      // No plaintext credential may be returned
+      expect(res.body.tempPassword).toBeUndefined();
 
       createdUserId = res.body.user.id;
 
@@ -293,6 +292,15 @@ describe('User Management', () => {
       const row = await db.query('SELECT email, is_verified FROM users WHERE id = $1', [createdUserId]);
       expect(row.rows).toHaveLength(1);
       expect(row.rows[0].is_verified).toBe(true);
+
+      // A single-use setup token (hashed) must exist for the new user
+      const tokenRow = await db.query(
+        'SELECT token, expires_at FROM password_reset_tokens WHERE user_id = $1',
+        [createdUserId]
+      );
+      expect(tokenRow.rows).toHaveLength(1);
+      expect(tokenRow.rows[0].token).toHaveLength(64); // SHA-256 hex, not the raw token
+      expect(new Date(tokenRow.rows[0].expires_at).getTime()).toBeGreaterThan(Date.now());
     });
 
     it('returns 409 for duplicate email', async () => {

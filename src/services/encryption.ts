@@ -1,15 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import { gcm } from '@noble/ciphers/aes.js';
+import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 /**
  * Encryption Service for Knowledge Vault
  *
- * Uses AES-256-GCM for encrypting sensitive data at rest.
- * The encryption key is derived from a user PIN + device-specific salt using PBKDF2-like iterations.
+ * Uses AES-256-GCM (authenticated encryption) for sensitive data at rest.
+ * The encryption key is derived from a user PIN + device-specific salt using
+ * PBKDF2-SHA256 (100,000 iterations).
  *
- * This implementation uses Web Crypto API which is available on:
- * - All modern browsers (web platform)
- * - React Native 0.73+ with Hermes
+ * Two cipher backends, same security level:
+ * - Web Crypto API (crypto.subtle) when available (web platform): native
+ *   AES-GCM + PBKDF2.
+ * - @noble/ciphers + @noble/hashes when crypto.subtle is unavailable
+ *   (Hermes on Android, JSC on iOS — i.e. every real device): audited
+ *   pure-JS AES-256-GCM + PBKDF2, runs in-engine with no native modules.
  */
 
 const STORAGE_KEYS = {
@@ -21,45 +28,96 @@ const STORAGE_KEYS = {
   WRAPPED_DEK: '@karuna/vault_wrapped_dek',
 };
 
-// Key derivation iterations for brute-force resistance.
-// The PBKDF2 (crypto.subtle) path is native/fast, so it keeps the full count.
+// PBKDF2-SHA256 iterations for brute-force resistance. Both backends (native
+// Web Crypto and in-engine noble) are fast enough for the full count.
 const KEY_DERIVATION_ITERATIONS = 100000;
-// The fallback path hashes via expo-crypto, which is one native bridge round-trip
-// per iteration — 100k took ~2 minutes on a low-end device and is the reason
-// vault creation appeared to hang. Use a far smaller count there so create/unlock
-// stay responsive.
-const FALLBACK_KEY_DERIVATION_ITERATIONS = 1000;
+// Iteration count used by the pre-hardening expo-crypto fallback. Kept ONLY to
+// unlock + migrate vaults created before the noble hardening (2026-09-21).
+const LEGACY_FALLBACK_KEY_DERIVATION_ITERATIONS = 1000;
 
 /*
- * SECURITY — ACCEPTED RISK (Hermes/JSC fallback path only)
- * ---------------------------------------------------------
+ * SECURITY — vault crypto (hardened 2026-09-21)
+ * --------------------------------------------
  * crypto.subtle is unavailable on Hermes (Android) and JSC (iOS), so on real
- * devices the vault uses the expo-crypto fallback below. An automated security
- * review flagged two HIGH issues here; they are knowingly accepted for now to
- * unblock the vault (which previously failed on every device), and tracked for
- * hardening:
+ * devices the vault previously fell back to a SHA-256 keystream XOR with no
+ * authentication and a 1,000-iteration KDF — both flagged HIGH. That fallback
+ * is gone. The no-subtle path now uses audited pure-JS primitives that run
+ * in-engine on Hermes/JSC with no native build risk:
  *
- *   1. No authentication (not AEAD). The fallback is a SHA-256 keystream XOR
- *      with no integrity tag, so ciphertext is malleable — unlike the AES-GCM
- *      (crypto.subtle) path. Confidentiality holds (random per-record IV); a
- *      tampered record is not detected. (The `keyCheck` record still detects a
- *      wrong PIN, but not targeted bit-flips of vault data.)
- *   2. Weak KDF for a low-entropy PIN. 1000 iterations + a 4–6 digit PIN is
- *      brute-forceable offline by an attacker who can read the on-device salt +
- *      ciphertext (e.g. a rooted/jailbroken device or an unencrypted backup).
- *      The device salt + OS app-sandbox are the primary protection.
+ *   1. AES-256-GCM via @noble/ciphers (real AEAD). Ciphertext is tamper-evident:
+ *      any bit-flip fails tag verification and decrypt() throws.
+ *   2. PBKDF2-SHA256 at 100,000 iterations via @noble/hashes (<1s on device).
  *
- * HARDENING PATH (no native build risk): swap this path to pure-JS audited
- * crypto — @noble/ciphers (real AES-256-GCM AEAD) + @noble/hashes (PBKDF2 100k,
- * runs <1s in-engine on Hermes). Alternatively a native module
- * (react-native-quick-crypto / react-native-aes-crypto). Until then, prefer a
- * longer passphrase over a 4-digit PIN for sensitive vaults.
+ * Record format is versioned (see RECORD_VERSION_V1). Records written before
+ * the hardening (unversioned 16-byte-IV XOR) are still readable: on unlock,
+ * after the PIN is verified against them with the legacy KDF, they are
+ * transparently re-encrypted with AES-256-GCM. The legacy decrypt code below
+ * exists ONLY for that migration.
+ *
+ * Remaining accepted risks:
+ *   - A 4–6 digit PIN is low-entropy. The per-device salt + OS app sandbox are
+ *     the primary protection against offline brute force; prefer a longer PIN
+ *     for sensitive vaults.
+ *   - Bulk vault data records written pre-hardening stay XOR-encrypted until
+ *     the next save (decrypt() still reads them; every save re-encrypts).
  */
+
+// Encrypted-record format markers.
+//
+// v1 layout: magic(4) || ver(1) || iv(12) || ciphertext || tag(16), base64.
+// The 4-byte magic ('KARV') + version byte replaces the earlier 1-byte 0x01
+// marker: a legacy XOR record's random 16-byte IV prefix matched 0x01 with
+// probability 1/256 and would have been misclassified as v1 (then failed tag
+// verification, making a legitimate old record unreadable). A 5-byte header
+// collides with probability 2^-40 — negligible.
+// Both the Web Crypto and the noble encrypt paths write this exact layout,
+// so "new records are versioned" holds on every platform.
+const RECORD_MAGIC = [0x4b, 0x41, 0x52, 0x56]; // 'KARV'
+const RECORD_VERSION_V1 = 0x01; // AES-256-GCM
+const V1_HEADER_LENGTH = RECORD_MAGIC.length + 1; // 5
+const GCM_IV_LENGTH = 12;
+const GCM_TAG_LENGTH = 16;
+const V1_OVERHEAD = V1_HEADER_LENGTH + GCM_IV_LENGTH + GCM_TAG_LENGTH; // 33
+
+/**
+ * True when the stored record uses the v1 (AES-256-GCM) format.
+ * Unversioned records are either Web Crypto AES-GCM (web, pre-versioning) or
+ * legacy XOR (pre-hardening devices) and are handled by the platform/migration
+ * paths.
+ */
+function isV1Record(data: string): boolean {
+  try {
+    return isV1RecordBytes(base64ToBytes(data));
+  } catch {
+    return false;
+  }
+}
+
+/** Byte-level v1 check (avoids re-decoding in decrypt()). */
+function isV1RecordBytes(bytes: Uint8Array): boolean {
+  return (
+    bytes.length > V1_OVERHEAD &&
+    bytes[0] === RECORD_MAGIC[0] &&
+    bytes[1] === RECORD_MAGIC[1] &&
+    bytes[2] === RECORD_MAGIC[2] &&
+    bytes[3] === RECORD_MAGIC[3] &&
+    bytes[4] === RECORD_VERSION_V1
+  );
+}
+
+/** Prepend the v1 header (magic + version) to iv || ciphertext. */
+function addV1Header(ivAndCiphertext: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(V1_HEADER_LENGTH + ivAndCiphertext.length);
+  combined.set(RECORD_MAGIC, 0);
+  combined[V1_HEADER_LENGTH - 1] = RECORD_VERSION_V1;
+  combined.set(ivAndCiphertext, V1_HEADER_LENGTH);
+  return combined;
+}
 
 /**
  * Web Crypto (crypto.subtle) is absent on Hermes (Android) and JSC (iOS) — i.e.
- * every real device build. Detect it so we can fall back to an expo-crypto based
- * cipher instead of throwing, mirroring src/services/encryptedDatabase.ts.
+ * every real device build. Detect it so we can use the noble in-engine cipher
+ * instead of throwing, mirroring src/services/encryptedDatabase.ts.
  */
 function hasCryptoSubtle(): boolean {
   return (
@@ -126,8 +184,9 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
- * Derive encryption key from PIN using iterative SHA-256 (PBKDF2-like)
- * Uses expo-crypto for cross-platform support with high iteration count
+ * Derive a 256-bit key from a PIN using PBKDF2-SHA256 (100,000 iterations).
+ * Uses Web Crypto when available, otherwise the in-engine noble implementation
+ * (same algorithm, same iteration count, same output).
  */
 async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
   // Use Web Crypto API with PBKDF2 if available (preferred)
@@ -159,14 +218,26 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
 
       return new Uint8Array(derivedBits);
     } catch {
-      console.log('[Encryption] Web Crypto PBKDF2 not available, using iterative SHA-256');
+      console.log('[Encryption] Web Crypto PBKDF2 not available, using noble PBKDF2');
     }
   }
 
-  // Fallback: Iterative SHA-256 using expo-crypto (Hermes/JSC have no crypto.subtle)
+  // In-engine PBKDF2-SHA256 via @noble/hashes (Hermes/JSC have no crypto.subtle)
+  return pbkdf2(sha256, stringToBytes(pin), stringToBytes(salt), {
+    c: KEY_DERIVATION_ITERATIONS,
+    dkLen: 32,
+  });
+}
+
+/**
+ * Legacy key derivation (pre-hardening): iterative SHA-256 via the expo-crypto
+ * bridge at 1,000 iterations. Kept ONLY to verify the PIN against — and migrate
+ * — vaults created before the noble hardening. Never used for new records.
+ */
+async function deriveKeyLegacy(pin: string, salt: string): Promise<Uint8Array> {
   let hash = `${salt}:${pin}:${salt}`;
 
-  for (let i = 0; i < FALLBACK_KEY_DERIVATION_ITERATIONS; i++) {
+  for (let i = 0; i < LEGACY_FALLBACK_KEY_DERIVATION_ITERATIONS; i++) {
     hash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       hash + i.toString()
@@ -187,14 +258,12 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
 class EncryptionService {
   private cryptoKey: CryptoKey | null = null;
   private keyBytes: Uint8Array | null = null;
-  private keyString: string | null = null;
   private useWebCrypto = false;
   private isInitialized = false;
-  private salt: string | null = null;
 
   /**
    * Load the given raw key bytes as the active cipher key (AES-GCM via subtle
-   * when available, else the expo-crypto SHA-256 keystream fallback).
+   * when available, else the in-engine noble AES-GCM).
    */
   private async setActiveKey(keyBytes: Uint8Array): Promise<void> {
     this.keyBytes = keyBytes;
@@ -210,12 +279,47 @@ class EncryptionService {
           ['encrypt', 'decrypt']
         );
       } catch (error) {
-        console.warn('[Encryption] AES-GCM import failed, using expo-crypto fallback:', error);
+        console.warn('[Encryption] AES-GCM import failed, using noble AES-GCM:', error);
         this.useWebCrypto = false;
       }
     }
-    // Keep keyString set regardless so the fallback cipher always has key material.
-    this.keyString = bytesToBase64(keyBytes);
+  }
+
+  /**
+   * AES-256-GCM encrypt with the in-engine noble cipher. Output is the v1
+   * versioned record: magic(4) || ver(1) || iv(12) || ciphertext || tag(16),
+   * base64-encoded.
+   */
+  private async nobleEncrypt(plaintext: string, keyBytes: Uint8Array): Promise<string> {
+    const iv = await generateIV();
+    const ctWithTag = gcm(keyBytes, iv).encrypt(stringToBytes(plaintext));
+    const ivAndCt = new Uint8Array(GCM_IV_LENGTH + ctWithTag.length);
+    ivAndCt.set(iv, 0);
+    ivAndCt.set(ctWithTag, GCM_IV_LENGTH);
+    return bytesToBase64(addV1Header(ivAndCt));
+  }
+
+  /**
+   * AES-256-GCM decrypt with the in-engine noble cipher. Throws when the
+   * authentication tag does not verify (wrong key or tampered record).
+   */
+  private nobleDecryptBytes(combined: Uint8Array, keyBytes: Uint8Array): string {
+    const iv = combined.slice(V1_HEADER_LENGTH, V1_HEADER_LENGTH + GCM_IV_LENGTH);
+    const ctWithTag = combined.slice(V1_HEADER_LENGTH + GCM_IV_LENGTH);
+    const plain = gcm(keyBytes, iv).decrypt(ctWithTag);
+    return bytesToString(plain);
+  }
+
+  /**
+   * Legacy decrypt (pre-hardening): 16-byte IV prefix + SHA-256 keystream XOR.
+   * Exists ONLY for the unlock-time migration in initialize(). Never used to
+   * encrypt new records.
+   */
+  private async legacyXorDecryptBytes(combined: Uint8Array, keyBytes: Uint8Array): Promise<string> {
+    const iv = combined.slice(0, 16);
+    const ciphertext = combined.slice(16);
+    const plain = await this.xorKeystream(ciphertext, iv, bytesToBase64(keyBytes));
+    return bytesToString(plain);
   }
 
   /**
@@ -228,6 +332,10 @@ class EncryptionService {
    * PIN-derived key, no wrapped DEK) are migrated in place by *freezing* that
    * key as the DEK and wrapping it — so no vault data is ever re-encrypted.
    * See docs/VAULT_PIN_RECOVERY_DESIGN.md (H3).
+   *
+   * Records written before the 2026-09-21 crypto hardening (unversioned XOR)
+   * are verified with the legacy KDF, then transparently re-encrypted with
+   * AES-256-GCM during unlock.
    */
   async initialize(pin: string): Promise<boolean> {
     try {
@@ -237,31 +345,66 @@ class EncryptionService {
         salt = await generateSalt(32);
         await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, salt);
       }
-      this.salt = salt;
 
-      // Derive the PIN key (used only to wrap/unwrap the DEK). Make it the active
-      // key first so encrypt()/decrypt() operate under the PIN key for (un)wrapping.
+      // Derive the PIN key (used only to wrap/unwrap the DEK).
       const pinKeyBytes = await deriveKey(pin, salt);
-      await this.setActiveKey(pinKeyBytes);
 
       const wrapped = await AsyncStorage.getItem(STORAGE_KEYS.WRAPPED_DEK);
       const keyCheck = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
       let dekBytes: Uint8Array;
 
-      if (wrapped) {
-        // Existing DEK vault: unwrap the DEK with the PIN key. Failure = wrong PIN.
+      if (wrapped && isV1Record(wrapped)) {
+        // Current-format vault: unwrap the DEK. Tag failure = wrong PIN.
+        try {
+          dekBytes = base64ToBytes(this.nobleDecryptBytes(base64ToBytes(wrapped), pinKeyBytes));
+        } catch {
+          console.error('Invalid PIN - DEK unwrap failed');
+          return false;
+        }
+        if (dekBytes.length !== 32) {
+          console.error('Invalid PIN - DEK unwrap failed');
+          return false;
+        }
+      } else if (wrapped && hasCryptoSubtle()) {
+        // Web-platform vault (Web Crypto AES-GCM, unversioned). Same KDF as
+        // before, so the PIN key is unchanged.
+        await this.setActiveKey(pinKeyBytes);
         try {
           dekBytes = base64ToBytes(await this.decrypt(wrapped));
         } catch {
           console.error('Invalid PIN - DEK unwrap failed');
           return false;
         }
-      } else if (keyCheck) {
-        // Legacy vault: data is encrypted directly under the PIN key. Verify the
-        // PIN against the key check FIRST (before writing anything), then freeze
-        // the PIN key as the DEK and wrap it — no data re-encryption needed.
+      } else if (wrapped) {
+        // Legacy device vault (pre-hardening XOR records): verify the PIN with
+        // the legacy KDF, then migrate the records to AES-256-GCM.
+        const oldPinKey = await deriveKeyLegacy(pin, salt);
+        let dekB64: string;
         try {
-          if (await this.decrypt(keyCheck) !== 'KARUNA_VAULT_KEY_VALID') {
+          dekB64 = await this.legacyXorDecryptBytes(base64ToBytes(wrapped), oldPinKey);
+        } catch {
+          console.error('Invalid PIN - legacy DEK unwrap failed');
+          return false;
+        }
+        let candidateDek: Uint8Array;
+        try {
+          candidateDek = base64ToBytes(dekB64);
+        } catch {
+          console.error('Invalid PIN - legacy DEK unwrap failed');
+          return false;
+        }
+        if (candidateDek.length !== 32) {
+          console.error('Invalid PIN - legacy DEK unwrap failed');
+          return false;
+        }
+        // Verify against the legacy key check (XOR under the DEK) BEFORE
+        // migrating anything — a wrong PIN yields garbage here, not a throw.
+        if (!keyCheck) {
+          console.error('Vault is corrupted - missing key check');
+          return false;
+        }
+        try {
+          if (await this.legacyXorDecryptBytes(base64ToBytes(keyCheck), candidateDek) !== 'KARUNA_VAULT_KEY_VALID') {
             console.error('Invalid PIN - decryption failed');
             return false;
           }
@@ -269,22 +412,59 @@ class EncryptionService {
           console.error('Invalid PIN - decryption error');
           return false;
         }
-        dekBytes = pinKeyBytes;
-        await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, await this.encrypt(bytesToBase64(dekBytes)));
+        dekBytes = candidateDek;
+        // Migrate: re-wrap the DEK under the hardened PIN key and re-encrypt
+        // the key check under the DEK, both as v1 records. Bulk vault data
+        // stays XOR-encrypted until its next save; decrypt() still reads it.
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.WRAPPED_DEK,
+          await this.nobleEncrypt(bytesToBase64(dekBytes), pinKeyBytes)
+        );
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.ENCRYPTION_KEY_CHECK,
+          await this.nobleEncrypt('KARUNA_VAULT_KEY_VALID', dekBytes)
+        );
+      } else if (keyCheck) {
+        // Pre-DEK legacy vault: data encrypted directly under the PIN key (XOR).
+        // Verify the PIN against the key check FIRST (before writing anything),
+        // then freeze the legacy PIN key as the DEK and wrap it — no data
+        // re-encryption needed.
+        const oldPinKey = await deriveKeyLegacy(pin, salt);
+        try {
+          if (await this.legacyXorDecryptBytes(base64ToBytes(keyCheck), oldPinKey) !== 'KARUNA_VAULT_KEY_VALID') {
+            console.error('Invalid PIN - decryption failed');
+            return false;
+          }
+        } catch {
+          console.error('Invalid PIN - decryption error');
+          return false;
+        }
+        dekBytes = oldPinKey;
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.WRAPPED_DEK,
+          await this.nobleEncrypt(bytesToBase64(dekBytes), pinKeyBytes)
+        );
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.ENCRYPTION_KEY_CHECK,
+          await this.nobleEncrypt('KARUNA_VAULT_KEY_VALID', dekBytes)
+        );
       } else {
-        // Brand-new vault: random DEK, wrapped under the PIN key.
+        // Brand-new vault: random DEK, wrapped under the PIN key (v1 record).
         dekBytes = new Uint8Array(await Crypto.getRandomBytesAsync(32));
-        await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, await this.encrypt(bytesToBase64(dekBytes)));
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.WRAPPED_DEK,
+          await this.nobleEncrypt(bytesToBase64(dekBytes), pinKeyBytes)
+        );
       }
 
       // Switch the active key to the DEK for all subsequent data operations.
       await this.setActiveKey(dekBytes);
 
-      // Key check (under the DEK) — integrity guard. Legacy migration: DEK === old
-      // PIN key, so the existing key check still validates. New vault: create it.
-      if (keyCheck) {
+      // Key check (under the DEK) — integrity guard.
+      const finalKeyCheck = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
+      if (finalKeyCheck) {
         try {
-          if (await this.decrypt(keyCheck) !== 'KARUNA_VAULT_KEY_VALID') {
+          if (await this.decrypt(finalKeyCheck) !== 'KARUNA_VAULT_KEY_VALID') {
             console.error('Vault key check failed - data may be corrupted');
             return false;
           }
@@ -323,7 +503,9 @@ class EncryptionService {
   }
 
   /**
-   * Encrypt a string value using AES-256-GCM
+   * Encrypt a string value using AES-256-GCM (authenticated encryption).
+   * New records are always written in the v1 versioned format, on every
+   * platform (Web Crypto and noble both emit magic || ver || iv || ct || tag).
    */
   async encrypt(plaintext: string): Promise<string> {
     if (this.useWebCrypto && this.cryptoKey) {
@@ -338,33 +520,45 @@ class EncryptionService {
       );
       const ciphertext = new Uint8Array(encrypted);
 
-      // Combine IV + ciphertext and encode as base64
-      const combined = new Uint8Array(iv.length + ciphertext.length);
-      combined.set(iv);
-      combined.set(ciphertext, iv.length);
+      // Combine IV + ciphertext, then prepend the v1 header
+      const ivAndCt = new Uint8Array(iv.length + ciphertext.length);
+      ivAndCt.set(iv);
+      ivAndCt.set(ciphertext, iv.length);
 
-      return bytesToBase64(combined);
+      return bytesToBase64(addV1Header(ivAndCt));
     }
 
-    // Fallback (Hermes/JSC): SHA-256 keystream XOR with a 16-byte IV.
-    if (!this.keyString) {
+    // In-engine AES-256-GCM via @noble/ciphers (Hermes/JSC have no crypto.subtle)
+    if (!this.keyBytes) {
       throw new Error('Encryption not initialized - call initialize() first');
     }
-    const ivBytes = await Crypto.getRandomBytesAsync(16);
-    const iv = new Uint8Array(ivBytes);
-    const encrypted = await this.xorKeystream(stringToBytes(plaintext), iv);
-    const combined = new Uint8Array(iv.length + encrypted.length);
-    combined.set(iv);
-    combined.set(encrypted, iv.length);
-    return bytesToBase64(combined);
+    return this.nobleEncrypt(plaintext, this.keyBytes);
   }
 
   /**
-   * Decrypt an encrypted string using AES-256-GCM
+   * Decrypt an encrypted string using AES-256-GCM.
+   *
+   * Format auto-detection:
+   * - v1 versioned records (magic 'KARV' + version byte) → AES-256-GCM via the
+   *   in-engine noble cipher on every platform (keyBytes is always set after
+   *   initialize(); noble and Web Crypto emit byte-identical AES-GCM records).
+   *   Throws on tamper / wrong key.
+   * - unversioned records on web → legacy Web Crypto AES-GCM (iv12 || ct),
+   *   written before records were versioned.
+   * - unversioned records on device → legacy XOR (pre-hardening records only;
+   *   kept readable so old vault data migrates on next save).
    */
   async decrypt(encryptedData: string): Promise<string> {
+    const combined = base64ToBytes(encryptedData);
+
+    if (isV1RecordBytes(combined)) {
+      if (!this.keyBytes) {
+        throw new Error('Encryption not initialized - call initialize() first');
+      }
+      return this.nobleDecryptBytes(combined, this.keyBytes);
+    }
+
     if (this.useWebCrypto && this.cryptoKey) {
-      const combined = base64ToBytes(encryptedData);
       const iv = combined.slice(0, 12);
       const ciphertext = combined.slice(12);
 
@@ -378,23 +572,20 @@ class EncryptionService {
       return bytesToString(new Uint8Array(decryptedBuffer));
     }
 
-    // Fallback (Hermes/JSC): 16-byte IV prefix + SHA-256 keystream XOR (symmetric).
-    if (!this.keyString) {
+    // Legacy (pre-hardening) device records: 16-byte IV prefix + SHA-256
+    // keystream XOR. Readable for migration; never written anymore.
+    if (!this.keyBytes) {
       throw new Error('Encryption not initialized - call initialize() first');
     }
-    const combined = base64ToBytes(encryptedData);
-    const iv = combined.slice(0, 16);
-    const ciphertext = combined.slice(16);
-    const plain = await this.xorKeystream(ciphertext, iv);
-    return bytesToString(plain);
+    return this.legacyXorDecryptBytes(combined, this.keyBytes);
   }
 
   /**
-   * SHA-256 keystream XOR (symmetric — same call encrypts and decrypts), used
-   * when crypto.subtle is unavailable. Mirrors the fallback in
-   * src/services/encryptedDatabase.ts. Keystream block i = SHA-256(key:iv:i).
+   * SHA-256 keystream XOR (symmetric — same call encrypts and decrypts).
+   * LEGACY ONLY: used solely to read pre-hardening records during migration.
+   * Keystream block i = SHA-256(key:iv:i).
    */
-  private async xorKeystream(data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> {
+  private async xorKeystream(data: Uint8Array, iv: Uint8Array, keyString: string): Promise<Uint8Array> {
     const result = new Uint8Array(data.length);
     const ivHex = Array.from(iv).map((b) => b.toString(16).padStart(2, '0')).join('');
     let keystream = new Uint8Array(0);
@@ -405,7 +596,7 @@ class EncryptionService {
       if (keystreamOffset >= keystream.length) {
         const hash = await Crypto.digestStringAsync(
           Crypto.CryptoDigestAlgorithm.SHA256,
-          `${this.keyString}:${ivHex}:${blockCounter}`
+          `${keyString}:${ivHex}:${blockCounter}`
         );
         keystream = new Uint8Array(32);
         for (let j = 0; j < 32; j++) {
@@ -451,13 +642,11 @@ class EncryptionService {
       // encrypted under the unchanged DEK, so nothing else needs re-encrypting.
       const newSalt = await generateSalt(32);
       const newPinKey = await deriveKey(newPin, newSalt);
-      await this.setActiveKey(newPinKey);
-      const newWrapped = await this.encrypt(bytesToBase64(dekBytes));
+      const newWrapped = await this.nobleEncrypt(bytesToBase64(dekBytes), newPinKey);
 
       // Commit new salt + wrapped DEK, then restore the DEK as the active key.
       await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, newSalt);
       await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, newWrapped);
-      this.salt = newSalt;
       await this.setActiveKey(dekBytes);
       return true;
     } catch (error) {
@@ -478,10 +667,8 @@ class EncryptionService {
     const dekBytes = this.keyBytes;
     const rkBytes = new Uint8Array(await Crypto.getRandomBytesAsync(32));
     const recoveryKey = bytesToBase64(rkBytes);
-    // Wrap the DEK under the recovery key, then restore the DEK as the active key.
-    await this.setActiveKey(rkBytes);
-    const wrappedDek = await this.encrypt(bytesToBase64(dekBytes));
-    await this.setActiveKey(dekBytes);
+    // Wrap the DEK under the recovery key as a v1 record.
+    const wrappedDek = await this.nobleEncrypt(bytesToBase64(dekBytes), rkBytes);
     return { wrappedDek, recoveryKey };
   }
 
@@ -493,9 +680,8 @@ class EncryptionService {
    */
   async restoreWithRecovery(wrappedDek: string, recoveryKey: string, newPin: string): Promise<boolean> {
     try {
-      // Unwrap the DEK using the recovery key.
-      await this.setActiveKey(base64ToBytes(recoveryKey));
-      const dekBytes = base64ToBytes(await this.decrypt(wrappedDek));
+      // Unwrap the DEK using the recovery key (v1 record).
+      const dekBytes = base64ToBytes(this.nobleDecryptBytes(base64ToBytes(wrappedDek), base64ToBytes(recoveryKey)));
 
       // Integrity guard: the recovered DEK must match this vault's data.
       const keyCheck = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY_CHECK);
@@ -511,12 +697,10 @@ class EncryptionService {
       // Re-wrap the DEK under the new PIN (new salt) — data stays under the DEK.
       const newSalt = await generateSalt();
       const newPinKey = await deriveKey(newPin, newSalt);
-      await this.setActiveKey(newPinKey);
-      const newWrapped = await this.encrypt(bytesToBase64(dekBytes));
+      const newWrapped = await this.nobleEncrypt(bytesToBase64(dekBytes), newPinKey);
 
       await AsyncStorage.setItem(STORAGE_KEYS.ENCRYPTION_SALT, newSalt);
       await AsyncStorage.setItem(STORAGE_KEYS.WRAPPED_DEK, newWrapped);
-      this.salt = newSalt;
 
       // Activate the DEK; ensure a key check exists (new vaults).
       await this.setActiveKey(dekBytes);
@@ -541,8 +725,6 @@ class EncryptionService {
     this.isInitialized = false;
     this.cryptoKey = null;
     this.keyBytes = null;
-    this.keyString = null;
-    this.salt = null;
   }
 
   /**
@@ -556,8 +738,6 @@ class EncryptionService {
     }
     this.cryptoKey = null;
     this.keyBytes = null;
-    this.keyString = null;
-    this.salt = null;
   }
 }
 

@@ -147,7 +147,78 @@ module.exports = {
                   NSPrivacyAccessedAPITypeReasons: ['85F4.1'],
                 },
               ],
-              NSPrivacyCollectedDataTypes: [],
+              // Data collection disclosure (conservative, code-evidenced only).
+              // Every type below is processed by the app: health readings /
+              // medications sync (health_data, vault_medications), voice input
+              // recordings (services/voiceRecorder.ts), vault document photos
+              // (expo-image-picker, VaultDocumentScreen), care-circle members
+              // and emergency contacts, account name/email/phone, Karuna user
+              // ID, and the sync device ID (@karuna_device_id). All linked to
+              // the user's account, used solely for app functionality, no
+              // tracking. No crash/analytics SDKs are bundled, so no
+              // diagnostic types are declared.
+              NSPrivacyCollectedDataTypes: [
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeHealth',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeAudioData',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhotosorVideos',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeContacts',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeName',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeEmailAddress',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhoneNumber',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhysicalAddress',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeUserID',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeDeviceID',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+              ],
               NSPrivacyTracking: false,
               NSPrivacyTrackingDomains: [],
             },
