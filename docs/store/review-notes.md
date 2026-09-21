@@ -21,5 +21,5 @@
 ## Notes for the reviewer
 - All permission prompts (microphone, speech recognition, camera, photos, contacts, calendar, HealthKit) are optional and can be denied or skipped — the app degrades gracefully.
 - Karuna is a wellness companion, **not a medical device**: it does not diagnose, treat, or provide emergency services. The app says this in the listing and in-app where relevant.
-- Voice recordings are transcribed in real time and are not stored.
+- Voice recordings are transcribed in real time and are not stored by Karuna — audio is processed by OpenAI per their data-retention policy.
 - Contact: admin@karunaapp.in — we can join a review call or provide a TestFlight walkthrough if anything is unclear.

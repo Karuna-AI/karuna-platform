@@ -157,11 +157,19 @@ module.exports = {
               // medications sync (health_data, vault_medications), voice input
               // recordings (services/voiceRecorder.ts), vault document photos
               // (expo-image-picker, VaultDocumentScreen), care-circle members
-              // and emergency contacts, account name/email/phone, Karuna user
-              // ID, and the sync device ID (@karuna_device_id). All linked to
-              // the user's account, used solely for app functionality, no
-              // tracking. No crash/analytics SDKs are bundled, so no
-              // diagnostic types are declared.
+              // and emergency contacts, account name/email/phone, chat
+              // messages and vault notes (Other User Content), calendar
+              // appointments, approximate location for the weather widget
+              // (services/weather.ts), Karuna user ID, and the sync device ID
+              // (@karuna_device_id). Diagnostic types cover JS-level
+              // telemetry only — no third-party crash/analytics SDKs are
+              // bundled (no Sentry); error and performance events are sent
+              // to Karuna's own gateway (/api/telemetry). All linked to the
+              // user's account except diagnostics/product-interaction which
+              // are anonymized, used solely for app functionality/analytics,
+              // no tracking. Physical address is NOT declared: the only
+              // address-like data is free-text "where is this document
+              // stored" notes (VaultDocumentScreen), not real addresses.
               NSPrivacyCollectedDataTypes: [
                 {
                   NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeHealth',
@@ -206,10 +214,40 @@ module.exports = {
                   NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
                 },
                 {
-                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhysicalAddress',
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCoarseLocation',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeOtherUserContent',
                   NSPrivacyCollectedDataTypeLinked: true,
                   NSPrivacyCollectedDataTypeTracking: false,
                   NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCalendars',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeProductInteraction',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCrashData',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePerformanceData',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
                 },
                 {
                   NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeUserID',

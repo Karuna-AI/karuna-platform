@@ -35,7 +35,7 @@ FOR FAMILIES & CAREGIVERS
 
 PRIVACY FIRST
 • Your vault is encrypted with AES-256 on your device
-• Voice is transcribed in real time and never stored
+• Voice is transcribed in real time and not stored by Karuna — audio is processed by OpenAI per their data-retention policy
 • You control exactly what is shared with your care circle
 
 Karuna is a companion, not a medical device. It does not diagnose, treat, or replace professional care. In an emergency, always call your local emergency number.
@@ -54,4 +54,4 @@ Karuna is a companion, not a medical device. It does not diagnose, treat, or rep
 - **Content rating questionnaire:** no violence, no user-generated chat with strangers (care circle is invite-only), no location sharing → expect **Everyone**
 - **Target audience:** note the app is designed for seniors but usable by all ages; complete the "Designed for Families" section as **No**
 - **Data safety form:** see `data-safety-answers.md`
-- **Health Connect declaration:** the app reads heart rate, steps, blood pressure, blood glucose, and body weight via Health Connect. Declare each in Play Console → App content → Health Connect permissions, with the in-app justification (wellness dashboard & caregiver updates). Google may require a verification video — record a 1-minute screen capture showing the Health dashboard permission prompt and the data displayed.
+- **Health Connect declaration:** the app reads heart rate, steps, blood pressure, blood glucose, body weight, and oxygen saturation via Health Connect (READ_*), and can write manually entered vitals back (WRITE_*). Declare each in Play Console → App content → Health Connect permissions, with the in-app justification (wellness dashboard & caregiver updates; syncing manual entries). Google may require a verification video — record a 1-minute screen capture showing the Health dashboard permission prompt and the data displayed. Note: WRITE permissions may need a separate justification; if flagged, resubmit with read-only permissions.
