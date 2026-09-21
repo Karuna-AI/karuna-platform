@@ -30,6 +30,8 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.4.1",
     "@react-native-community/slider": "5.0.1",
