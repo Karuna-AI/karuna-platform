@@ -60,7 +60,9 @@ function b64decode(s: string): Uint8Array {
  */
 function isV1RecordBytes(bytes: Uint8Array): boolean {
   return (
-    bytes.length > 33 &&
+    // >= : an empty-plaintext record is exactly 33 bytes (header + iv + tag);
+    // `>` would misroute it to the legacy path (mirrors src/services/encryption.ts).
+    bytes.length >= 33 &&
     bytes[0] === 0x4b &&
     bytes[1] === 0x41 &&
     bytes[2] === 0x52 &&
@@ -159,6 +161,16 @@ describe('vault encryption without crypto.subtle (Hermes/JSC noble AES-GCM path)
     await svc.initialize('1234');
     const enc = await svc.encryptObject({ name: 'Dr Smith', phone: '555-1' });
     expect(await svc.decryptObject(enc)).toEqual({ name: 'Dr Smith', phone: '555-1' });
+  });
+
+  it('round-trips an empty plaintext (exactly V1_OVERHEAD bytes routes to v1)', async () => {
+    // Regression: isV1RecordBytes used `>` and misrouted empty-plaintext
+    // records to the legacy path, where the misaligned IV fails the GCM tag.
+    const svc = new EncryptionService();
+    await svc.initialize('1234');
+    const enc = await svc.encrypt('');
+    expect(isV1RecordBytes(b64decode(enc))).toBe(true);
+    expect(await svc.decrypt(enc)).toBe('');
   });
 
   it('unlocks with the correct PIN and rejects the wrong PIN (key-check)', async () => {

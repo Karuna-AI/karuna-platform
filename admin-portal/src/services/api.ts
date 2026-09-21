@@ -179,12 +179,14 @@ class AdminApiService {
     }
   }
 
-  async resetUserPassword(userId: string, newPassword: string): Promise<ApiResult<MutationPayload>> {
+  async resetUserPassword(userId: string): Promise<ApiResult<MutationPayload>> {
     try {
-      const response = await this.client.post(`/users/${userId}/reset-password`, { newPassword });
+      // The server issues a single-use reset link emailed to the user;
+      // it accepts no plaintext password.
+      const response = await this.client.post(`/users/${userId}/reset-password`, {});
       return { success: true, data: response.data };
     } catch {
-      return { success: false, error: 'Failed to reset password' };
+      return { success: false, error: 'Failed to send reset link' };
     }
   }
 
