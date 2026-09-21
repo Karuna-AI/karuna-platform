@@ -96,7 +96,10 @@ function isV1Record(data: string): boolean {
 /** Byte-level v1 check (avoids re-decoding in decrypt()). */
 function isV1RecordBytes(bytes: Uint8Array): boolean {
   return (
-    bytes.length > V1_OVERHEAD &&
+    // >= : an empty-plaintext record is exactly V1_OVERHEAD bytes
+    // (header + iv + tag, no ciphertext); `>` would misroute it to the
+    // legacy path, where the misaligned IV fails the GCM tag check.
+    bytes.length >= V1_OVERHEAD &&
     bytes[0] === RECORD_MAGIC[0] &&
     bytes[1] === RECORD_MAGIC[1] &&
     bytes[2] === RECORD_MAGIC[2] &&
