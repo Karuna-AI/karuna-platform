@@ -22,11 +22,18 @@ import { VoiceButton } from './VoiceButton';
 import { ChatBubble } from './ChatBubble';
 import { LoadingIndicator } from './LoadingIndicator';
 import { WeatherWidget } from './WeatherWidget';
+import { useVoicePreferences } from './voicePreferences';
+import { getCurrentTranslations } from '../i18n/translations';
+import { ttsService } from '../services/tts';
+import { onApiProgress } from '../services/api';
 import {
   getFontSizes,
   SPACING,
   TOUCH_TARGETS,
   announceForAccessibility} from '../utils/accessibility';
+
+/** #12: auto-send undo window before a voice transcript is sent. */
+const AUTO_SEND_UNDO_MS = 5000;
 
 interface ChatScreenProps {
   onOpenSettings?: () => void;
@@ -35,9 +42,12 @@ interface ChatScreenProps {
   onOpenHealth?: () => void;
 }
 
-export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): JSX.Element {
+export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOpenHealth }: ChatScreenProps): React.JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
+  const t = getCurrentTranslations();
+  // #1/#12: tap-to-talk default + opt-in review-before-send.
+  const { tapToTalk, confirmVoiceMessage } = useVoicePreferences();
 
   // "Press back again to exit" — elderly users frequently double-tap back by
   // accident; one press would otherwise quit the app from the root route.
@@ -84,9 +94,49 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
   } = useChatContext();
 
   const flatListRef = useRef<FlatList>(null);
+  const textInputRef = useRef<TextInput>(null);
   const [textInput, setTextInput] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [editedTranscript, setEditedTranscript] = useState('');
+
+  // #12: auto-send undo state. When review-before-send is OFF, a fresh
+  // transcript skips the modal and sends after a short undo window.
+  const [undoVisible, setUndoVisible] = useState(false);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearUndoTimer = useCallback(() => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearUndoTimer, [clearUndoTimer]);
+
+  // #30: surface TTS engine failures in the chat UI (friendly translated
+  // message from the service). TTS can't speak its own error, so we show it.
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  useEffect(() => {
+    const unsubscribe = ttsService.onSpeakError((message) => {
+      setTtsError(message);
+      announceForAccessibility(message);
+    });
+    return unsubscribe;
+  }, []);
+
+  // #40: visible "Still working…" feedback when a request runs long. The API
+  // service notifies subscribers; we show it while loading/processing.
+  const [apiProgress, setApiProgress] = useState<string | null>(null);
+  useEffect(() => {
+    const unsubscribe = onApiProgress((message) => {
+      setApiProgress(message);
+      announceForAccessibility(message);
+    });
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    if (!isLoading && !isProcessing) {
+      setApiProgress(null);
+    }
+  }, [isLoading, isProcessing]);
 
   // Sync edited transcript with pending transcript
   useEffect(() => {
@@ -165,6 +215,39 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
     setEditedTranscript('');
   }, [dismissTranscript]);
 
+  // #12: auto-send flow. The transcript modal is suppressed (see
+  // renderTranscriptEditModal) when review-before-send is off; instead the
+  // transcript sends after a 5-second undo window.
+  const showTranscriptModal = isPendingTranscriptVisible && confirmVoiceMessage;
+
+  const commitAutoSend = useCallback(async () => {
+    clearUndoTimer();
+    setUndoVisible(false);
+    await confirmTranscript();
+  }, [clearUndoTimer, confirmTranscript]);
+
+  const handleUndoAutoSend = useCallback(() => {
+    clearUndoTimer();
+    setUndoVisible(false);
+    dismissTranscript();
+    setEditedTranscript('');
+    announceForAccessibility('Message not sent');
+  }, [clearUndoTimer, dismissTranscript]);
+
+  useEffect(() => {
+    if (isPendingTranscriptVisible && pendingTranscript && !confirmVoiceMessage) {
+      setUndoVisible(true);
+      announceForAccessibility(`${t.chat.sendingYourMessage} ${t.undo}`);
+      clearUndoTimer();
+      undoTimerRef.current = setTimeout(() => {
+        commitAutoSend();
+      }, AUTO_SEND_UNDO_MS);
+    } else if (!isPendingTranscriptVisible) {
+      clearUndoTimer();
+      setUndoVisible(false);
+    }
+  }, [isPendingTranscriptVisible, pendingTranscript, confirmVoiceMessage, clearUndoTimer, commitAutoSend, t]);
+
   const renderMessage = useCallback(
     ({ item, index }: { item: Message; index: number }) => (
       <ChatBubble message={item} isLatest={index === messages.length - 1} />
@@ -189,7 +272,7 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
         <Text
           style={[styles.emptyTitle, { color: colors.text, fontSize: fonts.headerLarge }]}
         >
-          Hello! I'm Karuna
+          {t.chat.emptyTitle}
         </Text>
         <Text
           style={[
@@ -197,17 +280,17 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
             { color: colors.textSecondary, fontSize: fonts.body },
           ]}
         >
-          Your friendly voice assistant.{'\n'}
-          Hold the button below and speak to me.
+          {t.chat.emptySubtitle}
         </Text>
       </View>
     );
   };
 
-  // Render the "Did I hear that right?" modal
+  // Render the "Did I hear that right?" modal — suppressed when auto-send
+  // is on (#12); the undo banner handles that case instead.
   const renderTranscriptEditModal = () => (
     <Modal
-      visible={isPendingTranscriptVisible}
+      visible={showTranscriptModal}
       animationType="slide"
       transparent={true}
       onRequestClose={handleDismissTranscript}
@@ -316,7 +399,7 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
               />
             ))}
           </View>
-          <Text style={styles.speakingText}>Karuna is speaking...</Text>
+          <Text style={styles.speakingText}>{t.chat.speaking}</Text>
         </View>
         <TouchableOpacity
           style={styles.stopSpeakingButton}
@@ -383,17 +466,6 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
           Karuna
         </Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[styles.headerButton, { backgroundColor: colors.surface }]}
-            onPress={() => setShowTextInput(!showTextInput)}
-            accessible={true}
-            accessibilityLabel={showTextInput ? 'Switch to voice input' : 'Switch to typing'}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.headerButtonText, { color: colors.primary }]}>
-              {showTextInput ? 'Voice' : 'Type'}
-            </Text>
-          </TouchableOpacity>
           {messages.length > 0 && (
             <TouchableOpacity
               style={[styles.headerButton, { backgroundColor: colors.surface }]}
@@ -478,6 +550,20 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
         </TouchableOpacity>
       )}
 
+      {/* #30: TTS failure banner (message is already translated by the service) */}
+      {ttsError && !error && (
+        <TouchableOpacity
+          style={[styles.errorBanner, { backgroundColor: colors.error }]}
+          onPress={() => setTtsError(null)}
+          accessible={true}
+          accessibilityLabel={`${ttsError}. Tap to dismiss.`}
+          accessibilityRole="alert"
+        >
+          <Text style={styles.errorText}>{ttsError}</Text>
+          <Text style={styles.errorDismiss}>Tap to dismiss</Text>
+        </TouchableOpacity>
+      )}
+
       <KeyboardAvoidingView
         style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -496,17 +582,70 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
           ListFooterComponent={
             isLoading ? (
               <View style={styles.loadingContainer}>
-                <LoadingIndicator message="Karuna is thinking..." />
+                <LoadingIndicator message={t.chat.thinking} />
+                {/* #40: "Still working…" appears here when a request runs long */}
+                {apiProgress && (
+                  <Text
+                    style={[styles.apiProgressText, { color: colors.textSecondary }]}
+                    accessible={true}
+                    accessibilityLiveRegion="polite"
+                  >
+                    {apiProgress}
+                  </Text>
+                )}
               </View>
             ) : null
           }
           showsVerticalScrollIndicator={false}
         />
 
+        {/* #12: undo banner while a voice transcript waits to auto-send */}
+        {undoVisible && (
+          <View
+            style={[styles.undoBanner, { backgroundColor: colors.surface }]}
+            accessible={true}
+            accessibilityRole="alert"
+            accessibilityLabel={`${t.chat.sendingYourMessage} ${pendingTranscript ?? ''}`}
+          >
+            <Text
+              style={[styles.undoText, { color: colors.text }]}
+              numberOfLines={2}
+            >
+              {t.chat.sendingYourMessage}
+            </Text>
+            <TouchableOpacity
+              style={[styles.undoButton, { borderColor: colors.primary }]}
+              onPress={handleUndoAutoSend}
+              accessible={true}
+              accessibilityLabel={t.undo}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.undoButtonText, { color: colors.primary }]}>
+                {t.undo}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={[styles.inputContainer, { backgroundColor: colors.surface }]}>
           {showTextInput ? (
             <View style={styles.textInputContainer}>
+              {/* #11: switch back to voice mode (header toggle removed to
+                  avoid two controls doing the same job). */}
+              <TouchableOpacity
+                style={[styles.voiceInsteadButton, { backgroundColor: colors.surface }]}
+                onPress={() => setShowTextInput(false)}
+                accessible={true}
+                accessibilityLabel={t.chat.voiceMode}
+                accessibilityHint={t.chat.voiceInsteadHint}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.voiceInsteadText, { color: colors.primary }]}>
+                  🎤 {t.chat.voiceMode}
+                </Text>
+              </TouchableOpacity>
               <TextInput
+                ref={textInputRef}
                 style={[
                   styles.textInput,
                   {
@@ -517,13 +656,13 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
                 ]}
                 value={textInput}
                 onChangeText={setTextInput}
-                placeholder="Type your message..."
+                placeholder={t.chat.typeMessage}
                 placeholderTextColor={colors.textSecondary}
                 multiline
                 maxLength={500}
                 accessible={true}
-                accessibilityLabel="Message input"
-                accessibilityHint="Type your message here"
+                accessibilityLabel={t.chat.typeMessage}
+                accessibilityHint={t.chat.typeMessageHint}
               />
               <TouchableOpacity
                 style={[
@@ -537,7 +676,7 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
                 onPress={handleTextSubmit}
                 disabled={!textInput.trim() || isLoading}
                 accessible={true}
-                accessibilityLabel="Send message"
+                accessibilityLabel={t.chat.send}
                 accessibilityRole="button"
               >
                 <Text
@@ -548,20 +687,41 @@ export function ChatScreen({ onOpenSettings, onOpenVault, onOpenCareCircle, onOp
                     },
                   ]}
                 >
-                  Send
+                  {t.chat.send}
                 </Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <VoiceButton
-              isRecording={isRecording}
-              isProcessing={isProcessing}
-              isDisabled={isLoading}
-              recordingDuration={recordingDuration}
-              onPressIn={handleStartRecording}
-              onPressOut={handleStopRecording}
-              onCancel={handleCancelRecording}
-            />
+            <View style={styles.voiceColumn}>
+              <VoiceButton
+                isRecording={isRecording}
+                isProcessing={isProcessing}
+                isDisabled={isLoading}
+                recordingDuration={recordingDuration}
+                onPressIn={handleStartRecording}
+                onPressOut={handleStopRecording}
+                onCancel={handleCancelRecording}
+                tapToTalk={tapToTalk}
+              />
+              {/* #11: persistent "Type instead" beside the voice control */}
+              {!isRecording && !isProcessing && (
+                <TouchableOpacity
+                  style={styles.typeInsteadButton}
+                  onPress={() => {
+                    setShowTextInput(true);
+                    setTimeout(() => textInputRef.current?.focus(), 150);
+                  }}
+                  accessible={true}
+                  accessibilityLabel={t.chat.typeInstead}
+                  accessibilityHint={t.chat.typeInsteadHint}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.typeInsteadText, { color: colors.primary }]}>
+                    {t.chat.typeInstead}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
       </KeyboardAvoidingView>
@@ -612,7 +772,7 @@ const styles = StyleSheet.create({
   },
   headerButtonText: {
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 16,
   },
   // Icon (emoji) + label (14px text) stacked vertically. Per the audit,
   // emoji-only nav was unreadable for elderly users — the label confirms
@@ -622,7 +782,7 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   headerButtonLabel: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     marginTop: 2,
   },
@@ -662,7 +822,7 @@ const styles = StyleSheet.create({
   speakingText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 16,
   },
   stopSpeakingButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
@@ -683,12 +843,13 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontWeight: '600',
+    fontSize: 16,
     textAlign: 'center',
   },
   errorDismiss: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 16,
     textAlign: 'center',
     marginTop: 4,
   },
@@ -741,6 +902,18 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     paddingVertical: SPACING.sm,
   },
+  voiceInsteadButton: {
+    minHeight: TOUCH_TARGETS.minimum,
+    minWidth: TOUCH_TARGETS.minimum,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceInsteadText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   textInput: {
     flex: 1,
     borderRadius: 24,
@@ -758,7 +931,60 @@ const styles = StyleSheet.create({
   },
   sendButtonText: {
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 16,
+  },
+  apiProgressText: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: SPACING.xs,
+  },
+  // Voice-mode column: voice button + persistent "Type instead" (#11)
+  voiceColumn: {
+    alignItems: 'center',
+    paddingVertical: SPACING.xs,
+  },
+  typeInsteadButton: {
+    marginTop: SPACING.xs,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    minHeight: TOUCH_TARGETS.minimum,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  typeInsteadText: {
+    fontSize: 16,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  // #12: undo banner shown during the auto-send window
+  undoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+  },
+  undoText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    marginRight: SPACING.sm,
+  },
+  undoButton: {
+    borderWidth: 2,
+    borderRadius: 20,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    minHeight: TOUCH_TARGETS.minimum,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  undoButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   // Modal styles
   modalOverlay: {

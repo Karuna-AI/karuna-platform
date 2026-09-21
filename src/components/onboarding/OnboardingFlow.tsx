@@ -13,12 +13,9 @@ import {
 } from './shared';
 import { WelcomeRoleScreen } from './WelcomeRoleScreen';
 import { LanguageVoiceScreen } from './LanguageVoiceScreen';
-import { PermissionMicScreen } from './PermissionMicScreen';
-import { PermissionNotifyScreen } from './PermissionNotifyScreen';
+import { PermissionsScreen } from './PermissionsScreen';
 import { SecuritySetupScreen } from './SecuritySetupScreen';
-import { QuickSetupScreen } from './QuickSetupScreen';
 import { CaregiverInviteScreen } from './CaregiverInviteScreen';
-import { VoiceTutorialScreen } from './VoiceTutorialScreen';
 import { OnboardingCompleteScreen } from './OnboardingCompleteScreen';
 
 interface OnboardingFlowProps {
@@ -120,18 +117,12 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps): JSX.Element
         return <WelcomeRoleScreen {...screenProps} onRoleSelected={handleRoleSelected} />;
       case 'language_voice':
         return <LanguageVoiceScreen {...screenProps} />;
-      case 'permission_mic':
-        return <PermissionMicScreen {...screenProps} />;
-      case 'permission_notify':
-        return <PermissionNotifyScreen {...screenProps} />;
+      case 'permissions':
+        return <PermissionsScreen {...screenProps} />;
       case 'security_setup':
         return <SecuritySetupScreen {...screenProps} />;
-      case 'quick_setup':
-        return <QuickSetupScreen {...screenProps} />;
       case 'caregiver_invite':
         return <CaregiverInviteScreen {...screenProps} />;
-      case 'voice_tutorial':
-        return <VoiceTutorialScreen {...screenProps} />;
       case 'complete':
         return <OnboardingCompleteScreen {...screenProps} onComplete={handleComplete} />;
       default:
@@ -153,6 +144,13 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps): JSX.Element
       )}
       <View style={styles.container}>
         {renderCurrentScreen()}
+        {/* #17: progress dots also shown on welcome — non-interactive
+            (decorative), so no hitSlop is required. */}
+        {currentStep === 'welcome_role' && (
+          <View style={{ alignItems: 'center', paddingBottom: 12 }}>
+            <ProgressDots total={steps.length} current={currentIndex} />
+          </View>
+        )}
       </View>
       {showHeader && (
         <View style={{ alignItems: 'center', paddingBottom: 8 }}>

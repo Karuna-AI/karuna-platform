@@ -21,7 +21,9 @@ export function WelcomeRoleScreen({
 }: WelcomeRoleScreenProps): JSX.Element {
   useEffect(() => {
     if (readAloudEnabled) {
-      ttsService.speak('Welcome to Karuna. Your voice-first companion. Choose how you would like to get started.');
+      ttsService.speak('Welcome to Karuna. Your voice-first companion. Choose how you would like to get started.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled]);
 

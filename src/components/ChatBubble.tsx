@@ -12,11 +12,17 @@ interface ChatBubbleProps {
 export function ChatBubble({
   message,
   _isLatest = false,
-}: ChatBubbleProps): JSX.Element {
+}: ChatBubbleProps): React.JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
 
   const isUser = message.role === 'user';
+
+  // #3: bubble text floors at 16sp at every scale; timestamps are never
+  // small or low-contrast.
+  const bodySize = Math.max(16, fonts.body);
+  const labelSize = Math.max(16, fonts.body - 2);
+  const timestampSize = Math.max(16, fonts.body - 4);
 
   const formatTime = (timestamp: number): string => {
     const date = new Date(timestamp);
@@ -52,7 +58,7 @@ export function ChatBubble({
           <Text
             style={[
               styles.senderLabel,
-              { color: colors.primary, fontSize: fonts.body - 2 },
+              { color: colors.primary, fontSize: labelSize },
             ]}
           >
             Karuna
@@ -61,7 +67,7 @@ export function ChatBubble({
         <Text
           style={[
             styles.messageText,
-            { color: colors.text, fontSize: fonts.body },
+            { color: colors.text, fontSize: bodySize },
           ]}
         >
           {message.content}
@@ -69,7 +75,7 @@ export function ChatBubble({
         <Text
           style={[
             styles.timestamp,
-            { color: colors.textSecondary, fontSize: fonts.body - 4 },
+            { color: colors.text, fontSize: timestampSize, opacity: 0.75 },
           ]}
         >
           {formatTime(message.timestamp)}

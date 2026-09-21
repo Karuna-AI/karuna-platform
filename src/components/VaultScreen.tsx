@@ -32,7 +32,7 @@ interface VaultSummary {
   appointments: number;
 }
 
-export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreenProps): JSX.Element {
+export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreenProps): React.JSX.Element {
   const [isLocked, setIsLocked] = useState(true);
   const [hasVault, setHasVault] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -154,13 +154,15 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
   }, []);
 
   const confirmDeleteVault = () => {
+    // Stage 2: deliberate confirmation — distinct wording from stage 1 so
+    // "delete everything" is a conscious, unmistakable choice.
     Alert.alert(
-      'Delete Vault',
-      'Resetting the vault PIN will permanently delete all vault data. This cannot be undone. Are you sure?',
+      'Delete everything and start over?',
+      'This permanently deletes all your saved private information. This cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep my information', style: 'cancel' },
         {
-          text: 'Delete Vault',
+          text: 'Yes, delete everything',
           style: 'destructive',
           onPress: async () => {
             await vaultService.deleteVault();
@@ -177,9 +179,18 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
 
   const handleForgotVaultPin = () => {
     // In a care circle, offer caregiver-assisted recovery (no data loss) before
-    // the destructive delete. Outside a circle, delete is the only option.
+    // the destructive delete. Outside a circle, delete is the only option —
+    // staged in two steps so a forgotten PIN never wipes data by accident.
     if (!careCircleSyncService.isConnected()) {
-      confirmDeleteVault();
+      // Stage 1: plain-language warning that there is no recovery.
+      Alert.alert(
+        'Forgot your PIN?',
+        'There is no way to recover a forgotten PIN. The only way back in is to delete your private information and start over — everything you saved will be permanently deleted.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'I understand — continue', onPress: confirmDeleteVault },
+        ]
+      );
       return;
     }
     Alert.alert(
@@ -260,7 +271,7 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
           <TouchableOpacity onPress={onClose} style={styles.backButton}>
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Knowledge Vault</Text>
+          <Text style={styles.headerTitle}>My Private Information</Text>
           <View style={styles.placeholder} />
         </View>
         <View style={styles.loadingContainer}>
@@ -278,7 +289,7 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
         <TouchableOpacity onPress={onClose} style={styles.backButton}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Knowledge Vault</Text>
+        <Text style={styles.headerTitle}>My Private Information</Text>
         {!isLocked ? (
           <TouchableOpacity onPress={handleLock} style={styles.lockButton}>
             <Text style={styles.lockButtonText}>Lock</Text>
@@ -396,8 +407,15 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
         onRequestClose={() => setShowPinModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
+          <View
+            style={styles.modalContent}
+            accessible={true}
+            accessibilityViewIsModal={true}
+            accessibilityLabel={
+              isRecovering ? 'Recover your private information' : isCreatingVault ? 'Create your vault PIN' : 'Enter your PIN'
+            }
+          >
+            <Text style={styles.modalTitle} accessible={true} accessibilityRole="header">
               {isRecovering ? 'Recover Your Vault' : isCreatingVault ? 'Create Your Vault PIN' : 'Enter Your PIN'}
             </Text>
 
@@ -417,7 +435,8 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
               keyboardType="number-pad"
               secureTextEntry
               maxLength={6}
-              autoFocus
+              accessible={true}
+              accessibilityLabel={isRecovering ? 'New PIN, 4 to 6 digits' : 'Enter your PIN'}
             />
 
             {(isCreatingVault || isRecovering) && (
@@ -429,6 +448,8 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
                 keyboardType="number-pad"
                 secureTextEntry
                 maxLength={6}
+                accessible={true}
+                accessibilityLabel="Confirm your PIN, type it again"
               />
             )}
 
@@ -474,7 +495,14 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
             </View>
 
             {!isCreatingVault && !isRecovering && (
-              <TouchableOpacity style={styles.forgotPinLink} onPress={handleForgotVaultPin}>
+              <TouchableOpacity
+                style={styles.forgotPinLink}
+                onPress={handleForgotVaultPin}
+                accessible={true}
+                accessibilityLabel="Forgot vault PIN"
+                accessibilityHint="No PIN recovery exists — this explains your options"
+                accessibilityRole="button"
+              >
                 <Text style={styles.forgotPinLinkText}>Forgot vault PIN?</Text>
               </TouchableOpacity>
             )}
@@ -499,7 +527,7 @@ function VaultCategoryButton({
   count,
   description,
   onPress,
-}: VaultCategoryButtonProps): JSX.Element {
+}: VaultCategoryButtonProps): React.JSX.Element {
   return (
     <TouchableOpacity style={styles.categoryButton} onPress={onPress}>
       <Text style={styles.categoryIcon}>{icon}</Text>
@@ -671,8 +699,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   categoryDescription: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 16,
+    color: '#424242',
     textAlign: 'center',
   },
 
@@ -740,10 +768,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   pinWarning: {
-    color: '#B26A00',
+    color: '#7A4A00',
     backgroundColor: '#FFF4E5',
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 23,
     textAlign: 'left',
     padding: 12,
     borderRadius: 10,
@@ -783,11 +811,18 @@ const styles = StyleSheet.create({
   forgotPinLink: {
     marginTop: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    minHeight: 56,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#999',
+    paddingHorizontal: 16,
   },
   forgotPinLinkText: {
-    fontSize: 14,
-    color: '#999',
-    textDecorationLine: 'underline',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#424242',
   },
 });
 

@@ -22,6 +22,7 @@ import {
 import { useTranslation } from '../i18n/useTranslation';
 import { getLanguageConfig } from '../i18n/languages';
 import { LanguageSelector } from './LanguageSelector';
+import { useVoicePreferences } from './voicePreferences';
 import { SPACING, TOUCH_TARGETS } from '../utils/accessibility';
 
 interface SettingsScreenProps {
@@ -45,7 +46,7 @@ function OptionButton<T>({
   label,
   onSelect,
   fontSize,
-}: OptionButtonProps<T>): JSX.Element {
+}: OptionButtonProps<T>): React.JSX.Element {
   const isSelected = value === currentValue;
   return (
     <TouchableOpacity
@@ -72,7 +73,7 @@ function OptionButton<T>({
   );
 }
 
-export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpenMemories }: SettingsScreenProps): JSX.Element {
+export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpenMemories }: SettingsScreenProps): React.JSX.Element {
   const { t } = useTranslation();
   const {
     settings,
@@ -98,6 +99,14 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
   const [contactPhone, setContactPhone] = useState('');
   const [contactRelationship, setContactRelationship] = useState('');
 
+  // #12: voice interaction preferences (tap-to-talk default, review-before-send).
+  const {
+    tapToTalk,
+    confirmVoiceMessage,
+    setTapToTalk,
+    setConfirmVoiceMessage,
+  } = useVoicePreferences();
+
   // Font size based on settings
   const getFontSize = (base: number): number => {
     const multipliers: Record<FontSize, number> = {
@@ -111,7 +120,8 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
 
   const bodyFont = getFontSize(16);
   const headerFont = getFontSize(20);
-  const sectionFont = getFontSize(14);
+  // #14: section headings are 18sp bold — never smaller.
+  const sectionFont = getFontSize(18);
 
   const handleResetSettings = useCallback(() => {
     Alert.alert(
@@ -142,7 +152,7 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
 
   const handleSaveContact = useCallback(() => {
     if (!contactName.trim() || !contactPhone.trim()) {
-      Alert.alert(t.error, 'Please enter name and phone number');
+      Alert.alert(t.error, t.emergency.enterNameAndPhone);
       return;
     }
 
@@ -194,7 +204,7 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
         onPress: () => {
           const url = `tel:${primary.phoneNumber.replace(/\s/g, '')}`;
           Linking.openURL(url).catch(() => {
-            Alert.alert(t.error, 'Could not make call');
+            Alert.alert(t.error, t.emergency.callFailed);
           });
         },
       },
@@ -208,25 +218,37 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
     </View>
   );
 
+  // #14: the whole row is tappable (not just the switch), with a
+  // plain-language hint explaining what the setting does.
   const renderToggle = (
     label: string,
+    hint: string,
     value: boolean,
     onValueChange: (value: boolean) => void
   ) => (
-    <View style={styles.toggleRow}>
-      <Text style={[styles.toggleLabel, { fontSize: bodyFont }]}>{label}</Text>
+    <TouchableOpacity
+      style={styles.toggleRow}
+      onPress={() => onValueChange(!value)}
+      accessible={true}
+      accessibilityLabel={`${label}. ${hint}`}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+    >
+      <View style={styles.toggleTextColumn}>
+        <Text style={[styles.toggleLabel, { fontSize: bodyFont }]}>{label}</Text>
+        <Text style={[styles.toggleHint, { fontSize: Math.max(16, bodyFont - 2) }]}>
+          {hint}
+        </Text>
+      </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
         trackColor={{ false: '#767577', true: '#4CAF50' }}
         thumbColor={value ? '#FFFFFF' : '#f4f3f4'}
         ios_backgroundColor="#767577"
-        accessible={true}
-        accessibilityLabel={label}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: value }}
+        accessible={false}
       />
-    </View>
+    </TouchableOpacity>
   );
 
   const renderContactModal = () => (
@@ -237,7 +259,12 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
       onRequestClose={() => setShowAddContact(false)}
     >
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+        <View
+          style={styles.modalContent}
+          accessible={true}
+          accessibilityViewIsModal={true}
+          accessibilityLabel={editingContact ? t.emergency.editContact : t.emergency.addContact}
+        >
           <Text style={[styles.modalTitle, { fontSize: headerFont }]}>
             {editingContact ? t.emergency.editContact : t.emergency.addContact}
           </Text>
@@ -249,8 +276,10 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
             style={[styles.input, { fontSize: bodyFont }]}
             value={contactName}
             onChangeText={setContactName}
-            placeholder="Name"
-            autoFocus
+            placeholder={t.emergency.contactName}
+            accessible={true}
+            accessibilityLabel={t.emergency.contactName}
+            returnKeyType="next"
           />
 
           <Text style={[styles.inputLabel, { fontSize: sectionFont }]}>
@@ -262,6 +291,9 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
             onChangeText={setContactPhone}
             placeholder="+1234567890"
             keyboardType="phone-pad"
+            accessible={true}
+            accessibilityLabel={t.emergency.contactPhone}
+            returnKeyType="next"
           />
 
           <Text style={[styles.inputLabel, { fontSize: sectionFont }]}>
@@ -271,7 +303,10 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
             style={[styles.input, { fontSize: bodyFont }]}
             value={contactRelationship}
             onChangeText={setContactRelationship}
-            placeholder="Son, Daughter, Doctor, etc."
+            placeholder={t.emergency.contactRelationship}
+            accessible={true}
+            accessibilityLabel={t.emergency.contactRelationship}
+            returnKeyType="done"
           />
 
           <View style={styles.modalButtons}>
@@ -427,15 +462,42 @@ export function SettingsScreen({ onClose, onOpenSecurity, onOpenProactive, onOpe
         {/* Voice Settings */}
         {renderSection(t.settings.voice, (
           <>
-            {renderToggle(t.settings.autoPlayResponses, settings.autoPlayResponses, setAutoPlayResponses)}
+            {renderToggle(
+              t.settings.tapToTalkOption,
+              t.settings.tapToTalkHint,
+              tapToTalk,
+              setTapToTalk
+            )}
+            {renderToggle(
+              t.settings.confirmVoiceMessage,
+              t.settings.confirmVoiceMessageHint,
+              confirmVoiceMessage,
+              setConfirmVoiceMessage
+            )}
+            {renderToggle(
+              t.settings.autoPlayResponses,
+              t.settings.autoPlayResponsesHint,
+              settings.autoPlayResponses,
+              setAutoPlayResponses
+            )}
           </>
         ))}
 
         {/* Accessibility */}
         {renderSection(t.settings.accessibility, (
           <>
-            {renderToggle(t.settings.highContrast, settings.highContrast, setHighContrast)}
-            {renderToggle(t.settings.hapticFeedback, settings.hapticFeedback, setHapticFeedback)}
+            {renderToggle(
+              t.settings.highContrast,
+              t.settings.highContrastHint,
+              settings.highContrast,
+              setHighContrast
+            )}
+            {renderToggle(
+              t.settings.hapticFeedback,
+              t.settings.hapticFeedbackHint,
+              settings.hapticFeedback,
+              setHapticFeedback
+            )}
           </>
         ))}
 
@@ -667,10 +729,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sectionTitle: {
-    color: '#757575',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: '#212121',
+    fontWeight: '700',
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.xs,
@@ -715,10 +775,17 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     minHeight: TOUCH_TARGETS.comfortable,
   },
-  toggleLabel: {
-    color: '#212121',
+  toggleTextColumn: {
     flex: 1,
     paddingRight: SPACING.md,
+  },
+  toggleLabel: {
+    color: '#212121',
+    fontWeight: '600',
+  },
+  toggleHint: {
+    color: '#424242',
+    marginTop: 2,
   },
   languageButton: {
     flexDirection: 'row',

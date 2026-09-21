@@ -42,7 +42,9 @@ export function CaregiverInviteScreen({
 
   useEffect(() => {
     if (readAloudEnabled) {
-      ttsService.speak('Invite a caregiver. Share a link so your family member can connect with you on Karuna.');
+      ttsService.speak('Invite a caregiver. Share a link so your family member can connect with you on Karuna.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled]);
 

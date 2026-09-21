@@ -32,13 +32,25 @@ describe('VoiceButton', () => {
   });
 
   describe('idle state', () => {
-    it('renders "Hold to talk" state text in idle state', () => {
+    it('renders "Tap to talk" state text in idle state by default', () => {
       renderButton();
+      expect(screen.getByText('Tap to talk')).toBeTruthy();
+    });
+
+    it('renders "Hold to talk" when tapToTalk is false', () => {
+      renderButton({ tapToTalk: false });
       expect(screen.getByText('Hold to talk')).toBeTruthy();
     });
 
     it('has correct accessibility label in idle state', () => {
       renderButton();
+      expect(
+        screen.getByLabelText('Tap to talk button. Tap once to start speaking.')
+      ).toBeTruthy();
+    });
+
+    it('has hold-to-talk accessibility label when tapToTalk is false', () => {
+      renderButton({ tapToTalk: false });
       expect(
         screen.getByLabelText('Hold to talk button. Press and hold to start speaking.')
       ).toBeTruthy();
@@ -62,8 +74,13 @@ describe('VoiceButton', () => {
   });
 
   describe('recording state', () => {
-    it('renders "Listening..." state text while recording', () => {
+    it('renders "Tap to stop" state text while recording by default', () => {
       renderButton({ isRecording: true });
+      expect(screen.getByText('Tap to stop')).toBeTruthy();
+    });
+
+    it('renders "Listening..." while recording in hold-to-talk mode', () => {
+      renderButton({ isRecording: true, tapToTalk: false });
       expect(screen.getByText('Listening...')).toBeTruthy();
     });
 
@@ -71,9 +88,7 @@ describe('VoiceButton', () => {
       renderButton({ isRecording: true, recordingDuration: 5000 });
       // formatDurationForAccessibility(5000) → "5 seconds"
       expect(
-        screen.getByLabelText(
-          'Recording: 5 seconds. Release to send, or drag away to cancel.'
-        )
+        screen.getByLabelText('Recording: 5 seconds. Tap to stop.')
       ).toBeTruthy();
     });
 
@@ -113,9 +128,7 @@ describe('VoiceButton', () => {
 
     it('has correct accessibility label while processing', () => {
       renderButton({ isProcessing: true });
-      expect(
-        screen.getByLabelText('Processing your message. Please wait.')
-      ).toBeTruthy();
+      expect(screen.getByLabelText('Thinking...')).toBeTruthy();
     });
 
     it('does not show Cancel button while processing', () => {
@@ -132,26 +145,31 @@ describe('VoiceButton', () => {
   });
 
   describe('disabled state', () => {
-    it('renders without crashing when disabled', () => {
+    it('renders thinking message when disabled', () => {
       renderButton({ isDisabled: true });
-      expect(screen.getByText('Hold to talk')).toBeTruthy();
+      expect(screen.getByText('Karuna is thinking — please wait')).toBeTruthy();
     });
 
     it('button has disabled accessibility state when isDisabled is true', () => {
       renderButton({ isDisabled: true });
       // The View with accessibilityState has role="button"
       const button = screen.getByRole('button', {
-        name: 'Hold to talk button. Press and hold to start speaking.',
+        name: 'Karuna is thinking — please wait',
       });
       expect(button).toBeTruthy();
     });
 
-    it('button has disabled accessibility state when processing', () => {
+    it('button has busy accessibility state when processing', () => {
       renderButton({ isProcessing: true });
       const button = screen.getByRole('button', {
-        name: 'Processing your message. Please wait.',
+        name: 'Thinking...',
       });
       expect(button).toBeTruthy();
+    });
+
+    it('renders "Thinking..." state text while processing', () => {
+      renderButton({ isProcessing: true });
+      expect(screen.getByText('Thinking...')).toBeTruthy();
     });
   });
 

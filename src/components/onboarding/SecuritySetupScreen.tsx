@@ -44,7 +44,9 @@ export function SecuritySetupScreen({
 
   useEffect(() => {
     if (readAloudEnabled && phase === 'choose') {
-      ttsService.speak('Protect your information. Set up a PIN or use biometrics to keep your data safe.');
+      ttsService.speak('Keep your information private. Add a lock so only you can open your health notes and personal vault.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled, phase]);
 
@@ -92,8 +94,9 @@ export function SecuritySetupScreen({
         if (newConfirm === pin) {
           completePinSetup(newConfirm);
         } else {
+          // #16: gentle mismatch guidance — no alarm, simple next step.
           shake();
-          setError('PINs do not match. Try again.');
+          setError("Those numbers didn't match. No worries — let's try again.");
           setPin('');
           setConfirmPin('');
           setTimeout(() => setPhase('enter_pin'), 300);
@@ -136,18 +139,19 @@ export function SecuritySetupScreen({
   }, [onNext]);
 
   const biometricAvailable = biometricCaps?.isAvailable && biometricCaps?.isEnrolled;
+  // #15: plain language — say what the action does, not the brand name.
   const biometricLabel = biometricCaps?.biometricTypes.includes('facial')
-    ? 'Use Face ID'
-    : 'Use Fingerprint';
+    ? 'Unlock with My Face'
+    : 'Unlock with My Fingerprint';
 
   // Choose method phase
   if (phase === 'choose') {
     return (
       <View style={onboardingStyles.content}>
         <IconCircle icon="🛡️" />
-        <Text style={onboardingStyles.title}>Protect Your Information</Text>
+        <Text style={onboardingStyles.title}>Keep Your Information Private</Text>
         <Text style={onboardingStyles.subtitle}>
-          Keep your health data and personal vault secure
+          Choose a lock so only you can open your health notes and personal vault
         </Text>
 
         <View style={onboardingStyles.bottomArea}>
@@ -155,19 +159,19 @@ export function SecuritySetupScreen({
             <OnboardingButton
               title={biometricLabel}
               onPress={handleBiometric}
-              accessibilityHint="Sets up biometric authentication plus a backup PIN"
+              accessibilityHint="Sets up face or fingerprint unlock plus a backup PIN"
             />
           )}
           <OnboardingButton
             title="Set a 4-digit PIN"
             onPress={() => setPhase('enter_pin')}
             style={biometricAvailable ? { backgroundColor: colors.surface } : undefined}
-            accessibilityHint="Creates a 4-digit PIN to protect your data"
+            accessibilityHint="Creates a 4-digit number code to lock your data"
           />
           <OnboardingSecondaryButton
             title="Skip for now"
             onPress={handleSkip}
-            accessibilityHint="Skips security setup. You can set it up later."
+            accessibilityHint="Skips the lock. You can add one later in Settings."
           />
         </View>
       </View>
@@ -179,23 +183,23 @@ export function SecuritySetupScreen({
     return (
       <View style={onboardingStyles.content}>
         <IconCircle icon="✅" color={colors.success} />
-        <Text style={onboardingStyles.title}>Security Set Up!</Text>
-        <Text style={onboardingStyles.subtitle}>Your data is now protected</Text>
+        <Text style={onboardingStyles.title}>All Set!</Text>
+        <Text style={onboardingStyles.subtitle}>Only you can open your information now</Text>
       </View>
     );
   }
 
   // PIN entry / confirm phase
   const currentPin = phase === 'enter_pin' ? pin : confirmPin;
-  const promptText = phase === 'enter_pin' ? 'Create a 4-digit PIN' : 'Confirm your PIN';
+  const promptText = phase === 'enter_pin' ? 'Choose a 4-Number Code' : 'Enter the Same Code Again';
 
   return (
     <Animated.View style={[onboardingStyles.content, { transform: [{ translateX: shakeAnim }] }]}>
       <Text style={onboardingStyles.title}>{promptText}</Text>
       <Text style={onboardingStyles.subtitle}>
         {phase === 'enter_pin'
-          ? 'Choose a PIN you will remember'
-          : 'Enter the same PIN again'}
+          ? 'Pick numbers that are easy for you to remember'
+          : 'Enter the same 4 numbers again'}
       </Text>
 
       {/* PIN dots */}
