@@ -61,6 +61,9 @@ interface AppStateContextValue {
   // Onboarding
   isOnboardingComplete: boolean | null;
   onOnboardingComplete: () => void;
+  // Called after the care-circle account is deleted in-app: resets onboarding
+  // so the app returns to the welcome flow.
+  onAccountDeleted: () => Promise<void>;
 
   // Deep link invite token
   pendingInviteToken: string | null;
@@ -286,6 +289,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setIsOnboardingComplete(true);
   }, []);
 
+  // After in-app account deletion the server-side account is gone: wipe the
+  // onboarding state so the app returns to the welcome flow on a clean slate.
+  const onAccountDeleted = useCallback(async () => {
+    await onboardingStore.reset();
+    setIsOnboardingComplete(false);
+  }, []);
+
   const clearPendingInviteToken = useCallback(() => setPendingInviteToken(null), []);
 
   // ─── Intent modal ────────────────────────────────────────────────────────
@@ -415,6 +425,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       onVaultUnlock,
       isOnboardingComplete,
       onOnboardingComplete,
+      onAccountDeleted,
       pendingInviteToken,
       clearPendingInviteToken,
       showIntentModal,

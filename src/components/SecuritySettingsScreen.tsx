@@ -18,17 +18,23 @@ import {
   BiometricCapabilities,
   SecuritySettings,
 } from '../services/biometricAuth';
+import {
+  careCircleSyncService,
+  OwnedCircleSummary,
+} from '../services/careCircleSync';
 
 interface SecuritySettingsScreenProps {
   onBack: () => void;
   onOpenConsent: () => void;
   onOpenAuditLog: () => void;
+  onAccountDeleted: () => Promise<void>;
 }
 
 export function SecuritySettingsScreen({
   onBack,
   onOpenConsent,
   onOpenAuditLog,
+  onAccountDeleted,
 }: SecuritySettingsScreenProps): JSX.Element {
   const [settings, setSettings] = useState<SecuritySettings | null>(null);
   const [biometricCapabilities, setBiometricCapabilities] = useState<BiometricCapabilities | null>(null);
@@ -38,8 +44,21 @@ export function SecuritySettingsScreen({
   const [pinError, setPinError] = useState('');
   const [isSettingUp, setIsSettingUp] = useState(false);
 
+  // In-app account deletion (App Store 5.1.1(v)). Only shown when the app
+  // holds a care-circle auth token — i.e. the user actually has a server
+  // account to delete.
+  const [hasCareAccount, setHasCareAccount] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<'password' | 'ownedCircles'>('password');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [ownedCircles, setOwnedCircles] = useState<OwnedCircleSummary[]>([]);
+  const [confirmOwnedCircles, setConfirmOwnedCircles] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    setHasCareAccount(careCircleSyncService.getAuthToken() !== null);
   }, []);
 
   const loadSettings = async () => {
@@ -176,6 +195,177 @@ export function SecuritySettingsScreen({
     await biometricAuthService.lock();
     Alert.alert('Locked', 'The app has been locked');
   };
+
+  // ─── Account deletion ────────────────────────────────────────────────────
+
+  const openDeleteModal = () => {
+    setDeleteStep('password');
+    setDeletePassword('');
+    setDeleteError('');
+    setOwnedCircles([]);
+    setConfirmOwnedCircles(false);
+    setIsDeleting(false);
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false);
+    setDeletePassword('');
+    setDeleteError('');
+  };
+
+  const finishAccountDeletion = async () => {
+    // Server-side wipe succeeded: clear the local care session and return to
+    // the welcome flow. Local vault/PIN are untouched — this deletes the
+    // care-circle account, not the on-device profile.
+    await careCircleSyncService.clearLocalSession();
+    setShowDeleteModal(false);
+    await onAccountDeleted();
+  };
+
+  const handleDeleteAccount = async (confirmOwned: boolean) => {
+    if (!deletePassword) {
+      setDeleteError('Enter your password to confirm deletion.');
+      return;
+    }
+    setDeleteError('');
+    setIsDeleting(true);
+    const result = await careCircleSyncService.deleteAccount(deletePassword, confirmOwned);
+    setIsDeleting(false);
+
+    if (result.success) {
+      Alert.alert(
+        'Account Deleted',
+        'Your account and all associated data have been permanently deleted.',
+        [{ text: 'OK', onPress: () => { void finishAccountDeletion(); } }]
+      );
+      return;
+    }
+    if (result.ownedCircles && result.ownedCircles.length > 0) {
+      // 409: the user owns care circles — they need an explicit second
+      // confirmation because those circles are deleted for all members.
+      setOwnedCircles(result.ownedCircles);
+      setConfirmOwnedCircles(false);
+      setDeleteError(result.error || 'You own care circles — confirm below to delete them too.');
+      setDeleteStep('ownedCircles');
+      return;
+    }
+    setDeleteError(result.error || 'Failed to delete account. Please try again.');
+  };
+
+  const renderDeleteAccountModal = () => (
+    <Modal visible={showDeleteModal} animationType="slide" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Delete Account</Text>
+
+          {deleteStep === 'password' ? (
+            <>
+              <Text style={styles.deleteWarning}>
+                This permanently deletes your Karuna account and all data stored
+                for it. Care circles you own are deleted for all members; in
+                circles you only belong to, your identity is removed. This
+                cannot be undone.
+              </Text>
+
+              <View style={styles.pinInputContainer}>
+                <Text style={styles.pinInputLabel}>Confirm with your password</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="Enter your password"
+                  editable={!isDeleting}
+                />
+              </View>
+
+              {deleteError ? <Text style={styles.pinError}>{deleteError}</Text> : null}
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={closeDeleteModal}
+                  disabled={isDeleting}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.deleteConfirmButton, isDeleting && styles.buttonDisabled]}
+                  onPress={() => { void handleDeleteAccount(false); }}
+                  disabled={isDeleting}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {isDeleting ? 'Deleting…' : 'Delete My Account'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.deleteWarning}>
+                You own the following care circles. Deleting your account will
+                permanently delete these circles — and all their data — for
+                every member:
+              </Text>
+
+              <View style={styles.ownedCircleList}>
+                {ownedCircles.map((circle) => (
+                  <View key={circle.id} style={styles.ownedCircleRow}>
+                    <Text style={styles.ownedCircleName}>{circle.name}</Text>
+                    <Text style={styles.ownedCircleMeta}>
+                      {circle.memberCount} member{circle.memberCount === 1 ? '' : 's'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <TouchableOpacity
+                style={styles.confirmRow}
+                onPress={() => setConfirmOwnedCircles((v) => !v)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: confirmOwnedCircles }}
+              >
+                <View style={[styles.checkbox, confirmOwnedCircles && styles.checkboxChecked]}>
+                  {confirmOwnedCircles ? <Text style={styles.checkboxTick}>✓</Text> : null}
+                </View>
+                <Text style={styles.confirmRowText}>
+                  I understand my owned care circles will be permanently deleted
+                  for all members.
+                </Text>
+              </TouchableOpacity>
+
+              {deleteError ? <Text style={styles.pinError}>{deleteError}</Text> : null}
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={closeDeleteModal}
+                  disabled={isDeleting}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.deleteConfirmButton,
+                    (!confirmOwnedCircles || isDeleting) && styles.buttonDisabled,
+                  ]}
+                  onPress={() => { void handleDeleteAccount(true); }}
+                  disabled={!confirmOwnedCircles || isDeleting}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {isDeleting ? 'Deleting…' : 'Delete Everything'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
 
   const getBiometricName = () => {
     if (!biometricCapabilities) return 'Biometric';
@@ -438,10 +628,33 @@ export function SecuritySettingsScreen({
           </View>
         )}
 
+        {/* Danger Zone — in-app account deletion (App Store 5.1.1(v)).
+            Only visible when the app holds a care-circle auth token. */}
+        {hasCareAccount && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, styles.dangerSectionTitle]}>Danger Zone</Text>
+
+            <TouchableOpacity
+              style={styles.deleteAccountButton}
+              onPress={openDeleteModal}
+            >
+              <Text style={styles.deleteAccountIcon}>🗑️</Text>
+              <View style={styles.setupPinInfo}>
+                <Text style={styles.deleteAccountTitle}>Delete Account</Text>
+                <Text style={styles.deleteAccountDescription}>
+                  Permanently delete your account and all associated data
+                </Text>
+              </View>
+              <Text style={styles.setupPinArrow}>→</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.bottomPadding} />
       </ScrollView>
 
       {renderPinSetupModal()}
+      {renderDeleteAccountModal()}
     </SafeAreaView>
   );
 }
@@ -736,6 +949,113 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  // Account deletion styles
+  dangerSectionTitle: {
+    color: '#C62828',
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E57373',
+    ...Platform.select({
+      web: { boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+      },
+    }),
+  },
+  deleteAccountIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  deleteAccountTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#C62828',
+    marginBottom: 4,
+  },
+  deleteAccountDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  deleteWarning: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    backgroundColor: '#C62828',
+    alignItems: 'center',
+  },
+  deleteConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  ownedCircleList: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  ownedCircleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  ownedCircleName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    flex: 1,
+  },
+  ownedCircleMeta: {
+    fontSize: 13,
+    color: '#888',
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#999',
+    marginRight: 12,
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#C62828',
+    borderColor: '#C62828',
+  },
+  checkboxTick: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  confirmRowText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
   },
 });
 
