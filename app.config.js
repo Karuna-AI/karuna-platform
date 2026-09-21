@@ -266,7 +266,7 @@ module.exports = {
         projectId: 'b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
       },
     },
-    owner: process.env.EXPO_OWNER || 'karuna-ai',
+    owner: process.env.EXPO_OWNER || 'snehal2026',
     runtimeVersion: '1.0.0',
     updates: {
       enabled: false,
