@@ -66,6 +66,8 @@ module.exports = {
           'Karuna accesses your calendar to help manage appointments and send you timely reminders.',
         NSContactsUsageDescription:
           'Karuna accesses your contacts so you can quickly call or message family and caregivers.',
+        NSLocationWhenInUseUsageDescription:
+          'Karuna uses your location to show local weather information.',
         // 'audio' removed: triggers AVAudioSession class loading on iOS 26 which crashes
         // Audio recording works without background mode — only needed for background playback
         UIBackgroundModes: ['fetch', 'remote-notification'],
@@ -105,6 +107,9 @@ module.exports = {
         'android.permission.health.WRITE_BLOOD_GLUCOSE',
         'android.permission.health.WRITE_BODY_WEIGHT',
         'android.permission.health.WRITE_OXYGEN_SATURATION',
+        // Location for weather widget (approximate only)
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
       ],
       intentFilters: [
         {
@@ -259,6 +264,8 @@ module.exports = {
       'expo-audio',
       'expo-localization',
       'expo-secure-store',
+      '@kingstinct/react-native-healthkit',
+      'react-native-health-connect',
     ],
     extra: {
       apiUrl: getApiUrl(),
