@@ -1,6 +1,6 @@
 # Karuna AI Companion — Store Listing Copy
 
-> Fill the bracketed items before submitting. Privacy policy URL: deploy `privacy-policy/` (Vercel-ready, see `vercel.json`) and paste the live URL everywhere `[PRIVACY_URL]` appears.
+> Privacy policy deployed: https://karuna-privacy-policy.vercel.app/
 
 ## Shared
 
@@ -9,7 +9,7 @@
 - **Version:** 1.0.0 (iOS build 33, Android versionCode 12)
 - **Category:** Lifestyle (alt: Medical — pick Lifestyle; Medical triggers extra review scrutiny)
 - **Support URL:** https://karunaapp.in
-- **Privacy policy URL:** `[PRIVACY_URL]`
+- **Privacy policy URL:** `https://karuna-privacy-policy.vercel.app/`
 
 ## Apple App Store
 
