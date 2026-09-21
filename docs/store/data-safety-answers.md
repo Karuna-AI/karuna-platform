@@ -29,7 +29,7 @@
 ## Section 2: Security practices
 
 - **Is all user data encrypted in transit? → Yes** (TLS/HTTPS everywhere; cleartext blocked in production builds)
-- **Can users ask that their data be deleted? → Yes** — deletion performs a full server-side wipe: the user's owned care circles are cascade-deleted (vault, health, alerts, sync data) and other shared references (AI usage logs, audit logs) are anonymized. The in-app account-deletion path (Settings → Security) is being added for this release; the deletion endpoint is already live and tested server-side.
+- **Can users ask that their data be deleted? → Yes** — deletion performs a full server-side wipe: the user's owned care circles are cascade-deleted (vault, health, alerts, sync data) and other shared references (AI usage logs, audit logs) are anonymized. In-app deletion: Settings → Security → Delete Account (shown when a care-circle session is active; requires password; second confirmation if the user owns circles).
 - Independent security review: No
 
 ## Section 3: Health Connect (App content → Health Connect permissions)
