@@ -62,6 +62,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       CORS_ORIGIN: ${CORS_ORIGIN}
+      METRICS_SECRET: ${METRICS_SECRET}
+      VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY}
+      RECOVERY_KEK: ${RECOVERY_KEK}
+      APP_BASE_URL: ${APP_BASE_URL}
     healthcheck:
       # GET /health returns { status: 'healthy' }; node:alpine has no
       # wget/curl, so use node's built-in fetch.
