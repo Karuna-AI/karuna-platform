@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import type { JSX } from 'react';
 import { View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { onboardingStore, OnboardingStep, OnboardingRole } from '../../services/onboardingStore';

@@ -426,9 +426,9 @@ class ConsentService {
     if (!this.preferences) return;
 
     this.preferences.lastReviewedAt = new Date().toISOString();
-    // Set next review reminder for 90 days
-    const nextReview = new Date();
-    nextReview.setDate(nextReview.getDate() + 90);
+    // Set next review reminder for 90 days (absolute ms — immune to DST shifts,
+    // unlike setDate() calendar-day arithmetic).
+    const nextReview = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
     this.preferences.nextReviewReminder = nextReview.toISOString();
 
     await this.save();

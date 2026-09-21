@@ -6,6 +6,7 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
+import type { JSX } from 'react';
 import { I18nManager, Alert } from 'react-native';
 import { storageService } from '../services/storage';
 import { LanguageCode, getLanguageConfig } from '../i18n/languages';
@@ -98,8 +99,6 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 interface SettingsProviderProps {
   children: ReactNode;
 }
-
-const _SETTINGS_STORAGE_KEY = '@karuna/app_settings';
 
 export function SettingsProvider({ children }: SettingsProviderProps): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);

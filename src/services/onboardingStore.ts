@@ -16,13 +16,18 @@ export type OnboardingRole = 'self' | 'caregiver';
 export type OnboardingStep =
   | 'welcome_role'
   | 'language_voice'
-  | 'permission_mic'
-  | 'permission_notify'
+  | 'permissions'
   | 'security_setup'
-  | 'quick_setup'
   | 'caregiver_invite'
-  | 'voice_tutorial'
   | 'complete';
+
+/** Steps removed by the #13 onboarding consolidation; mapped forward for persisted state. */
+const LEGACY_STEP_MAP: Record<string, OnboardingStep> = {
+  permission_mic: 'permissions',
+  permission_notify: 'permissions',
+  quick_setup: 'permissions',
+  voice_tutorial: 'permissions',
+};
 
 export interface QuickSetupData {
   reminderTime?: string;
@@ -97,7 +102,7 @@ class OnboardingStore {
 
   /** Map pre-consolidation steps (#13) to the current step lists. */
   private normalizeStep(
-    step: OnboardingStep | null,
+    step: string | null,
     role: OnboardingRole
   ): OnboardingStep {
     if (!step) return 'welcome_role';

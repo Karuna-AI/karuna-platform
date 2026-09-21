@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
+import type { JSX } from 'react';
 import { View, Text, Share, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as Crypto from 'expo-crypto';

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import type { JSX } from 'react';
 import {
   View,
   Text,
@@ -132,7 +133,7 @@ export function SecuritySettingsScreen({
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: async (currentPin) => {
+          onPress: async (currentPin?: string) => {
             if (!currentPin) return;
             const result = await biometricAuthService.removePIN(currentPin);
             if (result.success) {
@@ -156,7 +157,7 @@ export function SecuritySettingsScreen({
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Next',
-          onPress: async (currentPin) => {
+          onPress: async (currentPin?: string) => {
             if (!currentPin) return;
             const result = await biometricAuthService.verifyPIN(currentPin);
             if (result.success) {

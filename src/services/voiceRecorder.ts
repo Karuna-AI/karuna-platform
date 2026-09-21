@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
 import { AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 

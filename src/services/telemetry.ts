@@ -34,6 +34,8 @@ export type TelemetryEvent =
   | 'onboarding_caregiver_invite_shared'
   | 'onboarding_caregiver_invite_skipped'
   | 'onboarding_tutorial_viewed'
+  | 'onboarding_permissions_skipped'
+  | 'onboarding_speech_speed_selected'
   | 'onboarding_completed'
   | 'onboarding_skipped';
 

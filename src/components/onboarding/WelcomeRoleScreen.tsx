@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import type { JSX } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { OnboardingRole } from '../../services/onboardingStore';

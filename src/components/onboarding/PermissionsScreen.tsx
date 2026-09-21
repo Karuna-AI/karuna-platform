@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
+import type { JSX } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { permissionsService } from '../../services/permissions';

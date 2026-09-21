@@ -1,4 +1,5 @@
 import React from 'react';
+import type { JSX } from 'react';
 import {
   View,
   Text,
@@ -58,8 +59,6 @@ export function VaultSelectButton({
   onSelect,
   icon,
 }: VaultSelectButtonProps): JSX.Element {
-  const _selectedOption = options.find(o => o.value === value);
-
   return (
     <View style={styles.container}>
       <Text style={styles.label}>

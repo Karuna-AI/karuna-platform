@@ -51,7 +51,6 @@ export function VaultScreen({ onClose, onNavigate, refreshKey = 0 }: VaultScreen
   // so category counts reflect items added/removed in a sub-screen (N1).
   useEffect(() => {
     checkVaultStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
   const checkVaultStatus = async () => {

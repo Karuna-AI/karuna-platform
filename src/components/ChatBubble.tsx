@@ -11,7 +11,6 @@ interface ChatBubbleProps {
 
 export function ChatBubble({
   message,
-  _isLatest = false,
 }: ChatBubbleProps): React.JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
