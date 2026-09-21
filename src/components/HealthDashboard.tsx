@@ -17,6 +17,7 @@ import { medicationService } from '../services/medication';
 import { VitalType, VITAL_TYPE_INFO, VitalSummary, VitalReading } from '../types/health';
 
 import { getColors } from '../utils/accessibility';
+import { useTranslation } from '../i18n/useTranslation';
 
 /**
  * Title/body for the "Sync Health Data" result alert (M3). Always returns a
@@ -85,6 +86,7 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
   onClose,
   onOpenMedications,
 }) => {
+  const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stepsData, setStepsData] = useState<{
@@ -234,11 +236,28 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
     return value >= summary.normalRange.min && value <= summary.normalRange.max;
   };
 
+  // #22: plain-language status wording — color alone isn't enough for
+  // elderly users. "A little high — worth mentioning to your doctor"
+  // instead of just a red number.
+  const getVitalStatusText = (summary: VitalSummary): string | null => {
+    if (!summary.latestReading || !summary.normalRange) return null;
+    const value = summary.latestReading.value;
+    if (value < summary.normalRange.min) return t.health.statusLow;
+    if (value > summary.normalRange.max) return t.health.statusHigh;
+    return t.health.statusNormal;
+  };
+
   if (isLoading) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          <TouchableOpacity
+              onPress={onClose}
+              style={styles.backButton}
+              accessible={true}
+              accessibilityLabel={t.back}
+              accessibilityRole="button"
+            >
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Health Dashboard</Text>
@@ -254,7 +273,13 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.backButton}>
+        <TouchableOpacity
+              onPress={onClose}
+              style={styles.backButton}
+              accessible={true}
+              accessibilityLabel={t.back}
+              accessibilityRole="button"
+            >
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Health Dashboard</Text>
@@ -356,8 +381,14 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
           {vitalSummaries.length > 0 ? (
             vitalSummaries.map((summary) => {
               const inRange = isVitalInRange(summary);
+              const statusText = getVitalStatusText(summary);
               return (
-                <View key={summary.type} style={styles.vitalCard}>
+                <View
+                  key={summary.type}
+                  style={styles.vitalCard}
+                  accessible={true}
+                  accessibilityLabel={`${summary.displayName}: ${summary.latestReading?.value ?? ''} ${summary.unit}. ${statusText ?? ''}`}
+                >
                   <Text style={styles.vitalIcon}>{summary.icon}</Text>
                   <Text style={styles.vitalName}>{summary.displayName}</Text>
                   {summary.latestReading && (
@@ -374,6 +405,17 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({
                           `/${summary.latestReading.secondaryValue}`}
                       </Text>
                       <Text style={styles.vitalUnit}>{summary.unit}</Text>
+                      {statusText && (
+                        <Text
+                          style={[
+                            styles.vitalStatus,
+                            inRange === false && styles.vitalStatusWarning,
+                            inRange === true && styles.vitalStatusGood,
+                          ]}
+                        >
+                          {statusText}
+                        </Text>
+                      )}
                       {summary.trend !== 'unknown' && (
                         <Text style={styles.vitalTrend}>{getTrendIcon(summary.trend)}</Text>
                       )}
@@ -517,6 +559,9 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 8,
+    minHeight: 48,
+    minWidth: 48,
+    justifyContent: 'center',
   },
   backText: {
     fontSize: 16,
@@ -575,7 +620,7 @@ const styles = StyleSheet.create({
     color: c.text,
   },
   cardAction: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.primary,
   },
   stepsContent: {
@@ -602,12 +647,12 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   progressText: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
     marginTop: 8,
   },
   stepsMessage: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
     textAlign: 'center',
     marginTop: 8,
@@ -630,7 +675,7 @@ const styles = StyleSheet.create({
     color: c.text,
   },
   medStatLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
   },
   medStatDivider: {
@@ -645,7 +690,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   nextDoseLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.primary,
     marginBottom: 4,
   },
@@ -660,12 +705,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   noDataText: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
     textAlign: 'center',
   },
   noDataHint: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
     textAlign: 'center',
     marginTop: 4,
@@ -706,7 +751,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   vitalName: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
     marginBottom: 4,
   },
@@ -722,8 +767,21 @@ const styles = StyleSheet.create({
     color: c.success,
   },
   vitalUnit: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.textSecondary,
+  },
+  vitalStatus: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 6,
+    color: c.textSecondary,
+  },
+  vitalStatusWarning: {
+    color: c.warning,
+  },
+  vitalStatusGood: {
+    color: c.success,
   },
   vitalTrend: {
     fontSize: 16,
@@ -764,7 +822,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   actionText: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.text,
     fontWeight: '500',
   },
@@ -792,7 +850,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalLabel: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: c.textSecondary,
     marginTop: 12,
@@ -806,6 +864,8 @@ const styles = StyleSheet.create({
   vitalTypeChip: {
     paddingVertical: 8,
     paddingHorizontal: 12,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 20,
     backgroundColor: c.background,
     borderWidth: 1,
@@ -816,7 +876,7 @@ const styles = StyleSheet.create({
     borderColor: c.primary,
   },
   vitalTypeChipText: {
-    fontSize: 14,
+    fontSize: 16,
     color: c.text,
   },
   vitalTypeChipTextActive: {
@@ -842,6 +902,8 @@ const styles = StyleSheet.create({
   modalButton: {
     paddingVertical: 12,
     paddingHorizontal: 20,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 10,
   },
   modalCancel: {

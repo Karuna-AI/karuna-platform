@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import type { JSX } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useSettings } from '../../context/SettingsContext';
+import { SpeechRate } from '../../context/SettingsContext';
 import { ttsService } from '../../services/tts';
 import { telemetryService } from '../../services/telemetry';
 import { LanguageCode, getLanguageConfig } from '../../i18n/languages';
 import { LanguageSelector } from '../LanguageSelector';
-import { getColors, getFontSizes, SPACING } from '../../utils/accessibility';
+import { getColors, getFontSizes, SPACING, TOUCH_TARGETS } from '../../utils/accessibility';
 import {
   OnboardingScreenProps,
   OnboardingButton,
@@ -33,7 +35,7 @@ export function LanguageVoiceScreen({
   onNext,
   readAloudEnabled,
 }: OnboardingScreenProps): JSX.Element {
-  const { settings, setLanguage } = useSettings();
+  const { settings, setLanguage, setSpeechRate } = useSettings();
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
@@ -41,7 +43,9 @@ export function LanguageVoiceScreen({
 
   useEffect(() => {
     if (readAloudEnabled) {
-      ttsService.speak('Choose your language. You can also test how Karuna sounds.');
+      ttsService.speak('Choose your language. You can also test how Karuna sounds.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled]);
 
@@ -55,11 +59,20 @@ export function LanguageVoiceScreen({
     if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
     setIsTesting(true);
     const sample = getVoiceSample(settings.language);
-    ttsService.speak(sample);
+    ttsService.speak(sample).catch(() => {
+      // Error already surfaced via onSpeakError.
+    });
     telemetryService.track('onboarding_voice_tested', { errorType: settings.language });
     // Reset after a few seconds
     setTimeout(() => setIsTesting(false), 4000);
   }, [settings.language]);
+
+  // #31: speech-speed choice — Slow (0.6) is the elderly-friendly default.
+  const handleSpeedSelect = useCallback(async (rate: SpeechRate) => {
+    if (Platform.OS !== 'web') { try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { /* intentionally empty */ } }
+    await setSpeechRate(rate);
+    telemetryService.track('onboarding_speech_speed_selected', { rate });
+  }, [setSpeechRate]);
 
   const handleNext = useCallback(() => {
     ttsService.stop();
@@ -97,6 +110,39 @@ export function LanguageVoiceScreen({
           accessibilityHint="Plays a sample of how Karuna sounds in your language"
           style={styles.testButton}
         />
+      </View>
+
+      {/* #31: speech speed — Slow is best for most users */}
+      <View style={styles.speedSection}>
+        <Text style={styles.speedLabel}>How fast should Karuna speak?</Text>
+        <View style={styles.speedRow}>
+          {(
+            [
+              { label: 'Slow', rate: 0.6 },
+              { label: 'Normal', rate: 0.8 },
+              { label: 'Fast', rate: 1.0 },
+            ] as { label: string; rate: SpeechRate }[]
+          ).map((option) => {
+            const selected = settings.speechRate === option.rate;
+            return (
+              <TouchableOpacity
+                key={option.label}
+                style={[styles.speedChip, selected && styles.speedChipActive]}
+                onPress={() => handleSpeedSelect(option.rate)}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`Speech speed: ${option.label}`}
+                accessibilityState={{ selected }}
+              >
+                <Text
+                  style={[styles.speedChipText, selected && styles.speedChipTextActive]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
 
       {/* Next button at bottom */}
@@ -147,5 +193,42 @@ const styles = StyleSheet.create({
   },
   testButton: {
     backgroundColor: colors.surface,
+  },
+  speedSection: {
+    width: '100%',
+    marginTop: SPACING.lg,
+    alignItems: 'center',
+  },
+  speedLabel: {
+    fontSize: fonts.body,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: SPACING.sm,
+  },
+  speedRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  speedChip: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    minHeight: TOUCH_TARGETS.minimum,
+    justifyContent: 'center',
+  },
+  speedChipActive: {
+    borderColor: colors.primary,
+  },
+  speedChipText: {
+    fontSize: fonts.body,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  speedChipTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
 });

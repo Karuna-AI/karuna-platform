@@ -31,7 +31,9 @@ export type VaultChangeListener = (
   kind: VaultEntityKind,
   id: string,
   action: VaultChangeAction,
-  entity: Record<string, unknown> | null
+  // All vault entities extend VaultEntity, so the listener receives the base
+  // type; the call sites always pass the entity matching `kind`.
+  entity: VaultEntity | null
 ) => void;
 
 /**
@@ -96,11 +98,11 @@ class VaultService {
   }
 
   /** Fire the change listener; never let a listener error break a vault write. */
-  private notifyChange(
+  private notifyChange<T extends VaultEntity>(
     kind: VaultEntityKind,
     id: string,
     action: VaultChangeAction,
-    entity: Record<string, unknown> | null
+    entity: T | null
   ): void {
     if (!this.changeListener) return;
     try {

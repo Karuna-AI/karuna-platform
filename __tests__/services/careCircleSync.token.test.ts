@@ -80,7 +80,7 @@ describe('care-circle auth token persistence', () => {
     await second.initialize(URL_BASE);
 
     const calls: string[] = [];
-    (global as any).fetch = jest.fn(async (url: string, opts: any) => {
+    (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
       calls.push(opts?.headers?.Authorization ?? '');
       return { ok: true, json: async () => ({ medications: [], doctors: [], appointments: [], contacts: [], notes: [], accounts: [] }) };
     });
@@ -103,7 +103,7 @@ describe('care-circle auth token persistence', () => {
     expect(asyncStore[LEGACY_ASYNC_KEY]).toBeUndefined();
 
     const calls: string[] = [];
-    (global as any).fetch = jest.fn(async (url: string, opts: any) => {
+    (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
       calls.push(opts?.headers?.Authorization ?? '');
       return { ok: true, json: async () => ({ medications: [], doctors: [], appointments: [], contacts: [], notes: [], accounts: [] }) };
     });

@@ -27,7 +27,7 @@ function SettingsErrorAlert(): null {
   return null;
 }
 
-function AppShell(): JSX.Element | null {
+function AppShell(): React.JSX.Element | null {
   const {
     isOnboardingComplete,
     onOnboardingComplete,
@@ -44,7 +44,7 @@ function AppShell(): JSX.Element | null {
   // Compute body once; OfflineBanner overlays above all variants so the
   // user always sees the connectivity hint regardless of which screen
   // mode is active.
-  let body: JSX.Element;
+  let body: React.JSX.Element;
   if (!isOnboardingComplete) {
     body = <OnboardingFlow onComplete={onOnboardingComplete} />;
   } else if (isAppLocked && isSecurityInitialized) {
@@ -90,7 +90,7 @@ function ThemedProviders({ children }: { children: React.ReactNode }) {
   return <ThemeProvider highContrast={settings.highContrast}>{children}</ThemeProvider>;
 }
 
-export default function App(): JSX.Element {
+export default function App(): React.JSX.Element {
   // GestureHandlerRootView is required by @react-navigation/native-stack and
   // react-native-screens for touch propagation. SafeAreaProvider is required
   // by react-native-safe-area-context's SafeAreaView / useSafeAreaInsets() to

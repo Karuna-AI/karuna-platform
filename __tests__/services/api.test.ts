@@ -28,6 +28,7 @@ import {
   sendTelemetry,
   checkGatewayHealth,
   getGatewayMetrics,
+  onApiProgress,
 } from '../../src/services/api';
 
 import { telemetryService } from '../../src/services/telemetry';
@@ -110,6 +111,52 @@ describe('sendChatMessage', () => {
     expect(config.timeout).toBe(30000);
   });
 
+  it('#40: retries once on transient 5xx and succeeds', async () => {
+    mockAxios.post
+      .mockRejectedValueOnce(axiosError(503))
+      .mockResolvedValueOnce(axiosSuccess({ message: 'recovered' }));
+
+    const result = await sendChatMessage([{ role: 'user' as const, content: 'hi' }]);
+
+    expect(result).toBe('recovered');
+    expect(mockAxios.post).toHaveBeenCalledTimes(2);
+  });
+
+  it('#40: does not retry on 4xx client errors', async () => {
+    mockAxios.post.mockRejectedValueOnce(axiosError(400, { error: 'Bad request' }));
+
+    await expect(
+      sendChatMessage([{ role: 'user' as const, content: 'hi' }])
+    ).rejects.toThrow('Bad request');
+    expect(mockAxios.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('#40: notifies progress subscribers when a request runs long', async () => {
+    jest.useFakeTimers();
+    try {
+      const messages: string[] = [];
+      const unsubscribe = onApiProgress((m: string) => messages.push(m));
+
+      mockAxios.post.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(axiosSuccess({ message: 'ok' })), 15000)
+          )
+      );
+      const promise = sendChatMessage([{ role: 'user' as const, content: 'hi' }]);
+      // advanceTimersByTimeAsync flushes microtasks too, letting the
+      // connectivity check and retry loop start before timers fire.
+      await jest.advanceTimersByTimeAsync(11000);
+      expect(messages.length).toBeGreaterThan(0);
+      // Finish the request.
+      await jest.advanceTimersByTimeAsync(5000);
+      await promise;
+      unsubscribe();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('throws user-friendly message on 429 Too Many Requests', async () => {
     mockAxios.post.mockRejectedValueOnce(axiosError(429));
 
@@ -119,11 +166,13 @@ describe('sendChatMessage', () => {
   });
 
   it('throws user-friendly message on 504 Gateway Timeout', async () => {
-    mockAxios.post.mockRejectedValueOnce(axiosError(504));
+    // #40: 504 is transient → one automatic retry, then the friendly error.
+    mockAxios.post.mockRejectedValue(axiosError(504));
 
     await expect(sendChatMessage([{ role: 'user' as const, content: 'hi' }])).rejects.toThrow(
       'Request timed out. Please try again.'
     );
+    expect(mockAxios.post).toHaveBeenCalledTimes(2);
   });
 
   it('throws the server error message when response has error field', async () => {
@@ -141,7 +190,7 @@ describe('sendChatMessage', () => {
     mockAxios.post.mockRejectedValueOnce(err);
 
     await expect(sendChatMessage([{ role: 'user' as const, content: 'hi' }])).rejects.toThrow(
-      'Unable to connect to the service. Please check your internet connection.'
+      'No internet connection — please check your Wi-Fi.'
     );
     expect(mockTelemetry.trackNetworkError).toHaveBeenCalledWith('gateway_unavailable');
   });
@@ -152,7 +201,7 @@ describe('sendChatMessage', () => {
     mockAxios.post.mockRejectedValueOnce(err);
 
     await expect(sendChatMessage([{ role: 'user' as const, content: 'hi' }])).rejects.toThrow(
-      'Something went wrong. Please try again.'
+      'Something went wrong.'
     );
   });
 
@@ -191,12 +240,12 @@ describe('transcribeAudio', () => {
     expect(mockAxios.post).toHaveBeenCalledTimes(1);
   });
 
-  it('sets a 60s timeout', async () => {
+  it('caps the STT timeout at the 30s overall budget', async () => {
     mockAxios.post.mockResolvedValueOnce(axiosSuccess({ text: 'test' }));
     await transcribeAudio(fakeBlob, 'hi');
 
     const config = mockAxios.post.mock.calls[0][2] as any;
-    expect(config.timeout).toBe(60000);
+    expect(config.timeout).toBeLessThanOrEqual(30000);
   });
 
   it('throws user-friendly message on 429', async () => {

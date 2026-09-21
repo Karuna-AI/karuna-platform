@@ -7,6 +7,10 @@
  * - Limited camera controls compared to native
  */
 
+import { logger } from '../services/logger';
+
+const log = logger.create('Camera');
+
 export const CameraType = {
   front: 'front',
   back: 'back',
@@ -50,7 +54,7 @@ export interface CameraCapturedPicture {
 let hasShownWebWarning = false;
 const showWebLimitationWarning = (feature: string) => {
   if (!hasShownWebWarning && process.env.NODE_ENV === 'development') {
-    console.debug(`[Camera] ${feature} - limited on web platform`);
+    log.debug(`[Camera] ${feature} - limited on web platform`);
     hasShownWebWarning = true;
   }
 };
@@ -195,7 +199,7 @@ export async function setTorchModeAsync(enabled: boolean): Promise<boolean> {
       stream.getTracks().forEach(t => t.stop());
     }
   } catch (error) {
-    console.debug('[Camera] Torch control not available:', error);
+    log.debug(`[Camera] Torch control not available: ${error}`);
   }
 
   return false;

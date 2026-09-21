@@ -4,6 +4,9 @@
  * Real PostgreSQL integration tests for the Karuna Admin API.
  * Connects to the real karuna_test database — no mocks for DB.
  *
+ * GATED: this suite only runs with RUN_REALDB_TESTS=1 (see jest.config.js).
+ * Without it, Jest does not load this file at all.
+ *
  * Prerequisites:
  *   1. PostgreSQL running on localhost:5437
  *   2. karuna_test database created and migrated:
@@ -271,7 +274,7 @@ describe('User Management', () => {
   });
 
   describe('POST /api/admin/users', () => {
-    it('creates a user and returns tempPassword', async () => {
+    it('creates a user with a setup link and no tempPassword', async () => {
       const newEmail = `provisioned-${uniqueSuffix}@admintest.karuna`;
       const res = await req.post('/api/admin/users')
         .set('Authorization', `Bearer ${adminJwt}`)
@@ -283,9 +286,8 @@ describe('User Management', () => {
       expect(res.body.user).toBeDefined();
       expect(res.body.user.email).toBe(newEmail);
       expect(res.body.user.is_verified).toBe(true);
-      expect(res.body.tempPassword).toBeDefined();
-      expect(typeof res.body.tempPassword).toBe('string');
-      expect(res.body.tempPassword.length).toBeGreaterThanOrEqual(12);
+      // No plaintext credential may be returned
+      expect(res.body.tempPassword).toBeUndefined();
 
       createdUserId = res.body.user.id;
 
@@ -293,6 +295,15 @@ describe('User Management', () => {
       const row = await db.query('SELECT email, is_verified FROM users WHERE id = $1', [createdUserId]);
       expect(row.rows).toHaveLength(1);
       expect(row.rows[0].is_verified).toBe(true);
+
+      // A single-use setup token (hashed) must exist for the new user
+      const tokenRow = await db.query(
+        'SELECT token, expires_at FROM password_reset_tokens WHERE user_id = $1',
+        [createdUserId]
+      );
+      expect(tokenRow.rows).toHaveLength(1);
+      expect(tokenRow.rows[0].token).toHaveLength(64); // SHA-256 hex, not the raw token
+      expect(new Date(tokenRow.rows[0].expires_at).getTime()).toBeGreaterThan(Date.now());
     });
 
     it('returns 409 for duplicate email', async () => {

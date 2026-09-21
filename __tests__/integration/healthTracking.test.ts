@@ -7,7 +7,6 @@ describe('Health Tracking Integration', () => {
   describe('vital signs workflow', () => {
     it('should add vital reading via voice', async () => {
       // User says: "Record my blood pressure as 120 over 80"
-      const _userInput = 'Record my blood pressure as 120 over 80';
 
       // AI extracts data and calls tool
       const toolCall = {
@@ -25,11 +24,6 @@ describe('Health Tracking Integration', () => {
 
     it('should query vitals history via voice', async () => {
       // User asks: "What was my blood pressure last week?"
-      const _query = {
-        type: 'bloodPressure',
-        startDate: '2024-01-08',
-        endDate: '2024-01-15',
-      };
 
       const results = [
         { date: '2024-01-10', systolic: 118, diastolic: 78 },
@@ -198,11 +192,6 @@ describe('Proactive Health Features', () => {
     });
 
     it('should analyze check-in responses', async () => {
-      const _responses = {
-        mood: 'good',
-        pain: 'none',
-        sleep: 'well',
-      };
 
       const overallStatus = 'healthy';
       expect(overallStatus).toBe('healthy');

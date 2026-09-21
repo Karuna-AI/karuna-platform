@@ -6,6 +6,20 @@
  * (3) account/document are not synced.
  */
 import { toSyncPayload, isSyncSupported } from '../../src/services/vaultSyncMap';
+import type {
+  VaultAppointment,
+  VaultContact,
+  VaultDoctor,
+  VaultEntity,
+  VaultMedication,
+} from '../../src/types/vault';
+
+// toSyncPayload only reads whitelisted fields, so mapping tests build entities
+// from partials. The helper keeps the intent (partial test data) while
+// satisfying the concrete entity parameter types.
+function asEntity<T>(partial: Partial<T>): T {
+  return partial as T;
+}
 
 // Server-side allowed columns (mirror of careCircle.js allowedColumns) — the
 // mapping must never emit a key outside these sets.
@@ -20,15 +34,15 @@ describe('vaultSyncMap', () => {
   it('does not sync account or document entities', () => {
     expect(isSyncSupported('account' as any)).toBe(false);
     expect(isSyncSupported('document' as any)).toBe(false);
-    expect(toSyncPayload('account' as any, { name: 'x' })).toBeNull();
-    expect(toSyncPayload('document' as any, { name: 'x' })).toBeNull();
+    expect(toSyncPayload('account' as any, {} as VaultEntity)).toBeNull();
+    expect(toSyncPayload('document' as any, {} as VaultEntity)).toBeNull();
   });
 
   it('maps a doctor: clinic→hospital, phoneNumbers[0]→phone, clinicAddress→address', () => {
-    const out = toSyncPayload('doctor', {
+    const out = toSyncPayload('doctor', asEntity<VaultDoctor>({
       name: 'Dr QA', specialty: 'cardiologist', clinic: 'QA Clinic',
       clinicAddress: 'MG Road', phoneNumbers: ['111', '222'], email: 'd@x.com', notes: 'n',
-    });
+    }));
     expect(out).toEqual({
       entityType: 'doctor',
       data: { name: 'Dr QA', specialty: 'cardiologist', hospital: 'QA Clinic', phone: '111', email: 'd@x.com', address: 'MG Road', notes: 'n' },
@@ -37,15 +51,15 @@ describe('vaultSyncMap', () => {
   });
 
   it('uses specialtyOther when specialty is "other"', () => {
-    const out = toSyncPayload('doctor', { name: 'D', specialty: 'other', specialtyOther: 'Hepatology', clinic: 'C' });
+    const out = toSyncPayload('doctor', asEntity<VaultDoctor>({ name: 'D', specialty: 'other', specialtyOther: 'Hepatology', clinic: 'C' }));
     expect(out!.data.specialty).toBe('Hepatology');
   });
 
   it('maps a medication: prescribedBy→prescribing_doctor, times[]→timing, isActive→is_active', () => {
-    const out = toSyncPayload('medication', {
+    const out = toSyncPayload('medication', asEntity<VaultMedication>({
       name: 'Aspirin', dosage: '1 tab', frequency: 'twice_daily', times: ['8 AM', '8 PM'],
       prescribedBy: 'Dr QA', pharmacy: 'QA Pharma', refillDate: '2026-07-01', isActive: true, instructions: 'after food',
-    });
+    }));
     expect(out!.entityType).toBe('medication');
     expect(out!.data).toMatchObject({
       name: 'Aspirin', dosage: '1 tab', frequency: 'twice_daily', timing: '8 AM, 8 PM',
@@ -55,20 +69,20 @@ describe('vaultSyncMap', () => {
   });
 
   it('maps a contact: phoneNumbers[].number→phone/phone_alt', () => {
-    const out = toSyncPayload('contact', {
+    const out = toSyncPayload('contact', asEntity<VaultContact>({
       name: 'Son', relationship: 'son',
       phoneNumbers: [{ number: '111', label: 'mobile', isPrimary: true }, { number: '222', label: 'home', isPrimary: false }],
       email: 's@x.com', address: 'Home', notes: 'n',
-    });
+    }));
     expect(out!.data).toEqual({ name: 'Son', relationship: 'son', phone: '111', phone_alt: '222', email: 's@x.com', address: 'Home', notes: 'n' });
     Object.keys(out!.data).forEach(k => expect(ALLOWED.contact).toContain(k));
   });
 
   it('maps an appointment: title→purpose, preparationNotes→preparation_notes', () => {
-    const out = toSyncPayload('appointment', {
+    const out = toSyncPayload('appointment', asEntity<VaultAppointment>({
       title: 'Cardiology follow-up', type: 'doctor', date: '2026-07-01', time: '10:00',
       location: 'QA Clinic', preparationNotes: 'Fasting', status: 'scheduled', withPerson: 'Dr QA',
-    });
+    }));
     expect(out!.data).toMatchObject({
       purpose: 'Cardiology follow-up', date: '2026-07-01', time: '10:00', location: 'QA Clinic',
       preparation_notes: 'Fasting', status: 'scheduled', doctor_name: 'Dr QA',
@@ -77,8 +91,8 @@ describe('vaultSyncMap', () => {
   });
 
   it('omits undefined/empty fields and returns null when nothing usable maps', () => {
-    const out = toSyncPayload('doctor', { name: 'D', clinic: 'C', email: undefined, notes: '' });
+    const out = toSyncPayload('doctor', asEntity<VaultDoctor>({ name: 'D', clinic: 'C', email: undefined, notes: '' }));
     expect(out!.data).toEqual({ name: 'D', hospital: 'C' });
-    expect(toSyncPayload('contact', {})).toBeNull();
+    expect(toSyncPayload('contact', asEntity<VaultContact>({}))).toBeNull();
   });
 });

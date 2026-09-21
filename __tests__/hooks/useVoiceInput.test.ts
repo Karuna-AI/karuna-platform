@@ -123,7 +123,6 @@ describe('useVoiceInput Hook', () => {
     });
 
     it('should cleanup audio file after transcription', () => {
-      const _audioPath = '/tmp/recording.wav';
       let fileExists = true;
 
       // Simulate cleanup

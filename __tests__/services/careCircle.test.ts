@@ -69,20 +69,6 @@ describe('Care Circle Service', () => {
   });
 
   describe('permissions', () => {
-    const _allPermissions = [
-      'view_health',
-      'edit_health',
-      'view_medications',
-      'edit_medications',
-      'view_appointments',
-      'edit_appointments',
-      'view_notes',
-      'add_notes',
-      'view_documents',
-      'upload_documents',
-      'manage_members',
-      'emergency_access',
-    ];
 
     it('should grant permissions to member', () => {
       const member = createMockCareCircleMember({

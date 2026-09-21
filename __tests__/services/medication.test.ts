@@ -788,7 +788,7 @@ describe('MedicationService – getNextDose', () => {
 
   it('returns the next future pending dose', async () => {
     // Use a schedule time far in the future (23:59)
-    const med = await svc.addMedication(buildMed({
+    await svc.addMedication(buildMed({
       isActive: true,
       schedule: [{ id: 's_future', time: '23:59', label: 'Night' }],
     }));

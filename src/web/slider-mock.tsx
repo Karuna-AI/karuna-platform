@@ -36,7 +36,7 @@ function Slider({
   disabled = false,
   style,
   testID,
-}: SliderProps): JSX.Element {
+}: SliderProps): React.JSX.Element {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = parseFloat(e.target.value);
     onValueChange?.(newValue);

@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
+import type { JSX } from 'react';
 import { View, Text, Share, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as Crypto from 'expo-crypto';
@@ -42,7 +43,9 @@ export function CaregiverInviteScreen({
 
   useEffect(() => {
     if (readAloudEnabled) {
-      ttsService.speak('Invite a caregiver. Share a link so your family member can connect with you on Karuna.');
+      ttsService.speak('Invite a caregiver. Share a link so your family member can connect with you on Karuna.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled]);
 

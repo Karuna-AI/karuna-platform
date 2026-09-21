@@ -19,6 +19,7 @@ import {
   getAccessibilityHint,
   formatDurationForAccessibility,
   announceForAccessibility} from '../utils/accessibility';
+import { getCurrentTranslations } from '../i18n/translations';
 
 export type VoiceButtonState = 'idle' | 'recording' | 'processing';
 
@@ -30,6 +31,8 @@ interface VoiceButtonProps {
   onPressIn: () => void;
   onPressOut: () => void;
   onCancel?: () => void;
+  /** Tap once to start, tap again to stop. Defaults to true (elderly-friendly). */
+  tapToTalk?: boolean;
 }
 
 const CANCEL_THRESHOLD = 80; // Pixels to drag before cancel
@@ -42,9 +45,11 @@ export function VoiceButton({
   onPressIn,
   onPressOut,
   onCancel,
-}: VoiceButtonProps): JSX.Element {
+  tapToTalk = true,
+}: VoiceButtonProps): React.JSX.Element {
   const { colors } = useTheme();
   const fonts = getFontSizes('large');
+  const t = getCurrentTranslations();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingAnim = useRef(new Animated.Value(0)).current;
@@ -62,15 +67,29 @@ export function VoiceButton({
 
   const state = getState();
 
-  // Pan responder for drag-to-cancel
+  // Ref mirror of props for the PanResponder handlers, which are created once.
+  const liveProps = useRef({ tapToTalk, isRecording, isDisabled, isProcessing, onPressIn, onPressOut, onCancel });
+  liveProps.current = { tapToTalk, isRecording, isDisabled, isProcessing, onPressIn, onPressOut, onCancel };
+
+  // Pan responder for press-and-hold or tap-to-talk, with drag-to-cancel kept
+  // only as a silent fallback (the visible Cancel button is the primary path).
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
 
       onPanResponderGrant: () => {
-        if (!isDisabled && !isProcessing) {
-          onPressIn();
+        const p = liveProps.current;
+        if (p.isDisabled || p.isProcessing) {
+          // #4: when the button cannot start, announce why instead of silence.
+          announceForAccessibility(getCurrentTranslations().chat.thinkingPleaseWait);
+          return;
+        }
+        if (p.tapToTalk && p.isRecording) {
+          // Tap-to-talk: second tap stops and sends.
+          p.onPressOut();
+        } else {
+          p.onPressIn();
         }
       },
 
@@ -78,7 +97,8 @@ export function VoiceButton({
         _event: GestureResponderEvent,
         gestureState: PanResponderGestureState
       ) => {
-        if (isRecording) {
+        const p = liveProps.current;
+        if (p.isRecording && !p.tapToTalk) {
           const distance = Math.sqrt(
             Math.pow(gestureState.dx, 2) + Math.pow(gestureState.dy, 2)
           );
@@ -106,17 +126,24 @@ export function VoiceButton({
         _event: GestureResponderEvent,
         gestureState: PanResponderGestureState
       ) => {
+        const p = liveProps.current;
         const distance = Math.sqrt(
           Math.pow(gestureState.dx, 2) + Math.pow(gestureState.dy, 2)
         );
 
-        if (distance > CANCEL_THRESHOLD && isRecording) {
+        if (p.tapToTalk) {
+          // Tap-to-talk: release does nothing — stop via the next tap or the
+          // Cancel button. Drag-away stays as a silent fallback only.
+          if (p.isRecording && distance > CANCEL_THRESHOLD) {
+            p.onCancel?.();
+          }
+        } else if (distance > CANCEL_THRESHOLD && p.isRecording) {
           // Cancel recording
-          onCancel?.();
+          p.onCancel?.();
           announceForAccessibility('Recording cancelled');
-        } else if (isRecording) {
+        } else if (p.isRecording) {
           // Normal release - send
-          onPressOut();
+          p.onPressOut();
         }
 
         setDragDistance(0);
@@ -126,8 +153,8 @@ export function VoiceButton({
 
       onPanResponderTerminate: () => {
         // Another component took over
-        if (isRecording) {
-          onCancel?.();
+        if (liveProps.current.isRecording) {
+          liveProps.current.onCancel?.();
         }
         setDragDistance(0);
         setShowCancelHint(false);
@@ -163,7 +190,7 @@ export function VoiceButton({
         useNativeDriver: true,
       }).start();
 
-      announceForAccessibility('Recording. Speak now.');
+      announceForAccessibility(tapToTalk ? t.chat.tapToStop : t.chat.listening);
     } else {
       pulseAnim.stopAnimation();
       pulseAnim.setValue(1);
@@ -191,27 +218,37 @@ export function VoiceButton({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  // State text display
+  // State text display — never the tiny/low-contrast fallback sizes
   const getStateText = (): string => {
+    if (isDisabled && state === 'idle') {
+      return t.chat.thinkingPleaseWait;
+    }
     switch (state) {
       case 'processing':
-        return 'Thinking...';
+        return t.chat.thinking;
       case 'recording':
-        return 'Listening...';
+        return tapToTalk ? t.chat.tapToStop : t.chat.listening;
       default:
-        return 'Hold to talk';
+        return tapToTalk ? t.chat.tapToTalk : t.chat.holdToTalk;
     }
   };
 
-  // Accessibility
+  // Accessibility — drag-cancel is no longer part of spoken instructions
   const getAccessibilityLabel = (): string => {
+    if ((isDisabled || isProcessing) && state === 'idle') {
+      return t.chat.thinkingPleaseWait;
+    }
     switch (state) {
       case 'processing':
-        return 'Processing your message. Please wait.';
+        return t.chat.thinking;
       case 'recording':
-        return `Recording: ${formatDurationForAccessibility(recordingDuration)}. Release to send, or drag away to cancel.`;
+        return tapToTalk
+          ? `Recording: ${formatDurationForAccessibility(recordingDuration)}. ${t.chat.tapToStop}.`
+          : `Recording: ${formatDurationForAccessibility(recordingDuration)}. ${t.chat.listening}`;
       default:
-        return 'Hold to talk button. Press and hold to start speaking.';
+        return tapToTalk
+          ? `${t.chat.tapToTalk} button. Tap once to start speaking.`
+          : `${t.chat.holdToTalk} button. Press and hold to start speaking.`;
     }
   };
 
@@ -466,7 +503,7 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 16,
   },
   cancelButton: {
     marginTop: SPACING.md,

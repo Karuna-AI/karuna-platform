@@ -9,6 +9,9 @@ import {
   MedicationAdherence,
   MedicationFrequency,
 } from '../types/health';
+import { logger } from './logger';
+
+const log = logger.create('Medication');
 
 const STORAGE_KEYS = {
   MEDICATIONS: '@karuna_medications',
@@ -69,7 +72,7 @@ class MedicationService {
       await this.rescheduleAllNotifications();
 
       this.isInitialized = true;
-      console.log('[Medication] Initialized with', this.medications.length, 'medications');
+      log.info(`[Medication] Initialized with ${this.medications.length} medications`);
     } catch (error) {
       console.error('[Medication] Initialization error:', error);
       this.isInitialized = true;

@@ -1814,6 +1814,17 @@ export function isRTLLanguage(code: LanguageCode): boolean {
   return LANGUAGES[code]?.direction === 'rtl';
 }
 
+/**
+ * Language codes with full interface translations in `src/i18n/translations.ts`.
+ * Every other code in LANGUAGES currently falls back to English UI strings —
+ * selectors must say so instead of implying full translation (#34).
+ */
+export const FULLY_TRANSLATED_LANGUAGES: LanguageCode[] = ['en', 'hi', 'es', 'zh'];
+
+export function isFullyTranslated(code: LanguageCode): boolean {
+  return FULLY_TRANSLATED_LANGUAGES.includes(code);
+}
+
 export function getIndianLanguages(): LanguageConfig[] {
   return Object.values(LANGUAGES).filter(lang =>
     lang.locale.currency === 'INR' || lang.region.includes('India')

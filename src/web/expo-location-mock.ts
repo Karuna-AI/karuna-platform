@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('Location');
+
 /**
  * Web mock for expo-location
  * Uses browser Geolocation API
@@ -60,7 +64,7 @@ export async function requestForegroundPermissionsAsync(): Promise<PermissionRes
 
 export async function requestBackgroundPermissionsAsync(): Promise<PermissionResponse> {
   // Background location not supported on web
-  console.warn('[Location] Background location not supported on web');
+  log.warn('[Location] Background location not supported on web');
   return requestForegroundPermissionsAsync();
 }
 
@@ -156,12 +160,12 @@ export async function getLastKnownPositionAsync(): Promise<LocationObject | null
 }
 
 export async function geocodeAsync(_address: string): Promise<Array<{ latitude: number; longitude: number }>> {
-  console.warn('[Location] Geocoding not implemented on web');
+  log.warn('[Location] Geocoding not implemented on web');
   return [];
 }
 
 export async function reverseGeocodeAsync(_location: { latitude: number; longitude: number }): Promise<any[]> {
-  console.warn('[Location] Reverse geocoding not implemented on web');
+  log.warn('[Location] Reverse geocoding not implemented on web');
   return [];
 }
 

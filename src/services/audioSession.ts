@@ -1,4 +1,7 @@
 import { AppState, AppStateStatus } from 'react-native';
+import { logger } from './logger';
+
+const log = logger.create('AudioSession');
 
 type AudioSessionCallback = () => void;
 
@@ -57,7 +60,7 @@ class AudioSessionService {
 
     if (wasActive && !isNowActive) {
       // App went to background
-      console.debug('[AudioSession] App moved to background');
+      log.debug('[AudioSession] App moved to background');
 
       // If recording, we should stop safely
       if (this.isRecording) {
@@ -67,7 +70,7 @@ class AudioSessionService {
       this.callbacks.onAppBackground?.();
     } else if (!wasActive && isNowActive) {
       // App came to foreground
-      console.debug('[AudioSession] App moved to foreground');
+      log.debug('[AudioSession] App moved to foreground');
       this.callbacks.onAppForeground?.();
     }
 
@@ -93,7 +96,7 @@ class AudioSessionService {
    * This should be called from native code via event emitter
    */
   handleInterruptionBegan(): void {
-    console.debug('[AudioSession] Audio interruption began');
+    log.debug('[AudioSession] Audio interruption began');
 
     if (this.isRecording) {
       this.callbacks.onInterruptionBegan?.();
@@ -104,7 +107,7 @@ class AudioSessionService {
    * Handle audio interruption ended
    */
   handleInterruptionEnded(): void {
-    console.debug('[AudioSession] Audio interruption ended');
+    log.debug('[AudioSession] Audio interruption ended');
     this.callbacks.onInterruptionEnded?.();
   }
 

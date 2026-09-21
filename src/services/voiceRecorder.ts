@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { permissionsService, PermissionResult } from './permissions';
 import { AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 
@@ -31,6 +30,25 @@ export type RecordingError =
   | 'too_short'
   | 'unknown';
 
+export type AutoStopReason = 'silence' | 'max_duration';
+
+export interface RecordingResult {
+  path: string;
+  duration: number;
+  /** True when the recorder stopped itself (silence or max duration). */
+  autoStopped: boolean;
+  reason?: AutoStopReason;
+}
+
+/** #29: hard cap on recording length — 60 seconds. */
+export const MAX_RECORDING_MS = 60_000;
+/** #29: ~3 seconds of silence ends the recording. */
+export const SILENCE_DETECTION_MS = 3_000;
+/** Metering floor (dB) treated as silence. */
+export const SILENCE_DB_THRESHOLD = -50;
+/** Don't auto-stop on silence before the user has had a moment to start. */
+const MIN_SPEAK_MS = 2_000;
+
 export class RecordingException extends Error {
   type: RecordingError;
   canRetry: boolean;
@@ -48,6 +66,10 @@ class VoiceRecorder {
   private recordingDuration: number = 0;
   private lastPermissionResult: PermissionResult | null = null;
   private progressInterval: ReturnType<typeof setInterval> | null = null;
+  // Silence / max-duration auto-stop bookkeeping
+  private autoStopFired: boolean = false;
+  private autoStopReason: AutoStopReason | undefined = undefined;
+  private silenceStart: number = 0;
 
   constructor() {
     // Audio module loaded lazily on first use
@@ -86,9 +108,15 @@ class VoiceRecorder {
   }
 
   async startRecording(
-    onProgress?: (duration: number) => void
+    onProgress?: (duration: number) => void,
+    onAutoStop?: (reason: AutoStopReason) => void
   ): Promise<string> {
-    const permissionResult = await this.requestPermissions();
+    // #33: check first, request only when not already decided.
+    let permissionResult = await this.checkPermissions();
+    if (permissionResult.status !== 'granted' && permissionResult.status !== 'blocked') {
+      permissionResult = await permissionsService.requestMicrophonePermission();
+    }
+    this.lastPermissionResult = permissionResult;
 
     if (permissionResult.status !== 'granted') {
       if (permissionResult.status === 'blocked') {
@@ -110,33 +138,69 @@ class VoiceRecorder {
     try {
       await loadExpoAudio();
 
-      // Create recorder with high quality preset
-      const preset = RecordingPresetsRef?.HIGH_QUALITY || {
+      // Create recorder with high quality preset + metering for silence detection
+      const basePreset = RecordingPresetsRef?.HIGH_QUALITY || {
         extension: '.m4a',
         sampleRate: 44100,
         numberOfChannels: 1,
         bitRate: 128000,
       };
+      const preset = { ...basePreset, isMeteringEnabled: true };
 
       this.recorder = new AudioRecorderClass(preset);
       await this.recorder.prepareToRecordAsync();
       this.recorder.record();
       this.recordingDuration = 0;
+      this.autoStopFired = false;
+      this.autoStopReason = undefined;
+      this.silenceStart = 0;
 
-      // Poll for duration updates
-      if (onProgress) {
-        this.progressInterval = setInterval(() => {
-          try {
-            const status = this.recorder?.getStatus?.();
-            if (status?.durationMillis !== undefined) {
-              this.recordingDuration = status.durationMillis;
-              onProgress(status.durationMillis);
-            }
-          } catch {
-            /* intentionally empty */
+      // Poll for duration updates + silence / max-duration auto-stop (#29)
+      this.progressInterval = setInterval(() => {
+        try {
+          const status = this.recorder?.getStatus?.();
+          if (!status) return;
+          if (status.durationMillis !== undefined) {
+            this.recordingDuration = status.durationMillis;
+            onProgress?.(status.durationMillis);
           }
-        }, 100);
-      }
+
+          // #29: cap recordings at 60 seconds
+          if (this.recordingDuration >= MAX_RECORDING_MS && !this.autoStopFired) {
+            this.autoStopFired = true;
+            this.autoStopReason = 'max_duration';
+            onAutoStop?.('max_duration');
+            return;
+          }
+
+          // #29: ~3s of silence ends the recording with spoken/visual feedback
+          // (the caller speaks the prompt + shows the message).
+          const metering: number | undefined =
+            typeof status.metering === 'number' ? status.metering : undefined;
+          const now = Date.now();
+          if (metering === undefined) {
+            // Metering unavailable on this platform — skip silence detection
+            // rather than risk a false positive.
+            this.silenceStart = 0;
+          } else if (metering < SILENCE_DB_THRESHOLD) {
+            if (this.silenceStart === 0) {
+              this.silenceStart = now;
+            } else if (
+              now - this.silenceStart >= SILENCE_DETECTION_MS &&
+              this.recordingDuration >= MIN_SPEAK_MS &&
+              !this.autoStopFired
+            ) {
+              this.autoStopFired = true;
+              this.autoStopReason = 'silence';
+              onAutoStop?.('silence');
+            }
+          } else {
+            this.silenceStart = 0;
+          }
+        } catch {
+          /* intentionally empty */
+        }
+      }, 250);
 
       return this.recorder.uri || '';
     } catch (error) {
@@ -152,7 +216,7 @@ class VoiceRecorder {
     }
   }
 
-  async stopRecording(): Promise<{ path: string; duration: number }> {
+  async stopRecording(): Promise<RecordingResult> {
     try {
       if (!this.recorder) {
         throw new RecordingException(
@@ -171,25 +235,36 @@ class VoiceRecorder {
       // Get status before stopping
       const status = this.recorder.getStatus?.() || {};
       const duration = status.durationMillis || this.recordingDuration;
+      const autoStopped = this.autoStopFired;
 
       await this.recorder.stop();
 
       const uri = this.recorder.uri;
+      const reason = this.autoStopReason;
       this.recorder = null;
       this.recordingDuration = 0;
+      this.autoStopFired = false;
+      this.autoStopReason = undefined;
+      this.silenceStart = 0;
 
       if (duration < 500) {
+        // Lazy translation lookup avoids a hard provider dependency in tests.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getCurrentTranslations } = require('../i18n/translations');
         throw new RecordingException(
           'too_short',
-          'Recording too short. Please hold the button and speak.',
+          getCurrentTranslations().chat.recordingTooShort,
           true
         );
       }
 
-      return { path: uri || '', duration };
+      return { path: uri || '', duration, autoStopped, reason };
     } catch (error) {
       this.recorder = null;
       this.recordingDuration = 0;
+      this.autoStopFired = false;
+      this.autoStopReason = undefined;
+      this.silenceStart = 0;
 
       if (error instanceof RecordingException) {
         throw error;
@@ -214,6 +289,9 @@ class VoiceRecorder {
         await this.recorder.stop();
         this.recorder = null;
         this.recordingDuration = 0;
+        this.autoStopFired = false;
+        this.autoStopReason = undefined;
+        this.silenceStart = 0;
       }
     } catch (error) {
       console.error('[VoiceRecorder] Cancel recording error:', error);

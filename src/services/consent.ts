@@ -14,6 +14,9 @@ import {
   CONSENT_CATEGORY_INFO,
   CONSENT_GRANTEE_INFO,
 } from '../types/consent';
+import { logger } from './logger';
+
+const log = logger.create('Consent');
 
 const STORAGE_KEY = '@karuna_consent_preferences';
 
@@ -63,7 +66,7 @@ class ConsentService {
       }
 
       this.isInitialized = true;
-      console.debug('[Consent] Initialized with', this.preferences?.consents.length ?? 0, 'consent records');
+      log.debug(`[Consent] Initialized with ${this.preferences?.consents.length ?? 0} consent records`);
     } catch (error) {
       console.error('[Consent] Initialization error:', error);
       // Create minimal preferences
@@ -423,9 +426,9 @@ class ConsentService {
     if (!this.preferences) return;
 
     this.preferences.lastReviewedAt = new Date().toISOString();
-    // Set next review reminder for 90 days
-    const nextReview = new Date();
-    nextReview.setDate(nextReview.getDate() + 90);
+    // Set next review reminder for 90 days (absolute ms — immune to DST shifts,
+    // unlike setDate() calendar-day arithmetic).
+    const nextReview = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
     this.preferences.nextReviewReminder = nextReview.toISOString();
 
     await this.save();
@@ -522,11 +525,11 @@ class ConsentService {
         consents: this.preferences.consents,
       });
       if (!result.success) {
-        console.warn('[Consent] server sync failed:', result.error);
+        log.warn(`[Consent] server sync failed: ${result.error}`);
         this.notifySyncError(result.error || 'Sync failed');
       }
     } catch (e) {
-      console.warn('[Consent] server sync error:', e);
+      log.warn(`[Consent] server sync error: ${e}`);
       this.notifySyncError('Network error');
     }
   }

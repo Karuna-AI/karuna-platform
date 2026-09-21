@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('SecureStore');
+
 /**
  * Web mock for expo-secure-store
  *
@@ -10,7 +14,6 @@
  */
 
 const STORAGE_PREFIX = '__secure_store__';
-const _ENCRYPTION_KEY_NAME = '__secure_store_key__';
 
 // Session encryption key (generated once per session)
 let sessionKey: CryptoKey | null = null;
@@ -61,7 +64,7 @@ async function encryptValue(value: string): Promise<string> {
     return btoa(String.fromCharCode(...combined));
   } catch {
     // Fallback if encryption fails - store as-is with warning
-    console.warn('[SecureStore] Encryption not available, storing unencrypted');
+    log.warn('[SecureStore] Encryption not available, storing unencrypted');
     return `unenc:${btoa(value)}`;
   }
 }
@@ -112,7 +115,7 @@ export async function setItemAsync(
   }
 ): Promise<void> {
   if (!hasShownSecurityWarning && process.env.NODE_ENV === 'development') {
-    console.warn(
+    log.warn(
       '[SecureStore] Web platform has limited secure storage. ' +
       'Data is encrypted in sessionStorage and cleared when the tab closes. ' +
       'For maximum security, use the native mobile app.'

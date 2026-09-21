@@ -4,7 +4,6 @@
  */
 
 describe('TTS Service', () => {
-  let _ttsService: any;
 
   beforeEach(() => {
     jest.resetModules();
@@ -64,7 +63,7 @@ describe('TTS Service', () => {
       const hindiVoice = voices.find((v: any) => v.lang === 'hi-IN');
 
       expect(hindiVoice).toBeDefined();
-      expect(hindiVoice.name).toBe('Hindi Voice');
+      expect(hindiVoice!.name).toBe('Hindi Voice');
     });
 
     it('should fallback to default voice if language not available', () => {
@@ -72,7 +71,7 @@ describe('TTS Service', () => {
       const defaultVoice = voices.find((v: any) => v.default);
 
       expect(defaultVoice).toBeDefined();
-      expect(defaultVoice.lang).toBe('en-US');
+      expect(defaultVoice!.lang).toBe('en-US');
     });
   });
 

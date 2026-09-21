@@ -48,7 +48,9 @@ Decouple the data key from the PIN so the PIN can change without re-encrypting d
 - On vault create (and for already-set-up vaults, lazily on next unlock once in a circle):
   wrap the DEK under a random **recoveryKey** → `wrappedDEK_recovery`; send
   `{ wrappedDEK_recovery, recoveryKey }` to the gateway over TLS. Server stores the
-  escrow row keyed by user+circle, `recoveryKey` encrypted at rest by the server secret.
+  escrow row keyed by user+circle, `recoveryKey` encrypted at rest (AES-256-GCM)
+  under a dedicated `RECOVERY_KEK` (>= 32 bytes, set via env; never the JWT
+  signing secret — key separation).
 - New table `vault_recovery_escrow(user_id, circle_id, wrapped_dek, recovery_key_enc,
   created_at, status)`.
 

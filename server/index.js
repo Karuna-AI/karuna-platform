@@ -347,7 +347,9 @@ function optionalUserId(req) {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) return null;
     const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET);
+    // Pin the algorithm (algorithm-confusion hardening); invalid tokens
+    // simply yield no attribution — this path never throws.
+    const decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET, { algorithms: ['HS256'] });
     return decoded && decoded.id ? decoded.id : null;
   } catch {
     return null;

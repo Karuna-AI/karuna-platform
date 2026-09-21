@@ -73,7 +73,7 @@ describe('Accessibility: ErrorBoundary fallback', () => {
   beforeEach(() => { consoleError = jest.spyOn(console, 'error').mockImplementation(() => {}); });
   afterEach(() => { consoleError.mockRestore(); });
 
-  function Bomb(): JSX.Element {
+  function Bomb(): React.JSX.Element {
     throw new Error('Intentional test error');
   }
 

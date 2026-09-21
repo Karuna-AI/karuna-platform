@@ -12,13 +12,11 @@ export default function UserDetail() {
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [suspendReason, setSuspendReason] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [actionError, setActionError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [isSuspending, setIsSuspending] = useState(false);
   const [isUnsuspending, setIsUnsuspending] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
 
   useEffect(() => {
     if (id) loadUser();
@@ -63,24 +61,15 @@ export default function UserDetail() {
 
   const handleResetPassword = async () => {
     setActionError('');
-    if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      setActionError('Password must be at least 12 characters with an uppercase letter and a number');
-      return;
-    }
-    if (newPassword.length > 72) {
-      setActionError('Password must be 72 characters or fewer');
-      return;
-    }
     setIsResetting(true);
-    const result = await api.resetUserPassword(id!, newPassword);
+    const result = await api.resetUserPassword(id!);
     setIsResetting(false);
     if (result.success) {
       setShowResetModal(false);
-      setNewPassword('');
-      setSuccessMessage('Password reset successfully');
-      setTimeout(() => setSuccessMessage(''), 5000);
+      setSuccessMessage(`Password reset link sent to ${user?.email}. Existing sessions were revoked.`);
+      setTimeout(() => setSuccessMessage(''), 8000);
     } else {
-      setActionError(result.error || 'Failed to reset password');
+      setActionError(result.error || 'Failed to send reset link');
     }
   };
 
@@ -253,42 +242,27 @@ export default function UserDetail() {
         </div>
       )}
 
-      {/* Reset Password Modal */}
+      {/* Reset Password Modal — the server emails a single-use reset link;
+          no plaintext password is ever set or displayed here. */}
       {showResetModal && (
-        <div className="modal-overlay" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>
+        <div className="modal-overlay" onClick={() => setShowResetModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Reset Password</h3>
-              <button className="modal-close" onClick={() => { setShowResetModal(false); setShowNewPassword(false); }}>×</button>
+              <h3 className="modal-title">Send Password Reset Link</h3>
+              <button className="modal-close" onClick={() => setShowResetModal(false)}>×</button>
             </div>
             <div className="modal-body">
               {actionError && <div className="alert alert-error">{actionError}</div>}
-              <div className="form-group">
-                <label className="form-label">New Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type={showNewPassword ? 'text' : 'password'}
-                    className="form-input"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Enter new password..."
-                    style={{ paddingRight: '2.5rem' }}
-                  />
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={() => setShowNewPassword(!showNewPassword)}
-                    style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
-                  >
-                    {showNewPassword ? '🙈' : '👁️'}
-                  </button>
-                </div>
-              </div>
+              <p>
+                A single-use reset link will be emailed to <strong>{user?.email}</strong>.
+                The link expires after 1 hour, and the user's existing sessions
+                will be revoked immediately.
+              </p>
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowResetModal(false)} className="btn btn-secondary" disabled={isResetting}>Cancel</button>
               <button onClick={handleResetPassword} className="btn btn-primary" disabled={isResetting}>
-                {isResetting ? 'Resetting...' : 'Reset Password'}
+                {isResetting ? 'Sending...' : 'Send Reset Link'}
               </button>
             </div>
           </div>

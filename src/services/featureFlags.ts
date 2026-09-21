@@ -7,6 +7,9 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { logger } from './logger';
+
+const log = logger.create('FeatureFlags');
 
 const STORAGE_KEY = '@karuna:feature_flags';
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
@@ -32,7 +35,6 @@ interface CachedFlags {
 class FeatureFlagsService {
   private flags: Record<string, boolean> = { ...DEFAULT_FLAGS };
   private lastFetched: number = 0;
-  private isInitialized: boolean = false;
   private userId: string | null = null;
   private circleId: string | null = null;
 
@@ -49,7 +51,6 @@ class FeatureFlagsService {
     // Then refresh from server in background
     this.refreshFromServer().catch(console.error);
 
-    this.isInitialized = true;
   }
 
   /**
@@ -85,7 +86,7 @@ class FeatureFlagsService {
         this.lastFetched = data.lastFetched;
       }
     } catch (error) {
-      console.warn('[FeatureFlags] Failed to load from cache:', error);
+      log.warn(`[FeatureFlags] Failed to load from cache: ${error}`);
     }
   }
 
@@ -100,7 +101,7 @@ class FeatureFlagsService {
       };
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error) {
-      console.warn('[FeatureFlags] Failed to save to cache:', error);
+      log.warn(`[FeatureFlags] Failed to save to cache: ${error}`);
     }
   }
 
@@ -159,10 +160,10 @@ class FeatureFlagsService {
         this.lastFetched = Date.now();
         await this.saveToCache();
 
-        console.log('[FeatureFlags] Refreshed from server:', Object.keys(newFlags).length, 'flags');
+        log.info(`[FeatureFlags] Refreshed from server: ${Object.keys(newFlags).length} flags`);
       }
     } catch (error) {
-      console.warn('[FeatureFlags] Failed to refresh from server:', error);
+      log.warn(`[FeatureFlags] Failed to refresh from server: ${error}`);
       // Continue using cached/default flags
     }
   }
@@ -184,7 +185,6 @@ class FeatureFlagsService {
    * Clean up service
    */
   async cleanup(): Promise<void> {
-    this.isInitialized = false;
     this.userId = null;
     this.circleId = null;
   }

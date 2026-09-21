@@ -35,13 +35,18 @@
 
 ### 1.2 Test Accounts to Create
 
+> Test accounts must be **local-only** (never real user credentials) and
+> **disabled in production**. Use `example.invalid` addresses so they can
+> never resolve to a real mailbox, and set passwords at test time — never
+> commit real passwords to this plan.
+
 | Account Type | Email | Password | Purpose |
 |-------------|-------|----------|---------|
-| Admin (Super Admin) | admin@test.karuna.in | TestAdmin123! | Admin portal testing |
-| Caregiver (Owner) | caregiver1@test.karuna.in | TestCare123! | Care circle owner |
-| Caregiver (Member) | caregiver2@test.karuna.in | TestCare123! | Invited caregiver |
-| Caregiver (Viewer) | viewer@test.karuna.in | TestView123! | View-only member |
-| Mobile User | (via app onboarding) | PIN: 1234 | Elderly user on mobile |
+| Admin (Super Admin) | admin@example.invalid | *(set locally at test time)* | Admin portal testing |
+| Caregiver (Owner) | caregiver-owner@example.invalid | *(set locally at test time)* | Care circle owner |
+| Caregiver (Member) | caregiver-member@example.invalid | *(set locally at test time)* | Invited caregiver |
+| Caregiver (Viewer) | viewer@example.invalid | *(set locally at test time)* | View-only member |
+| Mobile User | (via app onboarding) | PIN set at onboarding (never reuse a real PIN) | Elderly user on mobile |
 
 ### 1.3 Test Devices Required
 

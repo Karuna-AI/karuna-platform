@@ -6,8 +6,11 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
+import type { JSX } from 'react';
+import { I18nManager, Alert } from 'react-native';
 import { storageService } from '../services/storage';
 import { LanguageCode, getLanguageConfig } from '../i18n/languages';
+import { getCurrentTranslations } from '../i18n/translations';
 import { languageService } from '../services/languageService';
 import { ttsService } from '../services/tts';
 
@@ -97,8 +100,6 @@ interface SettingsProviderProps {
   children: ReactNode;
 }
 
-const _SETTINGS_STORAGE_KEY = '@karuna/app_settings';
-
 export function SettingsProvider({ children }: SettingsProviderProps): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
@@ -179,6 +180,20 @@ export function SettingsProvider({ children }: SettingsProviderProps): JSX.Eleme
 
     // Sync with language services
     languageService.setLanguage(language);
+
+    // #35: apply RTL layout direction when the language requires it.
+    // React Native only applies the new direction after a restart, so we
+    // tell the user plainly instead of leaving a half-mirrored UI.
+    const rtl = languageService.isRTL(language);
+    if (rtl !== I18nManager.isRTL) {
+      I18nManager.forceRTL(rtl);
+      const rt = getCurrentTranslations().restart;
+      Alert.alert(
+        rt.title,
+        rtl ? rt.rtlMessage : rt.ltrMessage,
+        [{ text: rt.ok }]
+      );
+    }
 
     // Update TTS language and voice
     try {

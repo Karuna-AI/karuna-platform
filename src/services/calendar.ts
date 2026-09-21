@@ -10,6 +10,9 @@ import { Platform } from 'react-native';
 import { auditLogService } from './auditLog';
 import { CalendarEvent } from '../types/proactive';
 import { Appointment } from '../types/health';
+import { logger } from './logger';
+
+const log = logger.create('Calendar');
 
 const STORAGE_KEYS = {
   APPOINTMENTS: '@karuna_appointments',
@@ -60,7 +63,7 @@ class CalendarService {
       }
 
       this.isInitialized = true;
-      console.debug('[Calendar] Initialized with', this.appointments.length, 'appointments');
+      log.debug(`[Calendar] Initialized with ${this.appointments.length} appointments`);
     } catch (error) {
       console.error('[Calendar] Initialization error:', error);
       this.isInitialized = true;
@@ -110,7 +113,7 @@ class CalendarService {
           : { isLocalAccount: true, name: 'Karuna', type: Calendar.SourceType.LOCAL };
 
       if (!defaultCalendarSource) {
-        console.debug('[Calendar] No suitable calendar source found');
+        log.debug('[Calendar] No suitable calendar source found');
         return null;
       }
 

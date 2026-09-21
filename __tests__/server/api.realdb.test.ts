@@ -4,6 +4,9 @@
  * Real PostgreSQL integration tests for the Karuna server API.
  * Connects to a real karuna_test database — no mocks for DB or rate limiters.
  *
+ * GATED: this suite only runs with RUN_REALDB_TESTS=1 (see jest.config.js).
+ * Without it, Jest does not load this file at all.
+ *
  * Prerequisites:
  *   1. PostgreSQL running on localhost:5437
  *   2. karuna_test database created and migrated:
@@ -43,6 +46,10 @@ jest.mock('../../server/node_modules/bcryptjs', () => {
     compareSync: (password: string, hash: string) => real.compareSync(password, hash),
   };
 });
+
+// ── Allow the forgot-password endpoint to expose the raw reset token ─────────
+// (server only returns it when EXPOSE_RESET_TOKENS=true)
+process.env.EXPOSE_RESET_TOKENS = 'true';
 
 import supertest from 'supertest';
 import crypto from 'crypto';
@@ -350,7 +357,7 @@ describe('Password reset flow (real DB)', () => {
     const res = await req.post('/api/care/auth/forgot-password').send({ email: ownerEmail });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    // In non-production NODE_ENV, the raw token is returned
+    // EXPOSE_RESET_TOKENS=true is set at the top of this file, so the raw token is returned
     expect(res.body.resetToken).toBeDefined();
     rawResetToken = res.body.resetToken;
 
@@ -1058,7 +1065,9 @@ describe('Vault PIN recovery escrow (real DB)', () => {
     );
 
     const mkTok = (id: string, email: string, name: string) =>
-      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      // tv must match users.token_version (DEFAULT 1 for seeded rows);
+      // authMiddleware rejects tokens with a missing/mismatched tv claim.
+      jwtLib.sign({ id, email, name, tv: 1 }, process.env.JWT_SECRET, { expiresIn: '1h' });
     recOwnerToken = mkTok(ownerId, ownerEmail, 'Rec Owner');
     cgToken = mkTok(cgUserId, cgEmail, 'Rec Caregiver');
   });
@@ -1120,7 +1129,7 @@ describe('Vault PIN recovery escrow (real DB)', () => {
       [strangerEmail, bcrypt.hashSync('SeedPass123!', 1), 'Stranger']
     );
     const strangerToken = jwtLib.sign(
-      { id: sr.rows[0].id, email: strangerEmail, name: 'Stranger' },
+      { id: sr.rows[0].id, email: strangerEmail, name: 'Stranger', tv: 1 },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
@@ -1175,7 +1184,8 @@ describe('GDPR export & account deletion (real DB)', () => {
       [circleId, cgId]
     );
     const mkTok = (id: string, email: string, name: string) =>
-      jwtLib.sign({ id, email, name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      // tv must match users.token_version (DEFAULT 1 for seeded rows).
+      jwtLib.sign({ id, email, name, tv: 1 }, process.env.JWT_SECRET, { expiresIn: '1h' });
     ownerToken = mkTok(ownerId, ownerEmail, 'GDPR Owner');
     cgToken = mkTok(cgId, cgEmail, 'GDPR Caregiver');
   }, 30_000);

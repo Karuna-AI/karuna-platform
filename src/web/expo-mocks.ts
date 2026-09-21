@@ -6,6 +6,9 @@
 import * as secureStoreMock from './expo-secure-store-mock';
 import * as imagePickerMock from './expo-image-picker-mock';
 import * as cameraMock from './expo-camera-mock';
+import { logger } from '../services/logger';
+
+const log = logger.create('TaskManager');
 
 // expo-document-picker mock
 export const expoDocumentPicker = {
@@ -112,12 +115,12 @@ export const expoBackgroundFetch = {
   getStatusAsync: async () => 3, // Available
   registerTaskAsync: async (taskName: string, _options?: any) => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(`[BackgroundFetch] registerTask(${taskName}) - not supported on web`);
+      log.debug(`[BackgroundFetch] registerTask(${taskName}) - not supported on web`);
     }
   },
   unregisterTaskAsync: async (taskName: string) => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(`[BackgroundFetch] unregisterTask(${taskName}) - not supported on web`);
+      log.debug(`[BackgroundFetch] unregisterTask(${taskName}) - not supported on web`);
     }
   },
 };
@@ -127,19 +130,19 @@ export const expoBackgroundFetch = {
 export const expoTaskManager = {
   defineTask: (taskName: string, _taskExecutor: any) => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(`[TaskManager] defineTask(${taskName}) - not supported on web`);
+      log.debug(`[TaskManager] defineTask(${taskName}) - not supported on web`);
     }
   },
   isTaskRegisteredAsync: async (_taskName: string) => false,
   getTaskOptionsAsync: async (_taskName: string) => null,
   unregisterAllTasksAsync: async () => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug('[TaskManager] unregisterAllTasks - not supported on web');
+      log.debug('[TaskManager] unregisterAllTasks - not supported on web');
     }
   },
   unregisterTaskAsync: async (taskName: string) => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(`[TaskManager] unregisterTask(${taskName}) - not supported on web`);
+      log.debug(`[TaskManager] unregisterTask(${taskName}) - not supported on web`);
     }
   },
 };
@@ -194,7 +197,7 @@ export const expoLocation = {
       }
     });
   },
-  watchPositionAsync: async (options: any, callback: any) => {
+  watchPositionAsync: async (_options: any, callback: any) => {
     if ('geolocation' in navigator) {
       const watchId = navigator.geolocation.watchPosition(
         (position) => {

@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('ExpoNotificationsMock');
+
 /**
  * Web mock for expo-notifications
  *
@@ -11,7 +15,7 @@
 const hasShownWebWarning = false;
 const showWebLimitationWarning = (feature: string) => {
   if (!hasShownWebWarning && process.env.NODE_ENV === 'development') {
-    console.debug(`[Notifications] ${feature} - limited on web platform`);
+    log.debug(`[Notifications] ${feature} - limited on web platform`);
   }
 };
 
@@ -23,10 +27,8 @@ type NotificationHandler = {
   }>;
 };
 
-let _notificationHandler: NotificationHandler | null = null;
-
-export function setNotificationHandler(handler: NotificationHandler | null) {
-  _notificationHandler = handler;
+export function setNotificationHandler(_handler: NotificationHandler | null) {
+  // No-op on web: there is no native notification centre to invoke the handler.
 }
 
 export async function getPermissionsAsync() {

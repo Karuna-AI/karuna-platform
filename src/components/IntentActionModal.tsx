@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import type { JSX } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import {
   View,
@@ -12,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import {
+  getColors,
   getFontSizes,
   SPACING,
   TOUCH_TARGETS,
@@ -40,7 +42,6 @@ export function IntentActionModal({
   onSelectContact,
   onConfirm,
   onCancel,
-  _onModify,
   isLoading = false,
 }: IntentActionModalProps): JSX.Element | null {
   const { colors } = useTheme();

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import { auditLogService } from './auditLog';
 
 const STORAGE_KEYS = {
@@ -12,6 +13,16 @@ const STORAGE_KEYS = {
   LAST_AUTH_TIME: '@karuna_last_auth_time',
   AUTH_TIMEOUT_MINUTES: '@karuna_auth_timeout',
 };
+
+// Expo SecureStore (keychain/keystore) key for the 32-byte PIN secret. The
+// secret is mixed into the PIN hash so that AsyncStorage alone (hash + salt)
+// is insufficient to brute-force the PIN — an attacker needs the
+// hardware-backed secret too.
+const PIN_SECRET_KEY = 'karuna_pin_secret';
+
+// Version prefix for hashes bound to the SecureStore secret. Unprefixed
+// hashes are v1 (salt-only); 'pin_'-prefixed are the original legacy format.
+const PIN_HASH_V2_PREFIX = 'v2$';
 
 // Number of SHA-256 iterations for PIN hashing (provides brute-force resistance)
 const PIN_HASH_ITERATIONS = 10000;
@@ -45,6 +56,8 @@ export interface SecuritySettings {
 class BiometricAuthService {
   private pinHash: string | null = null;
   private pinSalt: string | null = null;
+  private pinSecret: string | null = null;
+  private pinSecretLoaded = false;
   private biometricEnabled: boolean = false;
   private appLockEnabled: boolean = false;
   private vaultLockEnabled: boolean = true;
@@ -152,8 +165,10 @@ class BiometricAuthService {
       // Generate a unique salt for this device/user
       const salt = await this.generateSalt();
 
-      // Hash the PIN with the unique salt
-      const hash = await this.hashPIN(pin, salt);
+      // Bind the hash to the hardware-backed PIN secret (or fall back to
+      // salt-only hashing when SecureStore is unavailable — see ensurePinSecret)
+      const secret = await this.ensurePinSecret();
+      const hash = await this.hashPIN(pin, salt, secret);
 
       // Store both hash and salt
       await Promise.all([
@@ -200,7 +215,12 @@ class BiometricAuthService {
 
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.PIN_HASH);
+      await AsyncStorage.removeItem(STORAGE_KEYS.PIN_SALT);
+      // Destroy the hardware-backed secret too — a removed PIN must leave
+      // nothing recoverable behind.
+      await this.deletePinSecret();
       this.pinHash = null;
+      this.pinSalt = null;
 
       // Disable biometric if PIN is removed
       await this.setBiometricEnabled(false);
@@ -233,25 +253,29 @@ class BiometricAuthService {
         // Verify with legacy method
         success = await this.verifyLegacyPIN(pin);
 
-        // If successful, migrate to new secure hash
+        // If successful, migrate to the current format
         if (success) {
-          const salt = await this.generateSalt();
-          const newHash = await this.hashPIN(pin, salt);
-
-          await Promise.all([
-            AsyncStorage.setItem(STORAGE_KEYS.PIN_HASH, newHash),
-            AsyncStorage.setItem(STORAGE_KEYS.PIN_SALT, salt),
-          ]);
-
-          this.pinHash = newHash;
-          this.pinSalt = salt;
-
+          await this.migratePinHash(pin);
           console.debug('[BiometricAuth] Migrated legacy PIN hash to secure format');
         }
-      } else if (this.pinSalt) {
-        // Verify with secure method
-        const hash = await this.hashPIN(pin, this.pinSalt);
+      } else if (this.pinHash.startsWith(PIN_HASH_V2_PREFIX) && this.pinSalt) {
+        // v2: hash is bound to the SecureStore secret. Without the secret
+        // (e.g. keychain wiped) verification is impossible — fail closed.
+        const secret = await this.getPinSecret();
+        if (!secret) {
+          return { success: false, error: 'Secure storage unavailable' };
+        }
+        const hash = await this.hashPIN(pin, this.pinSalt, secret);
         success = hash === this.pinHash;
+      } else if (this.pinSalt) {
+        // v1: salt-only hash (created while SecureStore was unavailable)
+        const hash = await this.hashPIN(pin, this.pinSalt, null);
+        success = hash === this.pinHash;
+
+        // Opportunistically upgrade to v2 now that we know the PIN
+        if (success) {
+          await this.migratePinHash(pin);
+        }
       }
 
       if (success) {
@@ -491,6 +515,7 @@ class BiometricAuthService {
       this.lastAuthTime = 0;
       this.authTimeoutMinutes = DEFAULT_AUTH_TIMEOUT;
       this.isAuthenticated = false;
+      await this.deletePinSecret();
 
       await auditLogService.log({
         action: 'security_reset',
@@ -514,12 +539,83 @@ class BiometricAuthService {
   }
 
   /**
-   * Secure PIN hashing using iterative SHA-256
-   * Uses a unique per-device salt and multiple iterations for brute-force resistance
+   * Load the hardware-backed PIN secret from SecureStore (cached in memory).
+   * Returns null when SecureStore is unavailable — callers must handle the
+   * documented fallback / fail-closed paths.
    */
-  private async hashPIN(pin: string, salt: string): Promise<string> {
-    // Combine PIN with salt
-    let hash = `${salt}:${pin}:${salt}`;
+  private async getPinSecret(): Promise<string | null> {
+    if (this.pinSecretLoaded) return this.pinSecret;
+    try {
+      this.pinSecret = await SecureStore.getItemAsync(PIN_SECRET_KEY);
+    } catch (error) {
+      console.warn('[BiometricAuth] SecureStore unavailable:', error);
+      this.pinSecret = null;
+    }
+    this.pinSecretLoaded = true;
+    return this.pinSecret;
+  }
+
+  /**
+   * Get the existing PIN secret, or generate and store a fresh 32-byte one.
+   *
+   * Documented fallback: when SecureStore is unavailable (web, or a device
+   * without a keychain/keystore), returns null and the PIN is hashed with
+   * salt only (v1 format). That is weaker — AsyncStorage alone then suffices
+   * for offline brute force — but keeps the app usable; the record upgrades
+   * to v2 automatically once SecureStore becomes available and the PIN is
+   * next verified.
+   */
+  private async ensurePinSecret(): Promise<string | null> {
+    const existing = await this.getPinSecret();
+    if (existing) return existing;
+    try {
+      const secret = await this.generateSalt(); // 32 random bytes, hex
+      await SecureStore.setItemAsync(PIN_SECRET_KEY, secret);
+      this.pinSecret = secret;
+      return secret;
+    } catch (error) {
+      console.warn('[BiometricAuth] Could not store PIN secret, using salt-only fallback:', error);
+      return null;
+    }
+  }
+
+  private async deletePinSecret(): Promise<void> {
+    this.pinSecret = null;
+    this.pinSecretLoaded = false;
+    try {
+      await SecureStore.deleteItemAsync(PIN_SECRET_KEY);
+    } catch {
+      // Already absent or SecureStore unavailable — nothing to do
+    }
+  }
+
+  /**
+   * Re-hash the (just-verified) PIN into the current format: a fresh salt and,
+   * when SecureStore is available, the hardware-backed secret (v2$ prefix).
+   */
+  private async migratePinHash(pin: string): Promise<void> {
+    const salt = await this.generateSalt();
+    const secret = await this.ensurePinSecret();
+    const newHash = await this.hashPIN(pin, salt, secret);
+
+    await Promise.all([
+      AsyncStorage.setItem(STORAGE_KEYS.PIN_HASH, newHash),
+      AsyncStorage.setItem(STORAGE_KEYS.PIN_SALT, salt),
+    ]);
+
+    this.pinHash = newHash;
+    this.pinSalt = salt;
+  }
+
+  /**
+   * Secure PIN hashing using iterative SHA-256.
+   * When a secret is provided, it is mixed into the input and the result is
+   * prefixed with v2$ — verification then requires the SecureStore secret,
+   * so the AsyncStorage hash+salt alone are insufficient for brute force.
+   */
+  private async hashPIN(pin: string, salt: string, secret: string | null): Promise<string> {
+    // Combine PIN with salt (and the hardware-backed secret when available)
+    let hash = secret ? `${secret}:${salt}:${pin}:${secret}` : `${salt}:${pin}:${salt}`;
 
     // Apply iterative hashing for key stretching
     for (let i = 0; i < PIN_HASH_ITERATIONS; i++) {
@@ -529,7 +625,7 @@ class BiometricAuthService {
       );
     }
 
-    return hash;
+    return secret ? `${PIN_HASH_V2_PREFIX}${hash}` : hash;
   }
 
   /**

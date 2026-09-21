@@ -1,4 +1,7 @@
 import { Platform } from 'react-native';
+import { logger } from './logger';
+
+const log = logger.create('Telemetry');
 
 /**
  * Telemetry events we track
@@ -31,6 +34,8 @@ export type TelemetryEvent =
   | 'onboarding_caregiver_invite_shared'
   | 'onboarding_caregiver_invite_skipped'
   | 'onboarding_tutorial_viewed'
+  | 'onboarding_permissions_skipped'
+  | 'onboarding_speech_speed_selected'
   | 'onboarding_completed'
   | 'onboarding_skipped';
 
@@ -72,7 +77,7 @@ class TelemetryService {
     }
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL);
 
-    console.debug('Telemetry service initialized');
+    log.debug('Telemetry service initialized');
   }
 
   /**
@@ -107,7 +112,7 @@ class TelemetryService {
     });
 
     // Log locally for debugging
-    console.debug(`[Telemetry] ${event}`, enrichedData);
+    log.debug(`${`[Telemetry] ${event}`} ${enrichedData}`);
 
     // Auto-flush if queue is full
     if (this.queue.length >= BATCH_SIZE) {
@@ -193,7 +198,7 @@ class TelemetryService {
 
     // If no gateway URL or on web (CORS issues), just log locally
     if (!this.gatewayUrl || Platform.OS === 'web') {
-      console.debug('[Telemetry] No gateway URL or web platform - events logged locally only');
+      log.debug('[Telemetry] No gateway URL or web platform - events logged locally only');
       return;
     }
 
@@ -210,7 +215,7 @@ class TelemetryService {
       }
     } catch (error) {
       // Silently fail - telemetry should never break the app
-      console.warn('[Telemetry] Failed to send events:', error);
+      log.warn(`[Telemetry] Failed to send events: ${error}`);
       // Re-queue failed events (up to a limit)
       if (this.queue.length < BATCH_SIZE * 2) {
         this.queue.push(...events);

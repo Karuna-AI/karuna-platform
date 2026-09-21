@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('Contacts');
+
 /**
  * Web mock for expo-contacts
  *
@@ -93,7 +97,7 @@ export interface PermissionResponse {
 let hasShownWebWarning = false;
 const showWebLimitationWarning = () => {
   if (!hasShownWebWarning && process.env.NODE_ENV === 'development') {
-    console.debug('[Contacts] Contact access not available on web platform');
+    log.debug('[Contacts] Contact access not available on web platform');
     hasShownWebWarning = true;
   }
 };
@@ -155,7 +159,7 @@ export async function getContactsAsync(_options?: {
       return { data, hasNextPage: false, hasPreviousPage: false };
     } catch (error) {
       // User cancelled or API error
-      console.debug('[Contacts] Contact picker cancelled or failed:', error);
+      log.debug(`[Contacts] Contact picker cancelled or failed: ${error}`);
     }
   }
 

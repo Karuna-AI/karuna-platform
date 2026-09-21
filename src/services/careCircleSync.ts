@@ -3,6 +3,17 @@ import { vaultService } from './vault';
 import { secureStorageService } from './secureStorage';
 import { toSyncPayload, isSyncSupported } from './vaultSyncMap';
 import { encryptionService } from './encryption';
+import type {
+  VaultMedication,
+  VaultDoctor,
+  VaultAppointment,
+  VaultContact,
+  VaultNote,
+  VaultEntity,
+} from '../types/vault';
+import { logger } from './logger';
+
+const log = logger.create('CareCircleSync');
 
 export type RecoveryStatus = 'none' | 'active' | 'pending' | 'approved';
 
@@ -37,6 +48,44 @@ interface SyncResult {
   synced: number;
   conflicts: SyncChange[];
   error?: string;
+}
+
+/** Timestamp fields in either casing, as read by the merge logic. */
+export interface SyncTimestamps {
+  updatedAt?: string | number;
+  updated_at?: string | number;
+  createdAt?: string | number;
+  created_at?: string | number;
+}
+
+/**
+ * A remote (server-side, snake_case) row being merged into the local vault.
+ * `T` is the local vault entity type; the server row may carry snake_case
+ * timestamps (and extra server columns), so both timestamp casings are
+ * accepted and read by mergeDecision().
+ */
+export type SyncableItem<T extends { id: string } = { id: string }> = T &
+  SyncTimestamps & {
+    created_by?: string;
+  };
+
+/** Payload shape the sync endpoint returns for applyRemoteData(). */
+export interface RemoteSyncData {
+  medications?: SyncableItem<VaultMedication>[];
+  doctors?: SyncableItem<VaultDoctor>[];
+  appointments?: SyncableItem<VaultAppointment>[];
+  contacts?: SyncableItem<VaultContact>[];
+  notes?: SyncableItem<VaultNote>[];
+}
+
+/** A health/vitals reading uploaded to the care circle (append-only endpoint). */
+export interface HealthReadingUpload {
+  dataType: string;
+  value: unknown;
+  unit?: string;
+  measuredAt: string;
+  source?: string;
+  notes?: string;
 }
 
 class CareCircleSyncService {
@@ -93,7 +142,7 @@ class CareCircleSyncService {
       try {
         this.pendingChanges = JSON.parse(savedChanges);
       } catch {
-        console.warn('[CareCircleSync] Corrupted pending changes, resetting');
+        log.warn('[CareCircleSync] Corrupted pending changes, resetting');
         this.pendingChanges = [];
       }
     }
@@ -108,11 +157,12 @@ class CareCircleSyncService {
         void this.trackChange(kind, id, 'delete', {});
         return;
       }
-      const payload = toSyncPayload(kind, entity || {});
+      if (!entity) return;
+      const payload = toSyncPayload(kind, entity);
       if (payload) void this.trackChange(payload.entityType, id, action, payload.data);
     });
 
-    console.debug('[CareCircleSync] Initialized with device:', this.deviceId);
+    log.debug(`[CareCircleSync] Initialized with device: ${this.deviceId}`);
   }
 
   // Join a care circle using invitation token
@@ -215,7 +265,7 @@ class CareCircleSyncService {
         }
       }
     } catch (error) {
-      console.debug('[CareCircleSync] getMyCircleRole fetch failed, using cache:', error);
+      log.debug(`[CareCircleSync] getMyCircleRole fetch failed, using cache: ${error}`);
     }
     // Offline / fetch miss: fall back to the last known cached role.
     const cached = await AsyncStorage.getItem(STORAGE_KEYS.CIRCLE_ROLE);
@@ -356,7 +406,7 @@ class CareCircleSyncService {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.debug('[CareCircleSync] WebSocket connected');
+        log.debug('[CareCircleSync] WebSocket connected');
         this.reconnectAttempts = 0;
 
         // Auth happens via the upgrade-time ticket — no in-band auth message
@@ -379,7 +429,7 @@ class CareCircleSyncService {
       };
 
       this.ws.onclose = () => {
-        console.debug('[CareCircleSync] WebSocket disconnected');
+        log.debug('[CareCircleSync] WebSocket disconnected');
         this.notifyListeners('disconnected');
         this.attemptReconnect();
       };
@@ -412,14 +462,14 @@ class CareCircleSyncService {
 
   private attemptReconnect() {
     if (this.isShuttingDown || this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.debug('[CareCircleSync] Not reconnecting (shutting down or max attempts reached)');
+      log.debug('[CareCircleSync] Not reconnecting (shutting down or max attempts reached)');
       return;
     }
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
 
-    console.debug(`[CareCircleSync] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    log.debug(`[CareCircleSync] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimeoutId = setTimeout(() => {
       this.reconnectTimeoutId = null;
@@ -462,7 +512,7 @@ class CareCircleSyncService {
         break;
 
       default:
-        console.debug('[CareCircleSync] Unknown message type:', message.type);
+        log.debug(`[CareCircleSync] Unknown message type: ${message.type}`);
     }
   }
 
@@ -538,7 +588,7 @@ class CareCircleSyncService {
         .map((c) => ({ ...c, retryCount: (c.retryCount ?? 0) + 1 }))
         .filter((c) => {
           if ((c.retryCount ?? 0) > MAX_CHANGE_RETRIES) {
-            console.warn('[CareCircleSync] Dropping change after max retries:', c.id, c.entityType, c.action);
+            log.warn(`[CareCircleSync] Dropping change after max retries: ${c.id} ${c.entityType} ${c.action}`);
             return false;
           }
           return true;
@@ -619,7 +669,7 @@ class CareCircleSyncService {
    * server-side. Returns success/error so callers can surface or retry.
    */
   async pushHealthReadings(
-    readings: { dataType: string; value: unknown; unit?: string; measuredAt: string; source?: string; notes?: string }[]
+    readings: HealthReadingUpload[]
   ): Promise<{ success: boolean; inserted?: number; error?: string }> {
     if (!this.careCircleId || !this.authToken) {
       return { success: false, error: 'Not connected to care circle' };
@@ -682,19 +732,13 @@ class CareCircleSyncService {
   }
 
   // Apply remote data to local vault
-  private async applyRemoteData(data: {
-    medications?: unknown[];
-    doctors?: unknown[];
-    appointments?: unknown[];
-    contacts?: unknown[];
-    notes?: unknown[];
-  }): Promise<void> {
+  private async applyRemoteData(data: RemoteSyncData): Promise<void> {
     if (!vaultService.isUnlocked()) {
-      console.debug('[CareCircleSync] Vault locked, skipping data apply');
+      log.debug('[CareCircleSync] Vault locked, skipping data apply');
       return;
     }
 
-    console.debug('[CareCircleSync] Merging remote data:', {
+    log.debug('[CareCircleSync] Merging remote data', {
       medications: data.medications?.length || 0,
       doctors: data.doctors?.length || 0,
       appointments: data.appointments?.length || 0,
@@ -703,49 +747,52 @@ class CareCircleSyncService {
     });
 
     // Merge strategy: last-write-wins based on updatedAt timestamp
-    // Remote items with newer updatedAt overwrite local; new items are added
+    // Remote items with newer updatedAt overwrite local; new items are added.
+    // NOTE: the vault add-methods declare Omit<Entity, keyof VaultEntity>, but
+    // the merge intentionally passes server timestamps through (so subsequent
+    // merges compare correctly) — hence the narrow, documented assertions.
     if (data.medications) {
       await this.mergeEntities(
-        data.medications as any[],
+        data.medications,
         () => vaultService.getMedications(),
-        (item: any) => vaultService.addMedication(item),
-        (id: string, item: any) => vaultService.updateMedication(id, item),
+        (item) => vaultService.addMedication(item as Omit<VaultMedication, keyof VaultEntity>),
+        (id: string, item) => vaultService.updateMedication(id, item),
       );
     }
 
     if (data.doctors) {
       await this.mergeEntities(
-        data.doctors as any[],
+        data.doctors,
         () => vaultService.getDoctors(),
-        (item: any) => vaultService.addDoctor(item),
-        (id: string, item: any) => vaultService.updateDoctor(id, item),
+        (item) => vaultService.addDoctor(item as Omit<VaultDoctor, keyof VaultEntity>),
+        (id: string, item) => vaultService.updateDoctor(id, item),
       );
     }
 
     if (data.appointments) {
       await this.mergeEntities(
-        data.appointments as any[],
+        data.appointments,
         () => vaultService.getAppointments(),
-        (item: any) => vaultService.addAppointment(item),
-        (id: string, item: any) => vaultService.updateAppointment(id, item),
+        (item) => vaultService.addAppointment(item as Omit<VaultAppointment, keyof VaultEntity>),
+        (id: string, item) => vaultService.updateAppointment(id, item),
       );
     }
 
     if (data.contacts) {
       await this.mergeEntities(
-        data.contacts as any[],
+        data.contacts,
         () => vaultService.getContacts(),
-        (item: any) => vaultService.addContact(item),
-        (id: string, item: any) => vaultService.updateContact(id, item),
+        (item) => vaultService.addContact(item as Omit<VaultContact, keyof VaultEntity>),
+        (id: string, item) => vaultService.updateContact(id, item),
       );
     }
 
     if (data.notes) {
       await this.mergeEntities(
-        data.notes as any[],
+        data.notes,
         () => vaultService.getNotes(),
-        (item: any) => vaultService.addNote(item),
-        (_id: string, _item: any) => Promise.resolve(null), // Notes are append-only
+        (item) => vaultService.addNote(item as Omit<VaultNote, keyof VaultEntity>),
+        (_id: string, _item) => Promise.resolve(null), // Notes are append-only
       );
     }
   }
@@ -756,30 +803,36 @@ class CareCircleSyncService {
    * camelCase (`updatedAt`, the local model) — the previous code only read
    * camelCase, so server `updated_at` was always undefined and remote edits
    * (e.g. a caregiver changing a medication) never overwrote the device.
+   *
+   * The `id` is optional here because the decision only reads timestamps;
+   * callers pass full SyncableItem objects.
    */
-  static mergeDecision(remoteItem: any, localItem: any | undefined): 'add' | 'update' | 'skip' {
+  static mergeDecision(
+    remoteItem: (SyncTimestamps & { id?: string }) | null | undefined,
+    localItem: (SyncTimestamps & { id?: string }) | null | undefined
+  ): 'add' | 'update' | 'skip' {
     if (!localItem) return 'add';
     const remoteTs = remoteItem?.updated_at ?? remoteItem?.updatedAt;
     const localTs = localItem?.updated_at ?? localItem?.updatedAt;
-    if (!remoteTs) return 'skip'; // no remote timestamp — don't clobber local
-    if (!localTs) return 'update'; // local has no timestamp — remote wins
+    if (remoteTs === undefined || remoteTs === null) return 'skip'; // no remote timestamp — don't clobber local
+    if (localTs === undefined || localTs === null) return 'update'; // local has no timestamp — remote wins
     return new Date(remoteTs) > new Date(localTs) ? 'update' : 'skip';
   }
 
   // Server rows are snake_case; surface camelCase timestamps so locally-stored
   // items carry a usable updatedAt/createdAt for subsequent merges.
-  private static normalizeTimestamps(item: any): any {
+  private static normalizeTimestamps<T extends SyncTimestamps>(item: T): T {
     const out = { ...item };
-    if (out.updated_at && !out.updatedAt) out.updatedAt = out.updated_at;
-    if (out.created_at && !out.createdAt) out.createdAt = out.created_at;
+    if (out.updated_at !== undefined && out.updatedAt === undefined) out.updatedAt = out.updated_at;
+    if (out.created_at !== undefined && out.createdAt === undefined) out.createdAt = out.created_at;
     return out;
   }
 
-  private async mergeEntities<T extends { id: string; updatedAt?: string }>(
+  private async mergeEntities<T extends SyncableItem<VaultEntity>>(
     remoteItems: T[],
     getLocal: () => Promise<T[]>,
-    addItem: (item: any) => Promise<any>,
-    updateItem: (id: string, item: any) => Promise<any>,
+    addItem: (item: Omit<T, 'id'>) => Promise<unknown>,
+    updateItem: (id: string, item: Partial<T>) => Promise<unknown>,
   ): Promise<void> {
     try {
       const localItems = await getLocal();
@@ -790,32 +843,27 @@ class CareCircleSyncService {
         const decision = CareCircleSyncService.mergeDecision(remoteItem, localItem);
 
         if (decision === 'add') {
-          const { id: _id, ...rest } = remoteItem as any;
+          // The vault mints a fresh local id on add; the server id is dropped
+          // here while server timestamps are preserved for future merges.
+          const { id: _droppedId, ...rest } = remoteItem;
           await addItem(CareCircleSyncService.normalizeTimestamps(rest));
         } else if (decision === 'update') {
-          const { id: _id2, createdAt: _c1, created_at: _c2, createdBy: _cb1, created_by: _cb2, ...updates } =
-            remoteItem as any;
-          await updateItem(remoteItem.id, CareCircleSyncService.normalizeTimestamps(updates));
+          const {
+            id: _sameId,
+            createdAt: _c1, created_at: _c2,
+            createdBy: _cb1, created_by: _cb2,
+            ...updates
+          } = remoteItem;
+          // `updates` is T minus identity/audit fields — a genuine Partial<T>.
+          // The assertion bridges Omit<T, …>'s opacity to the checker for
+          // generic T; it is sound because every remaining prop is from T.
+          const updatePayload = CareCircleSyncService.normalizeTimestamps(updates) as Partial<T>;
+          await updateItem(remoteItem.id, updatePayload);
         }
         // 'skip' → local is newer/equal or remote lacks a timestamp → keep local
       }
     } catch (error) {
       console.error('[CareCircleSync] Entity merge error:', error);
-    }
-  }
-
-  // Handle real-time changes from other devices
-  private async handleRemoteChanges(changes: SyncChange[]): Promise<void> {
-    console.debug('[CareCircleSync] Received', changes.length, 'remote changes');
-
-    // Filter out our own changes
-    const remoteChanges = changes.filter((c) => c.deviceId !== this.deviceId);
-
-    if (remoteChanges.length > 0) {
-      this.notifyListeners('remote_changes', remoteChanges);
-
-      // Trigger a pull to get the latest data
-      await this.pullFromCloud();
     }
   }
 

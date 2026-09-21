@@ -13,6 +13,18 @@ const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 const db = require('./db');
 const router = express.Router();
+const { escapeHtml } = require('./utils');
+
+// Base URL of the user-facing app, used to build single-use setup/reset links.
+const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3020';
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
 
 let resend = null;
 try {
@@ -21,53 +33,54 @@ try {
 } catch (_) {}
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Karuna <noreply@karunaapp.in>';
 
-async function sendAdminWelcomeEmail(email, name, password) {
+async function sendAdminWelcomeEmail(email, name) {
   if (!resend) return;
   try {
+    // The creating admin chose the password and shares it out-of-band.
+    // Never email plaintext credentials.
     await resend.emails.send({
       from: FROM_EMAIL,
       to: email,
       subject: 'Your Karuna Admin Account',
-      html: `<p>Hi ${name},</p>
+      html: `<p>Hi ${escapeHtml(name)},</p>
 <p>Your Karuna admin account has been created.</p>
-<p><strong>Email:</strong> ${email}<br>
-<strong>Temporary password:</strong> ${password}</p>
-<p>Please log in and change your password immediately.</p>`,
+<p><strong>Email:</strong> ${escapeHtml(email)}</p>
+<p>Please ask the administrator who created your account for your sign-in credentials, then log in and change your password immediately.</p>`,
     });
   } catch (err) {
     console.error('Admin welcome email failed:', err.message);
   }
 }
 
-async function sendUserTempPasswordEmail(email, name, tempPassword) {
+async function sendUserSetupEmail(email, name, setupUrl) {
   if (!resend) return;
   try {
     await resend.emails.send({
       from: FROM_EMAIL,
       to: email,
       subject: 'Your Karuna Account',
-      html: `<p>Hi ${name},</p>
+      html: `<p>Hi ${escapeHtml(name)},</p>
 <p>An account has been created for you on Karuna.</p>
-<p><strong>Email:</strong> ${email}<br>
-<strong>Temporary password:</strong> ${tempPassword}</p>
-<p>Please log in and change your password on first sign-in.</p>`,
+<p><strong>Email:</strong> ${escapeHtml(email)}</p>
+<p>Click the link below to set your password and activate your account. This link is single-use and expires in 24 hours.</p>
+<p><a href="${escapeHtml(setupUrl)}">Set your password</a></p>`,
     });
   } catch (err) {
-    console.error('User temp password email failed:', err.message);
+    console.error('User setup email failed:', err.message);
   }
 }
 
-async function sendPasswordResetEmail(email, name, newPassword) {
+async function sendPasswordResetEmail(email, name, resetUrl) {
   if (!resend) return;
   try {
     await resend.emails.send({
       from: FROM_EMAIL,
       to: email,
       subject: 'Your Karuna Password Has Been Reset',
-      html: `<p>Hi ${name},</p>
-<p>An admin has reset your Karuna account password.</p>
-<p><strong>New password:</strong> ${newPassword}</p>
-<p>Please log in and change your password immediately.</p>`,
+      html: `<p>Hi ${escapeHtml(name)},</p>
+<p>An admin has initiated a password reset for your Karuna account.</p>
+<p>Click the link below to choose a new password. This link is single-use and expires in 1 hour. If you did not expect this, please contact support.</p>
+<p><a href="${escapeHtml(resetUrl)}">Choose a new password</a></p>`,
     });
   } catch (err) {
     console.error('Password reset email failed:', err.message);
@@ -93,10 +106,6 @@ const createUserSchema = z.object({
 
 const suspendUserSchema = z.object({
   reason: z.string().min(1),
-});
-
-const resetPasswordSchema = z.object({
-  newPassword: z.string().min(12),
 });
 
 const createFeatureFlagSchema = z.object({
@@ -233,7 +242,10 @@ async function verifyPassword(password, hash, adminId = null) {
 
 function createAdminJWT(admin) {
   return jwt.sign(
-    { id: admin.id, email: admin.email, name: admin.name, role: admin.role },
+    // tv = token_version from the admin_users row; bumping it invalidates all
+    // previously issued admin tokens. Defaults to 1 for rows created before
+    // the token_version migration ran.
+    { id: admin.id, email: admin.email, name: admin.name, role: admin.role, tv: admin.token_version ?? 1 },
     ADMIN_JWT_SECRET,
     { expiresIn: ADMIN_JWT_EXPIRES_IN }
   );
@@ -241,7 +253,9 @@ function createAdminJWT(admin) {
 
 function verifyAdminJWT(token) {
   try {
-    return jwt.verify(token, ADMIN_JWT_SECRET);
+    // Pin the algorithm: without this, jwt.verify would accept tokens signed
+    // with any algorithm the library supports (algorithm-confusion attacks).
+    return jwt.verify(token, ADMIN_JWT_SECRET, { algorithms: ['HS256'] });
   } catch (error) {
     // Log admin JWT verification failures for security monitoring
     if (error.name === 'TokenExpiredError') {
@@ -298,7 +312,7 @@ function getCookie(req, name) {
 // Authentication Middleware
 // ============================================================================
 
-function adminAuthMiddleware(req, res, next) {
+async function adminAuthMiddleware(req, res, next) {
   // Prefer httpOnly cookie; fall back to Bearer header for API clients
   let token = getCookie(req, ADMIN_COOKIE_NAME);
   if (!token) {
@@ -318,8 +332,27 @@ function adminAuthMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  req.admin = decoded;
-  req.adminPermissions = ADMIN_ROLE_PERMISSIONS[decoded.role] || {};
+  // Session revocation: the admin JWT carries token_version at issue time;
+  // a mismatch with the stored version rejects the token. Fail closed: a
+  // token without a tv claim is rejected.
+  try {
+    const adminResult = await db.query(
+      'SELECT id, email, name, role, is_active, token_version FROM admin_users WHERE id = $1',
+      [decoded.id]
+    );
+    if (adminResult.rows.length === 0 || adminResult.rows[0].is_active === false) {
+      return res.status(401).json({ error: 'Admin account no longer exists or is deactivated' });
+    }
+    const admin = adminResult.rows[0];
+    if (decoded.tv !== admin.token_version) {
+      return res.status(401).json({ error: 'Session revoked. Please sign in again.' });
+    }
+    req.admin = admin;
+    req.adminPermissions = ADMIN_ROLE_PERMISSIONS[admin.role] || {};
+  } catch (error) {
+    console.error('Admin auth middleware error:', error);
+    return res.status(500).json({ error: 'Authentication failed' });
+  }
   next();
 }
 
@@ -498,7 +531,7 @@ router.post('/auth/create', adminAuthMiddleware, requirePermission('canManageAdm
     );
 
     await logAdminAction(req.admin.id, req.admin.email, 'create_admin', 'admin', result.rows[0].id, null, { email, name, role }, req);
-    await sendAdminWelcomeEmail(email, name, password);
+    await sendAdminWelcomeEmail(email, name);
 
     res.json({ success: true, admin: result.rows[0] });
   } catch (error) {
@@ -686,30 +719,42 @@ router.post('/users/:userId/unsuspend', adminAuthMiddleware, requirePermission('
   }
 });
 
-// Reset user password
-router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(resetPasswordSchema), async (req, res) => {
+// Reset user password — issues a single-use reset link instead of an
+// admin-chosen password. The plaintext password is never emailed; the user
+// sets their own password via the link (hashed token, 1h expiry, following
+// the existing password-reset token pattern). Bumps token_version immediately
+// so existing sessions are revoked even before the link is used.
+router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 12) {
-      return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    const userResult = await db.query(
+      'SELECT id, email, name FROM users WHERE id = $1',
+      [userId]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
-    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      return res.status(400).json({ error: 'Password must contain uppercase, lowercase, and a number' });
-    }
+    const { email: userEmail, name: userName } = userResult.rows[0];
 
-    // Use bcrypt for password hashing (same as careCircle.js)
-    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    // Revoke existing sessions now — the credential is being rotated.
+    await db.query(
+      'UPDATE users SET token_version = token_version + 1 WHERE id = $1',
+      [userId]
+    );
 
-    const userResult = await db.query('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING email, name', [passwordHash, userId]);
+    const resetToken = generateToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [userId, hashToken(resetToken), expiresAt]
+    );
 
-    await logAdminAction(req.admin.id, req.admin.email, 'reset_password', 'user', userId, null, { passwordReset: true }, req);
+    const resetUrl = `${APP_BASE_URL}/reset-password?token=${resetToken}`;
+    await sendPasswordResetEmail(userEmail, userName, resetUrl);
 
-    if (userResult.rows.length > 0) {
-      const { email: userEmail, name: userName } = userResult.rows[0];
-      await sendPasswordResetEmail(userEmail, userName, newPassword);
-    }
+    await logAdminAction(req.admin.id, req.admin.email, 'reset_password', 'user', userId, null, { passwordReset: true, viaLink: true }, req);
 
     res.json({ success: true });
   } catch (error) {
@@ -718,7 +763,10 @@ router.post('/users/:userId/reset-password', adminAuthMiddleware, requirePermiss
   }
 });
 
-// Create user account (admin-provisioned; sets is_verified=true, returns temp password)
+// Create user account (admin-provisioned; is_verified=true). No temporary
+// password is generated or returned — the user receives a single-use setup
+// link (hashed token, 24h expiry, following the password-reset token pattern)
+// and chooses their own password.
 router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), adminActionLimiter, validate(createUserSchema), async (req, res) => {
   try {
     const { email, name, phone } = req.body;
@@ -737,27 +785,31 @@ router.post('/users', adminAuthMiddleware, requirePermission('canManageUsers'), 
       return res.status(409).json({ error: 'A user with this email already exists' });
     }
 
-    // Generate a secure temporary password (16 chars: upper + lower + digits + special)
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$';
-    let tempPassword = '';
-    const randBytes = require('crypto').randomBytes(16);
-    for (let i = 0; i < 16; i++) {
-      tempPassword += chars[randBytes[i] % chars.length];
-    }
-
-    const passwordHash = await hashPassword(tempPassword);
+    // Unhashable placeholder: the account has no usable password until the
+    // setup link is redeemed. Random 32 bytes hashed with bcrypt.
+    const placeholderHash = await hashPassword(crypto.randomBytes(32).toString('hex'));
 
     const result = await db.query(
       `INSERT INTO users (email, password_hash, name, phone, is_verified)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, email, name, phone, is_verified, is_active, created_at`,
-      [email.toLowerCase(), passwordHash, name.trim(), phone || null]
+      [email.toLowerCase(), placeholderHash, name.trim(), phone || null]
+    );
+    const newUser = result.rows[0];
+
+    const setupToken = generateToken();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [newUser.id, hashToken(setupToken), expiresAt]
     );
 
-    await logAdminAction(req.admin.id, req.admin.email, 'create_user', 'user', result.rows[0].id, null, { email, name }, req);
-    await sendUserTempPasswordEmail(email, name.trim(), tempPassword);
+    const setupUrl = `${APP_BASE_URL}/reset-password?token=${setupToken}`;
+    await sendUserSetupEmail(email, newUser.name, setupUrl);
 
-    res.status(201).json({ success: true, user: result.rows[0], tempPassword });
+    await logAdminAction(req.admin.id, req.admin.email, 'create_user', 'user', newUser.id, null, { email, name }, req);
+
+    res.status(201).json({ success: true, user: newUser });
   } catch (error) {
     console.error('Create user error:', error);
     res.status(500).json({ error: 'Failed to create user' });
@@ -2035,5 +2087,6 @@ router.get('/medications', adminAuthMiddleware, requirePermission('canViewMetric
 module.exports = {
   router,
   adminAuthMiddleware,
+  requirePermission,
   ADMIN_ROLE_PERMISSIONS,
 };

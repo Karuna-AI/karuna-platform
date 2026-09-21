@@ -3,6 +3,10 @@
  * Background fetch is not supported on web, so these are no-ops
  */
 
+import { logger } from '../services/logger';
+
+const log = logger.create('BackgroundFetch');
+
 export const BackgroundFetchResult = {
   NoData: 1,
   NewData: 2,
@@ -28,7 +32,7 @@ export async function registerTaskAsync(
     startOnBoot?: boolean;
   }
 ): Promise<void> {
-  console.warn('[BackgroundFetch] Background fetch is not supported on web');
+  log.warn('[BackgroundFetch] Background fetch is not supported on web');
 }
 
 export async function unregisterTaskAsync(_taskName: string): Promise<void> {

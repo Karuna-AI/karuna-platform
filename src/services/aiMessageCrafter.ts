@@ -15,6 +15,9 @@ import {
   MedicationSignal,
   CHECK_IN_TYPE_INFO,
 } from '../types/proactive';
+import { logger } from './logger';
+
+const log = logger.create('AIMessageCrafter');
 
 // Guardrails for AI message generation
 const MESSAGE_GUARDRAILS = {
@@ -113,7 +116,7 @@ class AIMessageCrafterService {
       }
 
       // If AI message fails validation, use fallback
-      console.log('[AIMessageCrafter] AI message failed validation:', validationResult.reason);
+      log.info(`[AIMessageCrafter] AI message failed validation: ${validationResult.reason}`);
       return this.getFallbackMessage(request.checkInType);
     } catch (error) {
       console.error('[AIMessageCrafter] Error generating message:', error);

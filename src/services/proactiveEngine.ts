@@ -19,6 +19,9 @@ import {
   DEFAULT_PROACTIVE_PREFERENCES,
   CHECK_IN_TYPE_INFO,
 } from '../types/proactive';
+import { logger } from './logger';
+
+const log = logger.create('ProactiveEngine');
 
 const STORAGE_KEYS = {
   PREFERENCES: '@karuna_proactive_preferences',
@@ -52,7 +55,7 @@ if (Platform.OS !== 'web' && !isIOS26OrLater) {
     }
   }, 0);
 } else if (isIOS26OrLater) {
-  console.warn('[ProactiveEngine] Background task disabled on iOS 26+ due to known crash. Foreground check-ins only.');
+  log.warn('[ProactiveEngine] Background task disabled on iOS 26+ due to known crash. Foreground check-ins only.');
 }
 
 class ProactiveEngineService {
@@ -116,7 +119,7 @@ class ProactiveEngineService {
       this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
 
       this.isInitialized = true;
-      console.debug('[ProactiveEngine] Initialized');
+      log.debug('[ProactiveEngine] Initialized');
 
       // Start if enabled
       if (this.preferences.enabled) {
@@ -145,7 +148,7 @@ class ProactiveEngineService {
       this.runCheck();
     }, 15 * 60 * 1000);
 
-    console.debug('[ProactiveEngine] Started');
+    log.debug('[ProactiveEngine] Started');
   }
 
   /**
@@ -165,7 +168,7 @@ class ProactiveEngineService {
       this.appStateSubscription = null;
     }
 
-    console.debug('[ProactiveEngine] Stopped');
+    log.debug('[ProactiveEngine] Stopped');
   }
 
   /**
@@ -496,7 +499,7 @@ class ProactiveEngineService {
         startOnBoot: true,
       });
 
-      console.debug('[ProactiveEngine] Background task registered');
+      log.debug('[ProactiveEngine] Background task registered');
     } catch (error) {
       console.error('[ProactiveEngine] Background task registration error:', error);
     }

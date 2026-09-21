@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { secureStorageService } from './secureStorage';
 import { auditLogService } from './auditLog';
+import { logger } from './logger';
+
+const log = logger.create('EncryptionUtils');
 
 const DB_PREFIX = '@karuna_encrypted_';
 const DB_VERSION = 1;
@@ -61,7 +64,7 @@ class EncryptionUtils {
       }
 
       if (!this.useWebCrypto) {
-        console.debug('[EncryptionUtils] Using expo-crypto fallback (crypto.subtle not available)');
+        log.debug('[EncryptionUtils] Using expo-crypto fallback (crypto.subtle not available)');
       }
 
       return true;
@@ -213,7 +216,7 @@ class EncryptedDatabaseService {
       await this.loadMetadata();
       this.isOpen = true;
 
-      console.debug('[EncryptedDB] Database opened successfully');
+      log.debug('[EncryptedDB] Database opened successfully');
       return { success: true };
     } catch (error) {
       console.error('[EncryptedDB] Open error:', error);
@@ -226,7 +229,7 @@ class EncryptedDatabaseService {
    */
   async close(): Promise<void> {
     this.isOpen = false;
-    console.debug('[EncryptedDB] Database closed');
+    log.debug('[EncryptedDB] Database closed');
   }
 
   /**
@@ -571,7 +574,7 @@ class EncryptedDatabaseService {
         await this.saveMetadata();
       }
     } catch (error) {
-      console.debug('[EncryptedDB] Load metadata error (stale data cleared):', (error as Error).message);
+      log.debug(`[EncryptedDB] Load metadata error (stale data cleared): ${(error as Error).message}`);
       // Clear stale encrypted data that can't be decrypted (e.g., key mismatch on web)
       const key = DB_PREFIX + '_metadata';
       await AsyncStorage.removeItem(key).catch(() => {});

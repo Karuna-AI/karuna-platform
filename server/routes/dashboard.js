@@ -7,7 +7,7 @@
  */
 
 module.exports = function mountDashboardRoutes(router, deps) {
-const { db, authMiddleware } = deps;
+const { db, authMiddleware, hasCategoryConsent } = deps;
 
 // ============================================================================
 // Dashboard Summary Route
@@ -38,6 +38,11 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Not a member' });
     }
 
+    // The health section carries the same consent gate as the health/vault
+    // endpoints: without health_data consent the readings are withheld
+    // (fail closed on check errors).
+    const canViewHealth = await hasCategoryConsent(circleId, req.user.id, 'health_data');
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const weekAgo = new Date(today);
@@ -51,13 +56,15 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
       alertsResult,
       checkinsResult,
     ] = await Promise.all([
-      // Latest health readings
-      db.query(
-        `SELECT DISTINCT ON (data_type) * FROM health_data
-         WHERE circle_id = $1
-         ORDER BY data_type, measured_at DESC`,
-        [circleId]
-      ),
+      // Latest health readings (skipped entirely without consent)
+      canViewHealth
+        ? db.query(
+            `SELECT DISTINCT ON (data_type) * FROM health_data
+             WHERE circle_id = $1
+             ORDER BY data_type, measured_at DESC`,
+            [circleId]
+          )
+        : Promise.resolve({ rows: [] }),
       // Today's medication adherence
       db.query(
         `SELECT md.status, COUNT(*) as count
@@ -122,6 +129,9 @@ router.get('/circles/:circleId/dashboard', authMiddleware, async (req, res) => {
     res.json({
       health: {
         latest: healthResult.rows.map(camelizeRow),
+        // Signals to clients that the section was withheld for lack of
+        // health_data consent (rather than merely empty).
+        restricted: !canViewHealth,
       },
       adherence: {
         today: adherence,

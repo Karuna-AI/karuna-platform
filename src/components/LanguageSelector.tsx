@@ -18,6 +18,7 @@ import {
   LanguageCode,
   LANGUAGE_GROUPS,
   getLanguageConfig,
+  FULLY_TRANSLATED_LANGUAGES,
 } from '../i18n/languages';
 import { SPACING, TOUCH_TARGETS } from '../utils/accessibility';
 
@@ -45,7 +46,7 @@ function LanguageGroup({
   onSelect,
   fontSize,
   searchQuery,
-}: LanguageGroupProps): JSX.Element | null {
+}: LanguageGroupProps): React.JSX.Element | null {
   const filteredLanguages = useMemo(() => {
     if (!searchQuery) return languages;
 
@@ -124,7 +125,7 @@ export function LanguageSelector({
   onSelect,
   onClose,
   fontSize = 16,
-}: LanguageSelectorProps): JSX.Element {
+}: LanguageSelectorProps): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleSelect = useCallback(
@@ -202,23 +203,30 @@ export function LanguageSelector({
           )}
         </View>
 
-        {/* Language Groups */}
+        {/* Language Groups — #34: only fully-translated languages are offered,
+            so every visible string in the app is actually translated. */}
         <ScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
         >
           {(Object.keys(LANGUAGE_GROUPS) as (keyof typeof LANGUAGE_GROUPS)[]).map(
-            (groupKey) => (
-              <LanguageGroup
-                key={groupKey}
-                title={groupTitles[groupKey]}
-                languages={LANGUAGE_GROUPS[groupKey]}
-                currentLanguage={currentLanguage}
-                onSelect={handleSelect}
-                fontSize={fontSize}
-                searchQuery={searchQuery}
-              />
-            )
+            (groupKey) => {
+              const available = LANGUAGE_GROUPS[groupKey].filter((code) =>
+                FULLY_TRANSLATED_LANGUAGES.includes(code)
+              );
+              if (available.length === 0) return null;
+              return (
+                <LanguageGroup
+                  key={groupKey}
+                  title={groupTitles[groupKey]}
+                  languages={available}
+                  currentLanguage={currentLanguage}
+                  onSelect={handleSelect}
+                  fontSize={fontSize}
+                  searchQuery={searchQuery}
+                />
+              );
+            }
           )}
 
           <View style={styles.bottomPadding} />

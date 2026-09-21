@@ -16,14 +16,6 @@ describe('Gateway Server', () => {
     });
 
     it('should handle chat completion request', async () => {
-      const request = {
-        method: 'POST',
-        path: '/api/chat',
-        body: {
-          messages: [{ role: 'user', content: 'Hello' }],
-          model: 'gpt-4',
-        },
-      };
 
       const response = {
         status: 200,
@@ -39,14 +31,6 @@ describe('Gateway Server', () => {
     });
 
     it('should handle transcription request', async () => {
-      const request = {
-        method: 'POST',
-        path: '/api/transcribe',
-        body: {
-          audio: 'base64-audio-data',
-          language: 'en',
-        },
-      };
 
       const response = {
         status: 200,
@@ -202,14 +186,12 @@ describe('Gateway Server', () => {
 describe('Care Circle Server', () => {
   describe('authentication', () => {
     it('should verify JWT tokens', () => {
-      const token = 'valid-jwt-token';
       const isValid = true;
 
       expect(isValid).toBe(true);
     });
 
     it('should reject invalid tokens', () => {
-      const token = 'invalid-token';
       const isValid = false;
 
       expect(isValid).toBe(false);
@@ -227,11 +209,6 @@ describe('Care Circle Server', () => {
 
   describe('care circle endpoints', () => {
     it('should create care circle', async () => {
-      const request = {
-        method: 'POST',
-        path: '/api/care-circle',
-        body: { name: 'Family Circle' },
-      };
 
       const response = {
         status: 201,
@@ -242,14 +219,6 @@ describe('Care Circle Server', () => {
     });
 
     it('should add member to care circle', async () => {
-      const request = {
-        method: 'POST',
-        path: '/api/care-circle/circle-1/members',
-        body: {
-          email: 'member@example.com',
-          role: 'caregiver',
-        },
-      };
 
       const response = {
         status: 200,
@@ -260,13 +229,6 @@ describe('Care Circle Server', () => {
     });
 
     it('should update member permissions', async () => {
-      const request = {
-        method: 'PATCH',
-        path: '/api/care-circle/circle-1/members/member-1',
-        body: {
-          permissions: ['view_health', 'view_medications'],
-        },
-      };
 
       const response = {
         status: 200,
@@ -277,13 +239,6 @@ describe('Care Circle Server', () => {
     });
 
     it('should sync health data', async () => {
-      const request = {
-        method: 'POST',
-        path: '/api/care-circle/circle-1/sync',
-        body: {
-          vitals: [{ type: 'bloodPressure', value: '120/80' }],
-        },
-      };
 
       const response = {
         status: 200,

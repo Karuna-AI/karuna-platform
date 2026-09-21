@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import type { JSX } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { OnboardingRole } from '../../services/onboardingStore';
@@ -21,7 +22,9 @@ export function WelcomeRoleScreen({
 }: WelcomeRoleScreenProps): JSX.Element {
   useEffect(() => {
     if (readAloudEnabled) {
-      ttsService.speak('Welcome to Karuna. Your voice-first companion. Choose how you would like to get started.');
+      ttsService.speak('Welcome to Karuna. Your voice-first companion. Choose how you would like to get started.').catch(() => {
+        // Error already surfaced via onSpeakError.
+      });
     }
   }, [readAloudEnabled]);
 

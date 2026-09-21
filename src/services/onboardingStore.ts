@@ -16,13 +16,18 @@ export type OnboardingRole = 'self' | 'caregiver';
 export type OnboardingStep =
   | 'welcome_role'
   | 'language_voice'
-  | 'permission_mic'
-  | 'permission_notify'
+  | 'permissions'
   | 'security_setup'
-  | 'quick_setup'
   | 'caregiver_invite'
-  | 'voice_tutorial'
   | 'complete';
+
+/** Steps removed by the #13 onboarding consolidation; mapped forward for persisted state. */
+const LEGACY_STEP_MAP: Record<string, OnboardingStep> = {
+  permission_mic: 'permissions',
+  permission_notify: 'permissions',
+  quick_setup: 'permissions',
+  voice_tutorial: 'permissions',
+};
 
 export interface QuickSetupData {
   reminderTime?: string;
@@ -34,23 +39,17 @@ export interface QuickSetupData {
 const SELF_STEPS: OnboardingStep[] = [
   'welcome_role',
   'language_voice',
-  'permission_mic',
-  'permission_notify',
+  'permissions',
   'security_setup',
-  'quick_setup',
-  'voice_tutorial',
   'complete',
 ];
 
 const CAREGIVER_STEPS: OnboardingStep[] = [
   'welcome_role',
   'language_voice',
-  'permission_mic',
-  'permission_notify',
+  'permissions',
   'security_setup',
-  'quick_setup',
   'caregiver_invite',
-  'voice_tutorial',
   'complete',
 ];
 
@@ -59,7 +58,6 @@ class OnboardingStore {
   private currentStep: OnboardingStep = 'welcome_role';
   private role: OnboardingRole = 'self';
   private skipped: boolean = false;
-  private initialized: boolean = false;
 
   async initialize(): Promise<void> {
     try {
@@ -71,13 +69,14 @@ class OnboardingStore {
       ]);
 
       this.completed = complete === 'true';
-      this.currentStep = (step as OnboardingStep) || 'welcome_role';
+      this.currentStep = this.normalizeStep(
+        (step as OnboardingStep) || null,
+        (role as OnboardingRole) || 'self'
+      );
       this.role = (role as OnboardingRole) || 'self';
       this.skipped = skipped === 'true';
-      this.initialized = true;
     } catch (error) {
       console.error('OnboardingStore init error:', error);
-      this.initialized = true;
     }
   }
 
@@ -99,6 +98,17 @@ class OnboardingStore {
 
   getStepsForRole(role: OnboardingRole): OnboardingStep[] {
     return role === 'caregiver' ? [...CAREGIVER_STEPS] : [...SELF_STEPS];
+  }
+
+  /** Map pre-consolidation steps (#13) to the current step lists. */
+  private normalizeStep(
+    step: string | null,
+    role: OnboardingRole
+  ): OnboardingStep {
+    if (!step) return 'welcome_role';
+    const mapped = (LEGACY_STEP_MAP[step] ?? step) as OnboardingStep;
+    const steps = role === 'caregiver' ? CAREGIVER_STEPS : SELF_STEPS;
+    return steps.includes(mapped) ? mapped : 'welcome_role';
   }
 
   async setRole(role: OnboardingRole): Promise<void> {

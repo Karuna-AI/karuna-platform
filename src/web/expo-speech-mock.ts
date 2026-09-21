@@ -1,10 +1,13 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('Speech');
+
 /**
  * Web mock for expo-speech
  * Uses Web Speech API
  */
 
 let isSpeaking = false;
-let _currentUtterance: SpeechSynthesisUtterance | null = null;
 
 export async function speak(
   text: string,
@@ -21,7 +24,7 @@ export async function speak(
   }
 ): Promise<void> {
   if (!('speechSynthesis' in window)) {
-    console.warn('[Speech] Web Speech API not available');
+    log.warn('[Speech] Web Speech API not available');
     options?.onError?.({ message: 'Speech synthesis not available' });
     return;
   }
@@ -30,7 +33,6 @@ export async function speak(
   stop();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  _currentUtterance = utterance;
 
   if (options?.language) utterance.lang = options.language;
   if (options?.pitch) utterance.pitch = options.pitch;
@@ -51,13 +53,11 @@ export async function speak(
 
   utterance.onend = () => {
     isSpeaking = false;
-    _currentUtterance = null;
     options?.onDone?.();
   };
 
   utterance.onerror = (event) => {
     isSpeaking = false;
-    _currentUtterance = null;
     if (event.error !== 'interrupted') {
       options?.onError?.(event);
     } else {
@@ -72,7 +72,6 @@ export async function stop(): Promise<void> {
   if ('speechSynthesis' in window) {
     speechSynthesis.cancel();
     isSpeaking = false;
-    _currentUtterance = null;
   }
 }
 

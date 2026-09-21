@@ -4,7 +4,6 @@
  */
 
 import { Platform, Linking } from 'react-native';
-import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera } from 'expo-camera';
 import { deepLinksService } from './deepLinks';
@@ -361,21 +360,6 @@ class AppLauncherService {
     request: ActionRequest
   ): Promise<ActionResult> {
     const destination = request.params.destination as ActionLocation;
-
-    // Get current location for pickup
-    let _pickupLocation: ActionLocation | undefined;
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({});
-        _pickupLocation = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-      }
-    } catch {
-      console.log('[AppLauncher] Could not get current location');
-    }
 
     const params = {
       destination: destination.address || destination.name || '',

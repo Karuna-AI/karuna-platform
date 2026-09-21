@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('Pedometer');
+
 /**
  * Web mock for expo-sensors
  *
@@ -14,17 +18,17 @@ type Subscription = {
 // Pedometer mock - step counting not available on web
 export const Pedometer = {
   isAvailableAsync: async (): Promise<boolean> => {
-    console.debug('[Pedometer] Step counting not available on web');
+    log.debug('[Pedometer] Step counting not available on web');
     return false;
   },
 
   getStepCountAsync: async (_start: Date, _end: Date): Promise<{ steps: number }> => {
-    console.debug('[Pedometer] getStepCountAsync - not available on web');
+    log.debug('[Pedometer] getStepCountAsync - not available on web');
     return { steps: 0 };
   },
 
   watchStepCount: (_callback: (result: { steps: number }) => void): Subscription => {
-    console.debug('[Pedometer] watchStepCount - not available on web');
+    log.debug('[Pedometer] watchStepCount - not available on web');
     return { remove: () => {} };
   },
 
@@ -39,7 +43,6 @@ export const Pedometer = {
 
 // Accelerometer mock - uses DeviceMotion API when available
 const accelerometerListeners: Array<(data: { x: number; y: number; z: number }) => void> = [];
-const _accelerometerInterval: NodeJS.Timeout | null = null;
 
 export const Accelerometer = {
   isAvailableAsync: async (): Promise<boolean> => {
@@ -76,7 +79,7 @@ export const Accelerometer = {
 
   setUpdateInterval: (_intervalMs: number) => {
     // DeviceMotion API doesn't support custom intervals
-    console.debug('[Accelerometer] setUpdateInterval - using browser default');
+    log.debug('[Accelerometer] setUpdateInterval - using browser default');
   },
 
   getPermissionsAsync: async () => {
@@ -142,7 +145,7 @@ export const Gyroscope = {
   },
 
   setUpdateInterval: (_intervalMs: number) => {
-    console.debug('[Gyroscope] setUpdateInterval - using browser default');
+    log.debug('[Gyroscope] setUpdateInterval - using browser default');
   },
 
   getPermissionsAsync: async () => Accelerometer.getPermissionsAsync(),
@@ -154,7 +157,7 @@ export const Barometer = {
   isAvailableAsync: async (): Promise<boolean> => false,
 
   addListener: (_callback: (data: { pressure: number; relativeAltitude?: number }) => void): Subscription => {
-    console.debug('[Barometer] Not available on web');
+    log.debug('[Barometer] Not available on web');
     return { remove: () => {} };
   },
 
@@ -168,7 +171,7 @@ export const Magnetometer = {
   isAvailableAsync: async (): Promise<boolean> => false,
 
   addListener: (_callback: (data: { x: number; y: number; z: number }) => void): Subscription => {
-    console.debug('[Magnetometer] Not available on web');
+    log.debug('[Magnetometer] Not available on web');
     return { remove: () => {} };
   },
 
@@ -210,7 +213,7 @@ export const DeviceMotion = {
 export const LightSensor = {
   isAvailableAsync: async (): Promise<boolean> => false,
   addListener: (_callback: (data: { illuminance: number }) => void): Subscription => {
-    console.debug('[LightSensor] Not available on web');
+    log.debug('[LightSensor] Not available on web');
     return { remove: () => {} };
   },
   setUpdateInterval: (_intervalMs: number) => {},

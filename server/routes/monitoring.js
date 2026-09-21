@@ -11,7 +11,7 @@
  */
 
 module.exports = function mountMonitoringRoutes(router, deps) {
-const { db, authMiddleware, requireConsent, broadcastToCircle } = deps;
+const { db, authMiddleware, requireVerifiedEmail, requirePermission, requireConsent, broadcastToCircle } = deps;
 
 // ============================================================================
 // Health Data Routes (Caregiver Dashboard)
@@ -78,7 +78,7 @@ router.get('/circles/:circleId/health', authMiddleware, requireConsent('health_d
 });
 
 // Sync health data from device
-router.post('/circles/:circleId/health', authMiddleware, requireConsent('health_data'), async (req, res) => {
+router.post('/circles/:circleId/health', authMiddleware, requireVerifiedEmail, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { readings } = req.body;
@@ -264,7 +264,7 @@ router.get('/circles/:circleId/adherence', authMiddleware, requireConsent('healt
 });
 
 // Sync medication doses from device
-router.post('/circles/:circleId/adherence', authMiddleware, requireConsent('health_data'), async (req, res) => {
+router.post('/circles/:circleId/adherence', authMiddleware, requireVerifiedEmail, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { doses } = req.body;
@@ -402,7 +402,7 @@ router.get('/circles/:circleId/activity', authMiddleware, async (req, res) => {
 });
 
 // Log activity from device
-router.post('/circles/:circleId/activity', authMiddleware, async (req, res) => {
+router.post('/circles/:circleId/activity', authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { circleId } = req.params;
     const { activities } = req.body;
@@ -499,20 +499,11 @@ router.get('/circles/:circleId/alerts', authMiddleware, async (req, res) => {
   }
 });
 
-// Acknowledge an alert
-router.post('/circles/:circleId/alerts/:alertId/acknowledge', authMiddleware, async (req, res) => {
+// Acknowledge an alert — requires the alert-management permission, not just
+// membership: a viewer can see alerts but must not clear them for everyone.
+router.post('/circles/:circleId/alerts/:alertId/acknowledge', authMiddleware, requireVerifiedEmail, requirePermission('canManageAlerts'), async (req, res) => {
   try {
     const { circleId, alertId } = req.params;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
 
     const result = await db.query(
       `UPDATE caregiver_alerts
@@ -535,20 +526,11 @@ router.post('/circles/:circleId/alerts/:alertId/acknowledge', authMiddleware, as
   }
 });
 
-// Dismiss an alert
-router.post('/circles/:circleId/alerts/:alertId/dismiss', authMiddleware, async (req, res) => {
+// Dismiss an alert — requires the alert-management permission, not just
+// membership: a viewer can see alerts but must not clear them for everyone.
+router.post('/circles/:circleId/alerts/:alertId/dismiss', authMiddleware, requireVerifiedEmail, requirePermission('canManageAlerts'), async (req, res) => {
   try {
     const { circleId, alertId } = req.params;
-
-    // Check membership
-    const memberResult = await db.query(
-      'SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2',
-      [circleId, req.user.id]
-    );
-
-    if (memberResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Not a member' });
-    }
 
     const result = await db.query(
       `UPDATE caregiver_alerts
@@ -634,7 +616,7 @@ router.get('/circles/:circleId/checkins', authMiddleware, requireConsent('health
 });
 
 // Sync check-ins from device
-router.post('/circles/:circleId/checkins', authMiddleware, requireConsent('health_data'), async (req, res) => {
+router.post('/circles/:circleId/checkins', authMiddleware, requireVerifiedEmail, requireConsent('health_data'), async (req, res) => {
   try {
     const { circleId } = req.params;
     const { checkins } = req.body;

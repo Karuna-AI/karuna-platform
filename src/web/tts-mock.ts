@@ -1,3 +1,7 @@
+import { logger } from '../services/logger';
+
+const log = logger.create('TtsMock');
+
 // Web TTS implementation using Web Speech API
 
 type TTSEventHandler = () => void;
@@ -61,7 +65,7 @@ class WebTTS {
 
   async speak(text: string): Promise<void> {
     if (!this.synthesis) {
-      console.warn('Speech synthesis not supported');
+      log.warn('Speech synthesis not supported');
       return;
     }
 
