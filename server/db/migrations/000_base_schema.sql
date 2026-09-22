@@ -511,7 +511,7 @@ CREATE TRIGGER update_vault_notes_updated_at BEFORE UPDATE ON vault_notes FOR EA
 -- ============================================================================
 -- Admin Users Table (separate from regular users for security)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS admin_users (
+CREATE TABLE IF NOT EXISTS admin_users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -530,7 +530,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
 -- ============================================================================
 -- System Settings Table (global configuration)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS system_settings (
+CREATE TABLE IF NOT EXISTS system_settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     key VARCHAR(100) UNIQUE NOT NULL,
     value JSONB NOT NULL,
@@ -548,7 +548,7 @@ CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(categ
 -- ============================================================================
 -- Feature Flags Table (control features per user/global)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS feature_flags (
+CREATE TABLE IF NOT EXISTS feature_flags (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) UNIQUE NOT NULL,
     description TEXT,
@@ -568,7 +568,7 @@ CREATE INDEX IF NOT EXISTS idx_feature_flags_name ON feature_flags(name);
 -- ============================================================================
 -- System Metrics Table (aggregated stats for dashboard)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS system_metrics (
+CREATE TABLE IF NOT EXISTS system_metrics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     metric_date DATE NOT NULL,
     metric_type VARCHAR(50) NOT NULL, -- daily_active_users, api_calls, errors, ai_tokens, etc.
@@ -583,7 +583,7 @@ CREATE INDEX IF NOT EXISTS idx_system_metrics_type ON system_metrics(metric_type
 -- ============================================================================
 -- Admin Audit Log Table (track admin actions)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS admin_audit_logs (
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     admin_id UUID REFERENCES admin_users(id) ON DELETE SET NULL, -- nullable: pre-auth events (unknown-email login failures) have no admin to reference
     admin_email VARCHAR(255),
@@ -605,7 +605,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs(crea
 -- ============================================================================
 -- Notifications Queue Table (for admin-triggered notifications)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS notification_queue (
+CREATE TABLE IF NOT EXISTS notification_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     recipient_type VARCHAR(20) NOT NULL CHECK (recipient_type IN ('user', 'circle', 'all')),
     recipient_id UUID,
@@ -636,7 +636,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash VARCHAR(64); -- SHA-256 hex; raw token only in email
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP WITH TIME ZONE;
 
-CREATE INDEX IF NOT EXISTS IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token_hash);
+CREATE INDEX IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token_hash);
 
 -- ============================================================================
 -- Care Circle Status Extension
@@ -648,7 +648,7 @@ ALTER TABLE care_circles ADD COLUMN IF NOT EXISTS subscription_expires_at TIMEST
 -- ============================================================================
 -- AI Usage Logs Table (tracks AI API calls for analytics)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS ai_usage_logs (
+CREATE TABLE IF NOT EXISTS ai_usage_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id),
     circle_id UUID REFERENCES care_circles(id),
