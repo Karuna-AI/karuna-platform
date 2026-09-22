@@ -48,7 +48,7 @@ const log = logger.create('AppState');
 
 const GATEWAY_URL =
   (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
-  'https://karuna-gateway-production.up.railway.app';
+  'https://karuna-platform-production.up.railway.app';
 
 interface AppStateContextValue {
   // Security
