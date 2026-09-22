@@ -201,7 +201,7 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
       // Import PIN as key material for PBKDF2
       const keyMaterial = await crypto.subtle.importKey(
         'raw',
-        pinBytes,
+        pinBytes as BufferSource,
         'PBKDF2',
         false,
         ['deriveBits']
@@ -211,7 +211,7 @@ async function deriveKey(pin: string, salt: string): Promise<Uint8Array> {
       const derivedBits = await crypto.subtle.deriveBits(
         {
           name: 'PBKDF2',
-          salt: saltBytes,
+          salt: saltBytes as BufferSource,
           iterations: KEY_DERIVATION_ITERATIONS,
           hash: 'SHA-256',
         },
@@ -276,7 +276,7 @@ class EncryptionService {
       try {
         this.cryptoKey = await crypto.subtle.importKey(
           'raw',
-          keyBytes,
+          keyBytes as BufferSource,
           { name: 'AES-GCM' },
           false,
           ['encrypt', 'decrypt']
@@ -517,9 +517,9 @@ class EncryptionService {
 
       // Encrypt using AES-GCM (authenticated encryption)
       const encrypted = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
+        { name: 'AES-GCM', iv: iv as BufferSource },
         this.cryptoKey,
-        data
+        data as BufferSource
       );
       const ciphertext = new Uint8Array(encrypted);
 

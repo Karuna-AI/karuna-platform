@@ -106,7 +106,7 @@ export async function digest(
   data: Uint8Array
 ): Promise<ArrayBuffer> {
   if (typeof crypto !== 'undefined' && crypto.subtle) {
-    return crypto.subtle.digest(algorithm, data);
+    return crypto.subtle.digest(algorithm, data as BufferSource);
   }
 
   // Fallback for testing
