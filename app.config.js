@@ -48,7 +48,7 @@ module.exports = {
       jsEngine: 'jsc',
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      buildNumber: '32',
+      buildNumber: '34',
       infoPlist: {
         NSMicrophoneUsageDescription:
           'Karuna needs access to your microphone for voice conversations with your AI companion.',
@@ -66,6 +66,8 @@ module.exports = {
           'Karuna accesses your calendar to help manage appointments and send you timely reminders.',
         NSContactsUsageDescription:
           'Karuna accesses your contacts so you can quickly call or message family and caregivers.',
+        NSLocationWhenInUseUsageDescription:
+          'Karuna uses your location to show local weather information.',
         // 'audio' removed: triggers AVAudioSession class loading on iOS 26 which crashes
         // Audio recording works without background mode — only needed for background playback
         UIBackgroundModes: ['fetch', 'remote-notification'],
@@ -80,7 +82,7 @@ module.exports = {
         backgroundColor: '#4F46E5',
       },
       package: IS_DEV ? 'in.karunaapp.companion.dev' : 'in.karunaapp.companion',
-      versionCode: 11,
+      versionCode: 12,
       targetSdkVersion: 35,
       compileSdkVersion: 35,
       permissions: [
@@ -105,6 +107,9 @@ module.exports = {
         'android.permission.health.WRITE_BLOOD_GLUCOSE',
         'android.permission.health.WRITE_BODY_WEIGHT',
         'android.permission.health.WRITE_OXYGEN_SATURATION',
+        // Location for weather widget (approximate only)
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
       ],
       intentFilters: [
         {
@@ -152,11 +157,19 @@ module.exports = {
               // medications sync (health_data, vault_medications), voice input
               // recordings (services/voiceRecorder.ts), vault document photos
               // (expo-image-picker, VaultDocumentScreen), care-circle members
-              // and emergency contacts, account name/email/phone, Karuna user
-              // ID, and the sync device ID (@karuna_device_id). All linked to
-              // the user's account, used solely for app functionality, no
-              // tracking. No crash/analytics SDKs are bundled, so no
-              // diagnostic types are declared.
+              // and emergency contacts, account name/email/phone, chat
+              // messages and vault notes (Other User Content), calendar
+              // appointments, approximate location for the weather widget
+              // (services/weather.ts), Karuna user ID, and the sync device ID
+              // (@karuna_device_id). Diagnostic types cover JS-level
+              // telemetry only — no third-party crash/analytics SDKs are
+              // bundled (no Sentry); error and performance events are sent
+              // to Karuna's own gateway (/api/telemetry). All linked to the
+              // user's account except diagnostics/product-interaction which
+              // are anonymized, used solely for app functionality/analytics,
+              // no tracking. Physical address is NOT declared: the only
+              // address-like data is free-text "where is this document
+              // stored" notes (VaultDocumentScreen), not real addresses.
               NSPrivacyCollectedDataTypes: [
                 {
                   NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeHealth',
@@ -201,10 +214,40 @@ module.exports = {
                   NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
                 },
                 {
-                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePhysicalAddress',
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCoarseLocation',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeOtherUserContent',
                   NSPrivacyCollectedDataTypeLinked: true,
                   NSPrivacyCollectedDataTypeTracking: false,
                   NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCalendars',
+                  NSPrivacyCollectedDataTypeLinked: true,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeProductInteraction',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCrashData',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
+                },
+                {
+                  NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypePerformanceData',
+                  NSPrivacyCollectedDataTypeLinked: false,
+                  NSPrivacyCollectedDataTypeTracking: false,
+                  NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
                 },
                 {
                   NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeUserID',
@@ -259,6 +302,8 @@ module.exports = {
       'expo-audio',
       'expo-localization',
       'expo-secure-store',
+      '@kingstinct/react-native-healthkit',
+      'react-native-health-connect',
     ],
     extra: {
       apiUrl: getApiUrl(),
@@ -266,7 +311,7 @@ module.exports = {
         projectId: 'b2718a1a-6cc9-43e7-a894-58a19fa8d6e6',
       },
     },
-    owner: process.env.EXPO_OWNER || 'karuna-ai',
+    owner: process.env.EXPO_OWNER || 'snehal2026',
     runtimeVersion: '1.0.0',
     updates: {
       enabled: false,

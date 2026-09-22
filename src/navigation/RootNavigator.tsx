@@ -189,11 +189,13 @@ function CareCircleWrapper() {
 
 function SecurityWrapper() {
   const navigation = useNavigation<RootNavigationProp>();
+  const { onAccountDeleted } = useAppState();
   return (
     <SecuritySettingsScreen
       onBack={() => navigation.goBack()}
       onOpenConsent={() => navigation.navigate('Consent')}
       onOpenAuditLog={() => navigation.navigate('AuditLog')}
+      onAccountDeleted={onAccountDeleted}
     />
   );
 }

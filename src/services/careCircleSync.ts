@@ -88,6 +88,18 @@ export interface HealthReadingUpload {
   notes?: string;
 }
 
+export interface OwnedCircleSummary {
+  id: string;
+  name: string;
+  memberCount: number;
+}
+
+export interface DeleteAccountResult {
+  success: boolean;
+  error?: string;
+  ownedCircles?: OwnedCircleSummary[];
+}
+
 class CareCircleSyncService {
   private baseUrl: string = '';
   private deviceId: string = '';
@@ -227,6 +239,79 @@ class CareCircleSyncService {
       STORAGE_KEYS.CIRCLE_ROLE,
     ]);
     this.notifyListeners('left_circle');
+  }
+
+  /**
+   * Delete the care-circle account server-side (GDPR / App Store 5.1.1(v)).
+   *
+   * POST /api/care/auth/delete-account requires the current password. When the
+   * user owns care circles the server responds 409 with the owned circle list
+   * and requires a second, explicit confirmation
+   * (confirmDeleteOwnedCircles=true) because owned circles are deleted for all
+   * members.
+   */
+  async deleteAccount(
+    password: string,
+    confirmDeleteOwnedCircles = false
+  ): Promise<DeleteAccountResult> {
+    if (!this.authToken) {
+      return { success: false, error: 'Not signed in to a care circle' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/api/care/auth/delete-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({ password, confirmDeleteOwnedCircles }),
+      });
+      let data: { error?: string; ownedCircles?: OwnedCircleSummary[] } = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Non-JSON response — fall through to generic error handling.
+      }
+      if (response.ok) return { success: true };
+      if (response.status === 409 && data.ownedCircles) {
+        return {
+          success: false,
+          error:
+            data.error ||
+            'You own care circles. Deleting your account permanently deletes them for all members.',
+          ownedCircles: data.ownedCircles,
+        };
+      }
+      if (response.status === 429) {
+        return { success: false, error: 'Too many attempts — please try again later.' };
+      }
+      return { success: false, error: data.error || 'Failed to delete account' };
+    } catch (error) {
+      console.error('[CareCircleSync] Delete account error:', error);
+      return { success: false, error: 'Network error. Please check your connection and try again.' };
+    }
+  }
+
+  /**
+   * Wipe all local care-circle session state after the account has been
+   * deleted server-side. The auth token is dead, so it is removed from
+   * SecureStore along with the circle keys in AsyncStorage.
+   */
+  async clearLocalSession(): Promise<void> {
+    this.disconnectWebSocket();
+    this.authToken = null;
+    this.careCircleId = null;
+    this.pendingChanges = [];
+    this.lastSyncOk = false;
+    await secureStorageService.deleteItem('caregiver_auth_token');
+    await AsyncStorage.multiRemove([
+      STORAGE_KEYS.CARE_CIRCLE_ID,
+      STORAGE_KEYS.PENDING_CHANGES,
+      STORAGE_KEYS.LAST_SYNC,
+      STORAGE_KEYS.CIRCLE_ROLE,
+      STORAGE_KEYS.AUTH_TOKEN,
+    ]);
+    this.notifyListeners('account_deleted');
   }
 
   // Check if connected to a care circle

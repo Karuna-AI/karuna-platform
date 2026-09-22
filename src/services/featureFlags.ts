@@ -117,7 +117,7 @@ class FeatureFlagsService {
     try {
       const API_URL =
         (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
-        'https://karuna-gateway-production.up.railway.app';
+        'https://karuna-platform-production.up.railway.app';
       const response = await fetch(`${API_URL}/api/admin/feature-flags`);
 
       if (!response.ok) {
